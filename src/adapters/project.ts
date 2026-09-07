@@ -8,7 +8,7 @@ import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { dirname, join } from "node:path";
 
-import { LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME } from "./config.ts";
+import { DEFAULTS, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME, PROFILE_CONNECTION_FIELDS } from "./config.ts";
 import { ensureNekoHome } from "./context.ts";
 
 import { isBool, isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
@@ -108,15 +108,22 @@ export function setAutoUpdate(on: boolean): void {
  * Also drops any stray top-level model/api_key so the profile's own endpoint+key+model take effect cleanly. */
 export function setActiveProfile(name: string): void {
   updateUserConfig((d: any) => {
-    const previous = isText(d.active_profile) ? d.active_profile : "";
-    if (previous && d.api_key) {
+    let previous = isText(d.active_profile) ? d.active_profile : DEFAULTS.active_profile;
+    if (!previous && PROFILE_CONNECTION_FIELDS.some((field) => d[field] !== undefined)) {
+      previous = "legacy";
+      for (let suffix = 2; d.profiles?.[previous]; suffix++) previous = `legacy-${suffix}`;
+    }
+    if (previous) {
       if (!isObjectValue(d.profiles)) d.profiles = {};
       if (!isJsonObject(d.profiles[previous])) d.profiles[previous] = {};
-      if (!d.profiles[previous].api_key) d.profiles[previous].api_key = d.api_key;
+      for (const field of PROFILE_CONNECTION_FIELDS) {
+        if (d[field] !== undefined && (field !== "api_key" || !d.profiles[previous].api_key)) {
+          d.profiles[previous][field] = d[field];
+        }
+      }
     }
     d.active_profile = name;
-    delete d.model;
-    delete d.api_key;
+    for (const field of PROFILE_CONNECTION_FIELDS) delete d[field];
   });
 }
 

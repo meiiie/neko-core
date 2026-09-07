@@ -187,6 +187,14 @@ Use `neko config`, `neko profiles`, `neko doctor`, and `neko policy` to inspect 
 Provider keys may come from their named environment variables or the gitignored user config. A new model or
 endpoint belongs in a profile; it should not require changing the agent core.
 
+## Report a problem
+
+Run `/feedback` inside Neko to add private notes, optionally include the current
+session's text/tool log, and review the scrubbed attachment before sending to the
+maintainer. Nothing is sent automatically; local JSON and email-draft exports are
+also available. Scrubbing can miss sensitive content, so review before sharing.
+See [feedback and privacy](docs/process/FEEDBACK.md) for the recipient and limits.
+
 ## Develop from source
 
 Development requires Node.js and the stable Bun version pinned by CI:

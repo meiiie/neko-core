@@ -4,6 +4,10 @@ This document is the canonical evaluation contract for Neko Core. Dated experime
 explain decisions, but they do not override this policy. Internal fixtures are
 regression tests, not evidence that Neko is state of the art.
 
+Execution is paused by owner direction. Latest local records were inspected read-only
+on 2026-09-07; frozen R6 is incomplete and ineligible, as detailed below. No benchmark
+was resumed for this documentation review.
+
 ## What the Factory study establishes
 
 Factory's August 2026 ProgramBench study separates three responsibilities:
@@ -66,9 +70,9 @@ The host launcher also resolves the pinned ProgramBench 1.2.4 package with `uv
 --offline`. Prime and verify that cache before freezing a campaign so a transient
 package-index or DNS outage cannot invalidate later cells.
 
-Normal Neko Bash can request network authority for the exact destinations needed by
-one call, or use a user-configured standing policy. `auto` and `--yolo` may automate
-that grant but do not erase the OS sandbox. See [SANDBOX.md](SANDBOX.md).
+Normal Neko uses host Bash and host networking by default. With explicit `sandbox: true`,
+Bash can request per-call network authority or use a configured standing policy.
+`auto` and `--yolo` do not bypass an explicitly selected sandbox. See [SANDBOX.md](SANDBOX.md).
 
 The host keeps provider credentials and provider traffic outside the task container.
 The task sees only bounded native tools. Each run must emit:
@@ -101,6 +105,10 @@ ship a poor artifact.
 
 ## Current evidence ledger
 
+Run names require their namespace: the `yj` artifact-first pilot R6 is different from
+frozen campaign R6. The table below retains historical diagnostics; the latest inspected
+frozen campaign snapshot follows it.
+
 | Run | Task/controller | Evaluator | Result | Classification |
 |---|---|---|---:|---|
 | `cmatrix` smoke | GLM-5.3, earlier controller | ProgramBench 1.2.4 | 97/100, 769 evaluator rows | route/evaluator smoke; one replicate |
@@ -121,6 +129,33 @@ ship a poor artifact.
 | frozen R4, `fx` contract replicate 2 | GLM-5.3, contract | not run | `artifact_missing`; 32 calls, 689k tokens | controller zero |
 | frozen R4, `fx` single replicate 2 | GLM-5.3, single | not run | provider abort settled late, then teardown expired | infrastructure exclusion; campaign invalid |
 | frozen R5, `fx` replicate 1 | single vs contract | workspace-snapshot 1.2.4 | 0 vs 15.11/100 | one valid pair; `p=0.5`; diagnostic only |
+
+### Frozen R6 snapshot (inspected 2026-09-07)
+
+Source records: local, gitignored
+`results/programbench-frozen-round12-20260831-r6/campaign.json` and
+`campaign-summary.json`. These are preserved evidence, not new runs on v1.5.1.
+
+| Task | Single scores /100 (replicates 1, 2, 3) | Contract scores /100 (replicates 1, 2, 3) |
+|---|---|---|
+| `fx` | 0, 0, 0 (all missing artifact) | 53.33, 51.91, 30.04 |
+| `srgn` | interrupted, 0 (missing artifact), interrupted | 0 (missing artifact), 52.54, 66.58 |
+| `figlet` | pending, pending, pending | pending, pending, pending |
+
+There are ten terminal results, two interrupted cells, and six pending cells out of 18.
+The summary reports four complete pairs, mean paired score delta +46.95 points,
+31.5 fewer provider calls and about 2.97 million fewer tokens per paired contract run,
+with one-sided exact `p=0.0625`. It explicitly sets `campaignComplete`,
+`infrastructureValid`, `improvementClaimEligible`, and `sotaClaimEligible` to false.
+Interrupted or pending cells must not be turned into score zero. This partial result
+cannot support promotion or a general performance claim.
+
+SHA-256 at inspection:
+
+- `campaign.json`: `67d67889e876643b40b842f4205dfdc9d27801292c3c011d66094f81deb19e4e`
+- `campaign-summary.json`: `57807b41bba81ff06d9050d19de6aea8a921d3e32e755283a6053685d4cc5cf4`
+
+### Historical failure analysis
 
 R15 used about 28.5 minutes, 55 provider admissions, 2.73 million reported
 tokens, and 58 settled tools. It created substantial Go source but never produced
@@ -164,7 +199,7 @@ compatibility layer, not a new scoring rule.
 
 ## Active campaign gate
 
-Before another paid campaign:
+After explicit owner resumption and before another paid campaign:
 
 1. all deterministic and Wiii/sandbox regressions pass;
 2. the full suite has one clean run, or every quarantined flake has a documented owner
@@ -205,8 +240,8 @@ a power-cycle. Its completed records remain immutable. The interruption revealed
 separate ownership gap: evaluator branches had a daemon guard, but the primary
 candidate cleanroom did not. The primary cleanroom now carries the same run-scoped
 label under a heartbeat guard started before inference. A forced Windows process-tree
-kill left zero run containers, zero guard containers, and no heartbeat. R6 is the next
-claim-eligible full campaign; R5 cannot be resumed into eligibility because its
+kill left zero run containers, zero guard containers, and no heartbeat. R6 was selected
+as the next candidate campaign; R5 cannot be resumed into eligibility because its
 interrupted replicate identity is preserved rather than overwritten.
 
 The repaired R6 candidate then repeated the full gate: 1,579 Bun passes, 14 explicit

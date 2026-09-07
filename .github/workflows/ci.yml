@@ -6,6 +6,24 @@ on:
   pull_request:
 
 jobs:
+  feedback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: cloudflare/feedback
+      - run: bun run check
+        working-directory: cloudflare/feedback
+      - run: bun run test:integration
+        working-directory: cloudflare/feedback
+
   # The full verify loop on every OS we ship binaries for - a Linux-only CI can't guarantee the
   # macOS/Windows builds actually work (the owner develops on Windows; CI covers the other two).
   test:

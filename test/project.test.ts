@@ -123,6 +123,39 @@ test("switching profiles preserves a legacy top-level key under the previous pro
   expect(cfg.api_key).toBeUndefined();
 });
 
+test("switching routes keeps a legacy endpoint and credential with their owning profile", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "zai-openai", base_url: "https://api.z.ai/api/paas/v4",
+    provider: "openai_compat", model: "glm-5.2", api_key: "OLD-PAID",
+    profiles: { zai: { api_key: "CODING-KEY" }, bai: { api_key: "BAI-KEY" } },
+  }));
+  const preview = loadConfig({ profile: "zai" });
+  expect(preview.baseUrl).toBe("https://api.z.ai/api/anthropic");
+  expect(preview.provider).toBe("anthropic");
+  expect(preview.apiKey).toBe("CODING-KEY");
+  setActiveProfile("bai");
+  setActiveProfile("zai");
+  const current = loadConfig();
+  expect(current.baseUrl).toBe(preview.baseUrl);
+  expect(current.provider).toBe("anthropic");
+  expect(current.apiKey).toBe("CODING-KEY");
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  expect(saved.base_url).toBeUndefined();
+  expect(saved.profiles["zai-openai"]).toMatchObject({ base_url: "https://api.z.ai/api/paas/v4", api_key: "OLD-PAID" });
+  setActiveProfile("zai-openai");
+  expect(loadConfig().baseUrl).toBe("https://api.z.ai/api/paas/v4");
+  expect(loadConfig().apiKey).toBe("OLD-PAID");
+});
+
+test("first login preserves an unscoped custom connection without overwriting an existing legacy profile", () => {
+  const path = withTempHome(JSON.stringify({ provider: "openai_compat", base_url: "https://private.example/v1", api_key: "OLD", profiles: { legacy: { model: "keep" } } }));
+  setActiveProfile("zai");
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  expect(saved.profiles.legacy).toEqual({ model: "keep" });
+  expect(saved.profiles["legacy-2"]).toMatchObject({ base_url: "https://private.example/v1", api_key: "OLD" });
+  expect(loadConfig().baseUrl).toBe("https://api.z.ai/api/anthropic");
+});
+
 test("patchUserConfig merges keys and preserves api_key (used by `neko setup web`)", () => {
   const path = withTempHome('{ "api_key": "SECRET", "model": "m1" }');
   patchUserConfig({ searxng_url: "http://localhost:8888", search_backend: "searxng" });

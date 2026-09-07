@@ -1,9 +1,9 @@
 # Neko Core roadmap
 
-## Current status (2026-09-04) - v1.5.1 release candidate
+## Current status (2026-09-08) - v1.6.0 release candidate
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
-The 1.0 baseline includes:
+The current 1.x platform includes:
 
 - a provider-agnostic streaming agent loop with bounded recovery and evidence-based completion;
 - durable sessions, atomic checkpoints, crash recovery, rewind, handoff, and ACP load/resume;
@@ -25,9 +25,13 @@ The 1.0 baseline includes:
 - resumable, disk-streamed release downloads plus compressed transfer artifacts, with final binary digest and
   embedded-version verification before atomic activation.
 
-**Branch:** `main`. **Current public release: v1.5.0 (2026-09-04); next candidate: v1.5.1.** The 1.0 compatibility contract remains the
-long-term stable baseline. v1.5.0 makes host Bash the normal no-flag shell route while preserving explicit
-fail-closed sandboxing. v1.5.1 changes only release transport: resumable checkpoints and compressed assets;
+**Branch:** `main`. **Current release:** [v1.6.0](https://github.com/meiiie/neko-core/releases/tag/v1.6.0)
+is the candidate for this source tree; publication requires the CI/release gates below.
+Last verified public release before tagging: v1.5.1, published 2026-09-04, commit
+`c03012af31b81d04b13b8f65757f0f23d3cafe51`. Confirm the live release and assets on GitHub.
+The 1.0 compatibility contract remains the long-term stable baseline. v1.5.0 makes host Bash the normal
+no-flag shell route while preserving explicit fail-closed sandboxing. v1.5.1 changes only release transport:
+resumable checkpoints and compressed assets;
 it does not change providers, tools, authority, ACP, sessions, or the completion controller.
 Provider protocols, ACP hosts, and durable sessions remain compatible. The complete pre-1.0 history remains in
 [CHANGELOG.md](../../CHANGELOG.md) and
@@ -35,11 +39,34 @@ Provider protocols, ACP hosts, and durable sessions remain compatible. The compl
 
 ## Compatibility policy
 
+v1.6.0 includes profile endpoint ownership repair, home-directory
+ChatGPT transport startup, metadata-driven account catalogs and routing (including
+GPT-6 Astra), and reviewed private feedback email delivery with optional session logs.
+See [incident analysis](../research/provider-incidents-2026-09-07.md) and
+[feedback privacy](FEEDBACK.md). These are not included in v1.5.1;
+the dedicated Cloudflare feedback backend is deployed and accepted two synthetic
+emails, including a 500,512-byte report and duplicate-receipt checks. Gmail Inbox
+placement is not independently confirmed. Follow [RELEASE.md](RELEASE.md) for the
+full local gate, cross-platform CI and complete release-asset verification; a
+successful targeted check or a bumped version alone is not publication evidence.
+
 The 1.x CLI, configuration, durable-data, SDK, ACP, authority, and delivery commitments are defined in the
 canonical [stability and support policy](STABILITY.md). Roadmap work may extend those contracts, but it may not
 silently narrow them.
 
 ## Active priorities
+
+### Current work and resume point
+
+- Repository instruction/documentation refresh for GPT-6 Astra, reviewed 2026-09-07.
+  Shared instructions are in [AGENTS.md](../../AGENTS.md); model-specific rationale and
+  official sources are in [the dated review](../research/codex-astra-instructions-2026-09-07.md).
+- The instruction refresh itself does not change runtime behavior. The separately
+  tested provider fixes and private-feedback feature ship together in v1.6.0.
+- ProgramBench remains paused until explicit owner resumption. Frozen R6 is incomplete:
+  10 terminal results, two interrupted cells, six pending cells. Full details and claim
+  limits are in [EVALUATION.md](EVALUATION.md). Preserve its source and records; any new
+  comparison must pass provenance checks before work starts.
 
 ### Reliability
 
@@ -57,8 +84,8 @@ silently narrow them.
 
 ### Harness quality
 
-- ProgramBench is paused by owner direction for the v1.5.0 stabilization window. Preserve its immutable runs and
-  resume only after the 1.5.0 release is closed; do not launch a campaign as part of ordinary verification.
+- ProgramBench is paused by owner direction. Publishing a version does not automatically resume it;
+  preserve immutable runs and wait for explicit resumption. It is not an ordinary verification step.
 - When resumed, execute the falsifiable completion-system objective in [HARNESS-GOAL.md](HARNESS-GOAL.md). Keep
   one canonical evidence ledger in [EVALUATION.md](EVALUATION.md); do not grow a second speculative backlog or
   tune from hidden-test failures.
@@ -89,6 +116,6 @@ silently narrow them.
 
 ## How roadmap work ships
 
-Every item must name the user-visible outcome and its evidence. A change is not complete until targeted tests,
-the full verify loop, policy audit, compiled binary smokes, and applicable real-terminal probes pass. Release
-rules are in [RELEASE.md](RELEASE.md); architecture constraints are in [ARCHITECTURE.md](ARCHITECTURE.md).
+Every item must name the user-visible outcome and its evidence. Use the scoped checks in
+[TESTING.md](TESTING.md); release candidates require the full gate. Release rules are in
+[RELEASE.md](RELEASE.md); architecture constraints are in [ARCHITECTURE.md](ARCHITECTURE.md).

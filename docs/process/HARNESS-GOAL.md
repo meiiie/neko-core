@@ -1,6 +1,7 @@
 # Harness objective: independent completion with reproducible evidence
 
-Status: active, started 2026-08-30.
+Status: execution paused by owner; reviewed 2026-09-07. Objective started 2026-08-30.
+Publication of v1.5.1 does not resume this work. Await explicit owner direction.
 
 ## Objective
 
@@ -30,8 +31,8 @@ keeping it because it sounds sophisticated.
   Computer, or reveal private cases/raw output to the implementer.
 - The implementer cannot read hidden tests or validator cases.
 - ProgramBench stays networkless and clean-room compliant.
-- Normal Neko may use network only through the existing per-call capability or explicit
-  standing policy; `--yolo` automates approval, not containment removal.
+- Normal Neko uses host Bash and host networking by default. When explicitly sandboxed,
+  network grants follow [SANDBOX.md](SANDBOX.md); `--yolo` does not bypass that boundary.
 - Unknown mutation outcomes are never replayed automatically.
 - Wiii Computer remains session-scoped, semantic, lease-bound, and absent without a
   negotiated capability.
@@ -53,8 +54,8 @@ Evidence: link check, stale-term search, and diff review.
 - Run ACP Computer capability/context/lifecycle tests.
 - Run sandbox/network/turn-capability tests.
 - Fix only reproduced failures.
-- Confirm that the model-facing context distinguishes normal per-call egress from an
-  offline benchmark.
+- Confirm that model-facing context distinguishes host Bash, explicitly sandboxed
+  per-call egress, and an offline benchmark.
 
 Evidence: focused tests, policy output, and no authority widening.
 
@@ -102,26 +103,10 @@ artifact-before-deadline regressions.
 Evidence: immutable manifests, artifacts, trajectories, evaluator results, aggregate
 report, confidence intervals, and cost.
 
-R2 closed as infrastructure-invalid after five valid pairs (`p=0.0625`). Its manifest
-is retained unchanged. R3 stopped at dependency preflight before inference. R4
-stopped at cell four when an abort-ignoring provider request exposed a recursive
-teardown deadline fault. R4 is retained unchanged. R5 restarts the complete matrix with
-strict offline host dependency resolution, invalid-deliverable zero classification,
-infrastructure fail-fast semantics, abort-raced provider settlement, and a teardown
-budget independent from model work.
-
-R5 closed infrastructure-invalid after a host power-cycle interrupted one replicate.
-Its one valid `fx` pair is retained but ineligible. That interruption found and fixed
-the remaining cleanroom ownership gap: the primary task container is now covered by a
-Docker-daemon heartbeat guard, and a live forced process-tree kill left no owned
-container or heartbeat. R6 restarts all 18 cells from the repaired, newly gated source.
-
-The R6 source candidate passed the post-repair gate on 2026-08-31: 1,579 Bun tests
-passed with 14 platform skips and zero failures; 47 Python tests passed with three
-platform skips; typecheck, lint, diff hygiene, doctor, policy, production build, PTY,
-ACP, and startup lifecycle probes passed. Docker ownership was empty and the E: volume
-was healthy with no new Disk/NTFS fault event since boot. The campaign must retain this
-source snapshot unchanged until it closes.
+Campaign state and historical results live only in [EVALUATION.md](EVALUATION.md).
+Frozen R6 is incomplete and ineligible. Before owner-authorized resumption, reconcile
+its immutable records and current source/image provenance; do not overwrite interrupted
+replicates or assume that a release commit matches the frozen experiment.
 
 ## Decision rules
 

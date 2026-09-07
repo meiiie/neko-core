@@ -1009,16 +1009,16 @@ test("/support opens a management center and confirms managed-pack removal", asy
     const { stdin, lastFrame, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
     stdin.write("/support"); await tick(30); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Manage optional support components"))).toBe(true);
-    expect(lastFrame() ?? "").toContain("ChatGPT GPT-5.6 Support Pack");
+    expect(lastFrame() ?? "").toContain("ChatGPT Codex Support Pack");
     expect(lastFrame() ?? "").toContain("Office Artifact Support Pack");
     expect(lastFrame() ?? "").toContain("Meeting Transcription Support Pack");
     expect(lastFrame() ?? "").toContain("270.4 MiB");
     stdin.write("\r");
-    expect(await until(() => (lastFrame() ?? "").includes("Manage ChatGPT GPT-5.6 Support Pack"))).toBe(true);
+    expect(await until(() => (lastFrame() ?? "").includes("Manage ChatGPT Codex Support Pack"))).toBe(true);
     expect(lastFrame() ?? "").toContain("Remove support pack");
     expect(lastFrame() ?? "").toContain("ChatGPT sign-in stays");
     stdin.write("\x1b[B"); await tick(20); stdin.write("\r");
-    expect(await until(() => (lastFrame() ?? "").includes("Remove ChatGPT GPT-5.6 Support Pack?"))).toBe(true);
+    expect(await until(() => (lastFrame() ?? "").includes("Remove ChatGPT Codex Support Pack?"))).toBe(true);
     expect(lastFrame() ?? "").toContain("Keep installed");
     expect(lastFrame() ?? "").toContain("Remove and sign out");
     expect(existsSync(join(codexRoot, "codex-app-server.exe"))).toBe(true);
@@ -1188,7 +1188,7 @@ test("/support status keeps a copyable text report for diagnostics", async () =>
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
   const { stdin, frames, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider} />);
   stdin.write("/support status"); await tick(30); stdin.write("\r");
-  expect(await until(() => frames.join("\n").includes("ChatGPT GPT-5.6 support:"))).toBe(true);
+  expect(await until(() => frames.join("\n").includes("ChatGPT Codex support:"))).toBe(true);
   expect(frames.join("\n")).toContain("Gemini CLI support:");
   unmount();
 }, 15000);

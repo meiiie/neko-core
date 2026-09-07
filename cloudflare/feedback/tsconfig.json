@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ESNext", "module": "ESNext", "moduleResolution": "bundler",
+    "strict": true, "noEmit": true, "skipLibCheck": true,
+    "allowImportingTsExtensions": true, "types": ["node"]
+  },
+  "include": ["worker.ts", "worker-configuration.d.ts", "../../src/shared/feedback-wire.ts"]
+}

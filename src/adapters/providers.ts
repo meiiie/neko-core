@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { NekoConfig } from "./config.ts";
 import type { MoaRef } from "./config.ts";
 import { AnthropicProvider, isOfficialAnthropic } from "./anthropic.ts";
-import { ChatGptProvider, isDirectChatGptModel, listChatGptModelCatalog } from "./chatgpt-provider.ts";
+import { chatGptCatalogClientVersion, chatGptMinimumCodexVersion, ChatGptProvider, listChatGptModelCatalog, needsCodexTransport, rememberChatGptCatalog } from "./chatgpt-provider.ts";
 import { HybridChatGptProvider } from "./chatgpt-app-server-provider.ts";
 import { GeminiCliProvider } from "./gemini-provider.ts";
 import { providerScope } from "./provider-scope.ts";
@@ -18,7 +18,7 @@ import { ResponsesProvider } from "./responses-provider.ts";
 import { listOpenCodeAccountModelOptions, listOpenCodeZenModelOptions, OpenCodeAccountProvider, OpenCodeZenProvider } from "./opencode.ts";
 import { ClineAccountProvider, listClineModelOptions } from "./cline.ts";
 import { hasGeminiCredentials, listGeminiModels } from "./gemini-cli.ts";
-import { discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
+import { compareCodexVersions, discoverCodexSupport, type CodexSupportStatus } from "./codex-app-server.ts";
 import { hasChatGptCredentials } from "./chatgpt-auth.ts";
 import { grokProxyHeaders, hasGrokCredentials, listGrokCatalog, validGrokAccessToken } from "./grok-auth.ts";
 import { explainKimiAccessError, hasKimiCredentials, kimiIdentityHeaders, validKimiAccessToken } from "./kimi-auth.ts";
@@ -290,14 +290,14 @@ export async function listModelOptions(config: NekoConfig, codexSupport?: CodexS
   if (config.provider === "chatgpt") {
     const known = config.profile ? config.profiles[config.profile]?.models ?? [] : [];
     const fallback = [...new Set([config.model, ...known].filter(Boolean))]
-      .filter((id) => !id.startsWith("gpt-5.6-"))
+      .filter((id) => !needsCodexTransport(id))
       .map(fallbackChatGptOption);
     if (hasChatGptCredentials()) {
       try {
-        const live = await listChatGptModelCatalog();
         const support = codexSupport ?? discoverCodexSupport();
-        const compatible = live.filter((model) => isDirectChatGptModel(model) || model.slug.startsWith("gpt-5.6-"));
-        if (compatible.length) return compatible.map((model) => ({
+        const live = await listChatGptModelCatalog(fetch, undefined, chatGptCatalogClientVersion(support.executable?.version));
+        rememberChatGptCatalog(config, live);
+        return live.map((model) => ({
           id: model.slug,
           label: model.displayName,
           description: model.description,
@@ -305,8 +305,9 @@ export async function listModelOptions(config: NekoConfig, codexSupport?: CodexS
           efforts: model.efforts,
           contextWindow: model.contextWindow,
           vision: model.inputModalities.includes("image"),
-          requiresCodexSupport: !isDirectChatGptModel(model),
-          available: isDirectChatGptModel(model) || support.state === "ready",
+          requiresCodexSupport: needsCodexTransport(model.slug, model),
+          available: !needsCodexTransport(model.slug, model) || (support.state === "ready" &&
+            compareCodexVersions(support.executable?.version ?? "0.0.0", chatGptMinimumCodexVersion(model.slug, model)) >= 0),
         }));
       } catch {
         // Catalog availability must not make /model unusable. The fixed, non-secret profile list is

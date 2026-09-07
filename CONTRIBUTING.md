@@ -21,7 +21,8 @@ node bin/neko-source.cjs doctor # safe no-build source launcher (requires Node.j
 
 ## The verify loop (must stay green)
 
-Before you open a PR, all of these should pass:
+Choose the checks in [the testing contract](docs/process/TESTING.md) for your change.
+Documentation-only PRs need link/path checks and diff review. The full code/release gate is:
 
 ```bash
 bun run typecheck          # tsc --noEmit
@@ -32,8 +33,8 @@ node bin/neko-source.cjs policy # audits the safe/gated tool boundary
 bun run build              # bun build --compile -> dist/neko (the shipped single binary)
 ```
 
-Add a test for anything you change — the suite is fast and the bar is "a reviewer can trust it without
-re-running it by hand". Match the style of the code around you (naming, comment density, idiom).
+Add meaningful regressions for behavior changes. Avoid tests that mirror prose or implementation;
+do not repeat a passing check without a relevant change or unresolved concern. Match the surrounding style.
 
 ## How it's built
 
@@ -53,16 +54,16 @@ A **new model or endpoint is a config profile, not code** (`src/adapters/config.
 - **Secrets never get committed or printed.** API keys come from env (`NEKO_API_KEY` /
   `OPENAI_API_KEY` / `NVIDIA_API_KEY`) or a gitignored `~/.neko-core/config.json`. Scan before you push.
 - **Clean-room.** Study other agents for *ideas*, never copy proprietary code into this repo.
-- **Consequence-gated.** Default `auto` mode may edit and run ordinary commands inside a trusted workspace.
-  Host computer control, policy changes, credential/system paths, work outside trusted roots, catastrophic
-  shell, and `plan` mode keep their stricter boundaries (`node bin/neko-source.cjs policy` must stay valid).
-- **Windows-friendly output.** Printed (non-TUI) strings should be ASCII — the Windows console is cp1252,
-  so an em-dash or fancy quote can mojibake.
+- **Consequence-gated.** Host Bash is the default; optional OS sandboxing fails closed.
+  Preserve mode, structured-file, credential, seatbelt, and ACP host boundaries as defined in
+  [SANDBOX.md](docs/process/SANDBOX.md). Host shell execution is not filesystem containment.
+- **Windows-friendly output.** Keep legacy plain CLI diagnostics ASCII-compatible. Source/docs use
+  UTF-8; the Unicode TUI and Vietnamese text must retain their correct characters.
 
 ## Sending a PR
 
 1. Branch off `main`.
-2. Make the change + a test; keep the verify loop green.
+2. Make a focused change and run its required checks.
 3. Use a clear commit message (we like Conventional Commits: `fix(ui): …`, `feat(core): …`).
 4. Open the PR describing **what** and **why**. CI runs typecheck + tests on every push.
 

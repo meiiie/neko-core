@@ -45,6 +45,8 @@ import { deleteMeeting, formatMeetingTime, latestMeeting, listMeetings, readMeet
 import { transcribeMeeting } from "../adapters/meeting-transcription.ts";
 import { normalizeSandboxDomains } from "../core/sandbox.ts";
 import { messageOf } from "../shared/debug.ts";
+import { createFeedbackDraft, FEEDBACK_CATEGORIES, FEEDBACK_RECIPIENT, saveFeedbackDraft, saveFeedbackEmail, type FeedbackLogLine } from "../adapters/feedback.ts";
+import type { FeedbackReport } from "../shared/feedback-wire.ts";
 
 import { isBool, isText } from "../shared/wire.ts";
 
@@ -52,7 +54,7 @@ export const HELP = [
   "Commands:",
   "  /help /cost /usage /voice /model /provider /support /browser /meeting /tools /skill(s) /init /clear /compact /transcript /reset /exit",
   "  /goal <text> · /loop <n> <task> · /auto <goal> · /contract · /sessions · /resume · /handoff · /continue · /retry · /effort · /context",
-  "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /relay · /coach · /login · /logout",
+  "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /relay · /coach · /login · /logout · /feedback",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
     "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line, Ctrl+G external editor.",
     "Keys: Shift+Tab cycle mode · Up/Down history · Alt+C copy draft · Alt+V paste image · Ctrl+O expand · Ctrl+B bash to background · Ctrl+L clear.",
@@ -62,6 +64,7 @@ export const HELP = [
 
 export const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
+  { name: "/feedback", desc: "add notes, review session logs, and send private email feedback" },
   { name: "/cost", desc: "session cumulative tokens vs the last model request" },
   { name: "/usage", desc: "subscription/session quota and token usage for the active account" },
   { name: "/voice", desc: "terminal GPT-Live, browser compatibility, ChatGPT, or dictation" },
@@ -137,6 +140,9 @@ export interface CommandCtx {
   setLines: (lines: Line[]) => void;
   nextId: () => number;
   setOverlay: (o: Overlay | null) => void;
+  feedbackLog?: () => FeedbackLogLine[];
+  previewFeedback?: (text: string, onClose: () => void) => void;
+  submitFeedback?: (report: FeedbackReport, savedPath: string) => Promise<void>;
   setBusy: (b: boolean) => void;
   setQueued: (n: number) => void;
   resumeInto: (s: Session) => void;
@@ -336,7 +342,7 @@ function applyModelSelection(ctx: CommandCtx, selected: ModelOption): void {
 
 function openCodexInstallPrompt(ctx: CommandCtx, selected: ModelOption): void {
   ctx.setOverlay({
-    title: `${selected.id} needs the optional GPT-5.6 Support Pack. GPT-5.5/API/Ollama are unchanged.`,
+    title: `${selected.id} needs an up-to-date Codex Support Pack. Other providers are unchanged.`,
     items: [
       { id: "install", label: "Install support pack", detail: "official OpenAI App Server; about 95 MiB download / 270 MiB disk" },
       { id: "cancel", label: "Not now", detail: "keep the current model; download nothing" },
@@ -345,12 +351,12 @@ function openCodexInstallPrompt(ctx: CommandCtx, selected: ModelOption): void {
       ctx.setOverlay(null);
       if (choice.id !== "install") return ctx.addLine("info", "Support Pack installation cancelled; current model unchanged.");
       ctx.setBusy(true);
-      void installCodexSupportPack({ notify: (message) => ctx.addLine("info", message) })
+      void installCodexSupportPack({ force: true, notify: (message) => ctx.addLine("info", message) })
         .then(() => {
           applyModelSelection(ctx, { ...selected, available: true });
           ctx.addLine("info", "Manage, update, or remove this optional component anytime with /support.");
         })
-        .catch((error) => ctx.addLine("error", `GPT-5.6 Support Pack failed: ${error instanceof Error ? error.message : error}. Retry with /support chatgpt install.`))
+        .catch((error) => ctx.addLine("error", `Codex Support Pack failed: ${error instanceof Error ? error.message : error}. Retry with /support chatgpt install.`))
         .finally(() => ctx.setBusy(false));
     },
   });
@@ -374,7 +380,7 @@ function openSupportCenter(ctx: CommandCtx): void {
     items: [
       {
         id: "chatgpt",
-        label: "ChatGPT GPT-5.6 Support Pack",
+        label: "ChatGPT Codex Support Pack",
         detail: supportDetail("chatgpt", codex.state, codex.detail, codex.executable?.source === "managed", codexManaged?.installedBytes),
       },
       {
@@ -592,7 +598,7 @@ function supportDetail(kind: SupportKind, state: string, detail: string, activeM
 function openSupportManager(ctx: CommandCtx, kind: SupportKind): void {
   const managed = kind === "chatgpt" ? readCodexSupportPack() : kind === "gemini" ? readGeminiSupportPack() : readOfficeSupportPack();
   const status = kind === "chatgpt" ? discoverCodexSupport() : kind === "gemini" ? discoverGeminiCli() : discoverOfficeCli();
-  const title = kind === "chatgpt" ? "ChatGPT GPT-5.6 Support Pack" : kind === "gemini" ? "Gemini CLI Support Pack" : "Office Artifact Support Pack";
+  const title = kind === "chatgpt" ? "ChatGPT Codex Support Pack" : kind === "gemini" ? "Gemini CLI Support Pack" : "Office Artifact Support Pack";
   const officeVerifier = kind === "office" ? discoverLibreOffice() : undefined;
   const backDetail = kind === "office"
     ? `LibreOffice PDF verifier: ${officeVerifier!.state} - ${officeVerifier!.detail}`
@@ -645,7 +651,7 @@ function openSupportManager(ctx: CommandCtx, kind: SupportKind): void {
 }
 
 function openSupportRemoveConfirm(ctx: CommandCtx, kind: SupportKind, bytes: number): void {
-  const title = kind === "chatgpt" ? "ChatGPT GPT-5.6 Support Pack" : kind === "gemini" ? "Gemini CLI Support Pack" : "Office Artifact Support Pack";
+  const title = kind === "chatgpt" ? "ChatGPT Codex Support Pack" : kind === "gemini" ? "Gemini CLI Support Pack" : "Office Artifact Support Pack";
   const items = kind === "office" ? [
     { id: "keep", label: "Keep installed", detail: "Recommended if you still create or edit Office artifacts" },
     { id: "remove", label: `Remove and free ${formatMiB(bytes)}`, detail: "Office files and any separate OfficeCLI installation stay untouched" },
@@ -768,6 +774,73 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return ctx.exit();
     case "/help":
       return addLine("info", HELP);
+    case "/feedback": {
+      if (input.trim() !== "/feedback") return addLine("info", "Use /feedback to enter private notes in the dedicated form, outside the model conversation.");
+      ctx.setOverlay({
+        title: "Feedback - choose a category",
+        description: `Private recipient: ${FEEDBACK_RECIPIENT}. Nothing is sent without confirmation.`,
+        items: FEEDBACK_CATEGORIES.map((category) => ({ id: category, label: category })),
+        onSelect: (choice) => {
+          const category = FEEDBACK_CATEGORIES.find((value) => value === choice.id);
+          if (!category) return;
+          ctx.setOverlay({
+            title: "Feedback - additional notes",
+            description: "Describe the problem and what you expected. Do not paste credentials. Notes never go to the model.",
+            items: [], onSelect: () => {},
+            textInput: {
+              placeholder: "What went wrong? (optional)", maxChars: 4000,
+              onSubmit: (notes) => {
+                ctx.setOverlay({
+                  title: "Feedback - include current session logs?",
+                  description: "Chat text, tool calls/results, and displayed errors may contain source code or personal data. Known secret patterns are scrubbed, but review is still necessary. No images, hidden reasoning, auth stores, or other sessions.",
+                  items: [{ id: "yes", label: "Include current session logs" }, { id: "no", label: "Notes and basic diagnostics only" }],
+                  onSelect: (logs) => {
+                    if (logs.id !== "yes" && logs.id !== "no") return;
+                    const report = createFeedbackDraft(cfg, category, notes, logs.id === "yes" ? ctx.feedbackLog?.() ?? [] : undefined);
+                    const preview = JSON.stringify(report, null, 2);
+                    let reviewed = false;
+                    const review = () => ctx.setOverlay({
+                      title: "Feedback - review before sharing",
+                      description: `To: ${FEEDBACK_RECIPIENT}\n${Buffer.byteLength(preview)} bytes; ${report.sessionLog?.length ?? 0} log entries; ${report.omittedLines ?? 0} entries omitted by the size limit.\nSending shares this attachment with Cloudflare and the private Gmail inbox. Scrubbing can miss sensitive content. Raw reports should be deleted after triage, within 30 days.`,
+                      items: [
+                        { id: "preview", label: "Review complete attachment", detail: "Scroll and search the exact scrubbed JSON" },
+                        ...(reviewed ? [
+                          ...(ctx.submitFeedback ? [{ id: "send", label: "Send reviewed feedback", detail: `Send to ${FEEDBACK_RECIPIENT}; keep a local copy` }] : []),
+                          { id: "email", label: "Save email draft (.eml)", detail: "Open in your mail app, choose a sender and click Send" },
+                          { id: "save", label: "Save report (.json)", detail: "Attach manually in Gmail or another mail app" },
+                        ] : []),
+                        { id: "cancel", label: "Cancel", detail: "Save and send nothing" },
+                      ],
+                      onSelect: async (action) => {
+                        if (action.id === "preview") {
+                          if (!ctx.previewFeedback) return addLine("error", "This client cannot show the complete feedback preview. Nothing was sent.");
+                          ctx.setOverlay(null);
+                          ctx.previewFeedback(preview, () => { reviewed = true; review(); });
+                          return;
+                        }
+                        ctx.setOverlay(null);
+                        if (!reviewed || !["save", "email", "send"].includes(action.id)) return;
+                        if (action.id === "send" && !ctx.submitFeedback) return;
+                        let path: string;
+                        try {
+                          path = action.id === "email" ? saveFeedbackEmail(cfg.resolvedHome, report) : saveFeedbackDraft(cfg.resolvedHome, report);
+                        } catch { addLine("error", "Could not save the feedback draft. Nothing was sent."); return; }
+                        if (action.id === "send") {
+                          try { await ctx.submitFeedback!(report, path); }
+                          catch { addLine("error", `Feedback delivery is unconfirmed. Do not resend automatically. Local copy: ${path}`); }
+                        } else addLine("info", `Feedback saved: ${path}\nNOT sent. Recipient: ${FEEDBACK_RECIPIENT}. Review the attachment in your mail app before sending.`);
+                      },
+                    });
+                    review();
+                  },
+                });
+              },
+            },
+          });
+        },
+      });
+      return;
+    }
     case "/cost":
       return addLine("info", agent.cost.summary());
     case "/usage": {
@@ -970,7 +1043,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         const meetingManaged = readMeetingSupportPack();
         const meetingDisk = meetingManaged ? `; ${formatMiB(meetingPackBytes(meetingManaged))} managed files` : "";
         return addLine("info", [
-          `ChatGPT GPT-5.6 support: ${codex.state} (${codex.detail})${codexDisk}`,
+          `ChatGPT Codex support: ${codex.state} (${codex.detail})${codexDisk}`,
           `Gemini CLI support: ${gemini.state} (${gemini.detail})${geminiDisk}`,
           `Office artifact support: ${office.state} (${office.detail})${officeDisk}`,
           `LibreOffice PDF verifier: ${libreOffice.state} (${libreOffice.detail})`,
@@ -985,20 +1058,20 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         const status = discoverCodexSupport();
         const managed = readCodexSupportPack();
         const disk = managed ? `; ${(managed.installedBytes / 1024 / 1024).toFixed(1)} MiB on disk` : "";
-        return addLine("info", `ChatGPT GPT-5.6 support: ${status.state} (${status.detail})${disk}. GPT-5.5/API/Ollama do not require it.`);
+        return addLine("info", `ChatGPT Codex support: ${status.state} (${status.detail})${disk}. GPT-5.5/API/Ollama do not require it.`);
       }
       if (codexAction === "remove" || codexAction === "uninstall") {
         agent.setProvider(getProvider(cfg)); // release an idle App Server before Windows removes it
         const removed = removeCodexSupportPack();
         const fallback = discoverCodexSupport();
         return addLine("info", removed
-          ? `GPT-5.6 Support Pack removed. Bridge status: ${fallback.state} (${fallback.detail}). ChatGPT sign-in was kept; GPT-5.5/API/Ollama are unaffected.`
+          ? `Codex Support Pack removed. Bridge status: ${fallback.state} (${fallback.detail}). ChatGPT sign-in was kept; GPT-5.5/API/Ollama are unaffected.`
           : "No Neko-managed Support Pack is installed; an existing Codex CLI is never removed by Neko.");
       }
       if (codexAction !== "install" && codexAction !== "update") return addLine("info", "usage: /support [status|chatgpt|gemini|office|meeting] [status|install|update|remove]");
       ctx.setBusy(true);
       try { await installCodexSupportPack({ force: codexAction === "update", notify: (message) => addLine("info", message) }); }
-      catch (error) { addLine("error", `GPT-5.6 Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`); }
+      catch (error) { addLine("error", `Codex Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`); }
       finally { ctx.setBusy(false); }
       return;
     }

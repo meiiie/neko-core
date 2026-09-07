@@ -11,6 +11,8 @@ import { inspectProjectTrust, type ProjectTrustSummary } from "./project-trust.t
 export const LOCAL_CONFIG_DIR = ".neko-core";
 export const LOCAL_CONFIG_NAME = "config.json";
 
+export const PROFILE_CONNECTION_FIELDS = ["provider", "base_url", "model", "api_key", "key_env", "key_env_fallbacks"] as const;
+
 export interface Profile {
   provider?: string;
   base_url?: string;
@@ -824,7 +826,18 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
 
   let merged: any = structuredClone(DEFAULTS);
   if (selected) merged = mergeDeep(merged, profiles[selected]);
-  for (const overlay of overlays) merged = mergeDeep(merged, overlay);
+  const storedProfile = filesMerged.active_profile || DEFAULTS.active_profile;
+  for (const overlay of overlays) {
+    const scoped = { ...overlay };
+    if (selected && storedProfile && selected !== storedProfile) {
+      for (const field of PROFILE_CONNECTION_FIELDS) delete scoped[field];
+    }
+    merged = mergeDeep(merged, scoped);
+  }
+  if (selected === "zai" && merged.provider === "anthropic" &&
+      /^https:\/\/api\.z\.ai\/api\/(?:paas|coding)\/v4\/?$/.test(String(merged.base_url))) {
+    merged.base_url = DEFAULTS.profiles.zai.base_url;
+  }
 
   // `.mcp.json` (Claude-style project MCP file): merge its `mcpServers` map. ./.mcp.json (project)
   // wins over ~/.mcp.json, both layered onto config's `mcp_servers`.

@@ -6,6 +6,9 @@
  * reproduction harness for the class of bugs that only real terminals used to reveal.
  */
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { render } from "ink";
 import React from "react";
@@ -104,31 +107,47 @@ test("fullscreen sim: startup, typing, grow and shrink never leave a black scree
 }, 30000);
 
 test("resize after a completed turn keeps the input row empty", async () => {
-  const vt = new VirtualTerminal(110, 32);
-  const out = new FakeTtyOut(110, 32, vt);
-  const stdin = new FakeStdin();
-  const differ = new FrameDiffer();
-  const provider: any = { complete: async () => ({ content: "final answer", tool_calls: [] }) };
-  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
-  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
-  const app = renderFS(
+  const home = mkdtempSync(join(tmpdir(), "neko-resize-turn-"));
+  const previousHome = process.env.HOME;
+  const previousProfile = process.env.USERPROFILE;
+  process.env.HOME = process.env.USERPROFILE = home;
+  let app: ReturnType<typeof render> | undefined;
+  try {
+    const vt = new VirtualTerminal(110, 32);
+    const out = new FakeTtyOut(110, 32, vt);
+    const stdin = new FakeStdin();
+    const differ = new FrameDiffer();
+    const provider: any = { complete: async () => ({ content: "final answer", tool_calls: [] }) };
     // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
-    React.createElement(ChatApp as any, { yolo: true, provider, sessionId: "resize-after-turn", frameDiffer: differ, preAltDispose }),
-    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
-    { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
-  );
-  await tick(300);
-  stdin.push("PROMPT-MUST-NOT-GHOST"); await tick(30); stdin.push("\r"); await tick(450);
-  expect(vt.text()).toContain("final answer");
+    const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+    app = renderFS(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+      React.createElement(ChatApp as any, { yolo: true, provider, sessionId: "resize-after-turn", frameDiffer: differ, preAltDispose }),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+      { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+    );
+    await tick(300);
+    stdin.push("PROMPT-MUST-NOT-GHOST"); await tick(30); stdin.push("\r");
+    const deadline = Date.now() + 10_000;
+    while ((!vt.text().includes("final answer") || vt.text().includes("esc to interrupt")) && Date.now() < deadline) {
+      await tick(30);
+    }
+    expect(vt.text()).toContain("final answer");
+    expect(vt.text()).not.toContain("esc to interrupt");
 
-  out.setSize(80, 20);
-  await tick(700);
-  const promptRows = vt.lines().filter((line) => /^\s*>/.test(line));
-  expect(promptRows.at(-1)?.trim()).toBe(">");
-  stdin.push("\x1b[1;5A"); await tick(120); // Ctrl+Up belongs to transcript scroll, not prompt history
-  expect(vt.lines().filter((line) => /^\s*>/.test(line)).at(-1)?.trim()).toBe(">");
-  app.unmount();
-  await tick(50);
+    out.setSize(80, 20);
+    await tick(700);
+    const promptRows = vt.lines().filter((line) => /^\s*>/.test(line));
+    expect(promptRows.at(-1)?.trim(), vt.text()).toBe(">");
+    stdin.push("\x1b[1;5A"); await tick(120); // Ctrl+Up belongs to transcript scroll, not prompt history
+    expect(vt.lines().filter((line) => /^\s*>/.test(line)).at(-1)?.trim()).toBe(">");
+  } finally {
+    app?.unmount();
+    await tick(50);
+    if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+    if (previousProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = previousProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
 }, 30000);
 
 test("STARTUP-fullscreen sim: alt entered BEFORE the first render - content visible with zero input", async () => {

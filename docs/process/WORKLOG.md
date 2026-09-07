@@ -5,6 +5,177 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-09-08 - v1.6.0 release candidate
+
+Owner authorized release of the provider repairs, dynamic ChatGPT catalog, private
+feedback flow and repository-documentation refresh. No completion-controller,
+authority or session-schema changes; ProgramBench remains paused.
+
+Reproduced the remaining completed-turn resize failure before resize was even
+attempted: the fixture depended on personal configuration and a fixed 450 ms
+turn-completion delay. The fixture now uses an isolated home, waits for the final
+answer and idle frame with a bounded deadline, and always unmounts/restores its
+environment. Its original resize/Ctrl+Up no-ghost assertions remain intact and pass.
+The previous meeting/handoff timeouts passed again in full sequential shards,
+without changing those tests. A separate supervisor fixture sometimes terminated
+before the child's signal handler was installed. Its existing termination seam now
+waits for a bounded ready marker before invoking the real process-tree terminator;
+the supervisor's 750 ms timeout, dead-PID assertion and 10-second overall bound stay
+intact. The output-cap fixture yields between writes instead of saturating the
+event loop, and temporary-directory cleanup retries short Windows handle-release
+delays. These are fixture changes, not production timing or benchmark-score changes.
+
+The Worker typecheck and local real D1/email-binding integration pass. Added a
+dedicated Linux CI job for them, without credentials or live email. Full local,
+cross-platform CI and release artifact results are authoritative in the release
+workflow; do not equate the candidate version string with successful publication.
+
+## 2026-09-07 - Private feedback email service deployed (pre-release checkpoint)
+
+After owner sign-in, verified the destination `meiiiekhp888@gmail.com`. Dashboard
+general Email Sending requires Workers Paid, but the official verified-destination
+Email Routing binding works on Free. No plan upgrade or website/general routing
+change was made. An initial D1 creation returned auth error 10000; a later explicit
+APAC creation succeeded without changing credentials/scopes. Its precise cause was
+not established.
+
+Deployed the dedicated `neko-feedback.holilihu.online` Worker, version
+`c3da976c-c51b-4884-8d81-ba17e2e230e9`, with restricted sender/receiver, server-only
+IP hash secret, D1 receipts, atomic daily admission limits, and scheduled retention.
+Report bodies stay out of D1 and application logs. There is no public report listing,
+SMTP secret in the CLI, paid model call, or durable raw-payload retry queue.
+
+The real email binding accepted synthetic reports of 454 and 500,512 bytes. Both
+duplicate submissions returned their existing receipts; D1 contains two accepted
+rows. Gmail Inbox placement remains unconfirmed. No real user logs were sent.
+
+CLI flow: separate notes editor, optional text/tool log, exact scrubbed preview,
+explicit send or local export. Save first, send once, then poll status; uncertain
+outcomes preserve the local copy and never auto-resend. Real Ink regressions verify
+Esc/Ctrl+C/unmount cancellation, queued command drainage and no model calls. Fixed
+an uncovered edge case: reports made before choosing a model now use `unconfigured`.
+
+Typecheck/lint pass; 13 targeted feedback tests pass (147 assertions), plus local
+workerd/D1/email integration for deduplication, conflict, unknown outcome, quota and
+privacy boundaries. Production build includes 946 modules and passes keyboard PTY,
+ACP smoke, and startup/exit lifecycle probes. Doctor/policy complete with the same
+local trust, unconfined-auto, offline bridge and non-TTY warnings. All 23 checked
+relative links resolve; `git diff --check` passes. The API sender adds no root
+dependency. Cloudflare development dependencies are isolated in their own package.
+See [deployment instructions](../../cloudflare/feedback/README.md).
+
+No version bump, installed-binary replacement, commit, push, release or ProgramBench
+run. The broader suite's previously recorded failures below are not resolved by this
+targeted work; a new CLI release still requires its full gate.
+
+## 2026-09-07 - Cloudflare prerequisite check (historical; resolved above)
+
+Owner approved Cloudflare. Created only the Email Routing destination for
+`meiiiekhp888@gmail.com`; Cloudflare sent its verification message. Last observed
+state at this checkpoint was pending owner confirmation. No session/report data was uploaded.
+
+Email Sending list, domain inspection and enable for `holilihu.online` fail with
+Unauthorized (2036), despite the CLI advertising both email write scopes. Cause
+is not established; the Dashboard is at the existing-account sign-in screen and
+has been left open for owner handoff. No DNS mutation was confirmed and no Worker
+or sender was activated. Automatic `/feedback` sending remains unimplemented and
+undeployed; local reviewed drafts remain available. No source/dependency changes,
+paid calls, benchmarks, commit, push or release in this prerequisite check.
+
+This checkpoint's blockers were resolved by the deployment entry above. Retained
+here to distinguish its failed prerequisite calls from the later verified send.
+
+## 2026-09-07 - Dynamic ChatGPT catalog and private feedback workflow (unreleased)
+
+Removed the live model-name allowlist. Account metadata selects direct/native
+transport and minimum Codex version; installed newer clients determine the catalog
+compatibility query. Routing snapshots expire after five minutes and are scoped to
+both bearer and selected account. Known direct bootstrap models retain their fast
+first-turn path. Unknown future model fixtures cover discovery/routing/version gating;
+this is not a promise that arbitrary future protocols or account entitlements work.
+
+The owner selected `meiiiekhp888@gmail.com`. `/feedback` now provides a separate
+notes editor, explicit optional current-session text/tool logs, bounded scrubbing,
+an unabridged exact-attachment preview, and `.eml`/JSON export. No notes are sent to
+the model. Tool arguments are scrubbed before an extra JSON encoding can hide key
+patterns. No background telemetry, hidden provider state, images or credential-store
+dump. Scrubbing remains best-effort; source/business content may remain.
+
+Codex CLI 0.153.4's real feedback menu was inspected using an isolated home without
+a model request and cancelled before upload. Cloudflare Email Sending returned
+Unauthorized; Email Routing was readable but the requested receiver was unverified.
+No email/address/domain/sender change occurred. Automatic sending is **not implemented
+or deployed**; exported drafts say NOT sent. See [feedback contract](FEEDBACK.md).
+
+Final targeted checks: 53 pass / 0 fail across five files, including real Ink notes,
+preview and cancellation, account-switch invalidation and shared-refresh cancellation.
+Typecheck, lint, doctor/policy, production build (944 modules), PTY keyboard, ACP and
+startup/exit lifecycle pass. Doctor/policy retain expected local configuration warnings.
+39 relative documentation links resolve and `git diff --check` passes.
+
+The broader four-shard Windows run was **not green**: 1,596 pass / 14 skip / 3 fail
+across 149 files. Meeting permission inspection and CLI handoff hit the default 5s
+test limit; each passed when isolated, with unchanged assertions/timeouts. Fullscreen
+`resize after a completed turn keeps the input row empty` still failed in isolation
+at line 122: its fixed 450ms wait expired before `final answer`, before resize runs.
+The screenshot showed a busy first turn, not a demonstrated geometry defect. The
+cause is not established; do not dismiss it as unrelated or claim a full green gate.
+Logs remain in the local `neko-feedback-gate-4853af44a45e43aca113489a408625b9` temp
+directory. Later catalog account-scope and tool-argument scrubbing adjustments are
+covered by the final targeted checks and build, not by a repeated full-suite claim.
+
+No `src/core`, dependency, permission/sandbox, version, installed binary or benchmark
+changes. No commit, push or release. Next: resolve the first-turn fixture failure,
+then obtain the owner's email-service choice and verify sender/receiver before
+implementing automatic submission. Do not ship a sender credential in the CLI.
+
+## 2026-09-07 - Provider incident fixes and local feedback drafts (unreleased)
+
+Fixed connection-override ownership when switching profiles, normalized the known
+legacy built-in Z.AI Coding Plan endpoint, and added a preflight failure for explicit
+Messages/OpenAI endpoint mismatches. ChatGPT transport now accepts its canonical Neko
+control directory when launched exactly from user home, retaining project/junction/root
+guards and all native-tool restrictions. GPT-6 Astra uses the shared native route,
+live account catalog and a Codex 0.153.4 compatibility floor; other routes keep their
+existing behavior. `/feedback` previews an allowlisted diagnostic draft and saves it
+locally only. No hosted inbox, email delivery, or automatic telemetry was deployed.
+
+Evidence: typecheck and lint pass. The Windows CI-equivalent four sequential shards
+pass 1,592 tests, skip 14 environment-dependent tests, and fail none across 148 files.
+An initial single-process run hit the existing fullscreen fixture's fixed 450 ms
+completion assertion; its assertions/timeouts were not changed. The canonical shard
+run retained and passed that test. Doctor/policy finish with the expected untrusted
+project, unconfined auto, offline bridge and non-TTY warnings. Production build,
+keyboard PTY probe, ACP smoke and startup/exit lifecycle pass.
+
+A real Codex 0.145.0 App Server initialized successfully from the user-home cwd and
+closed cleanly, without sending a model prompt. The local account-catalog probe was
+unavailable; Astra entitlement and a live model response on the friend's account are
+not claimed. No `src/core` or dependency changes, no ProgramBench run, no version bump,
+commit, push or release. See [incident analysis](../research/provider-incidents-2026-09-07.md)
+and [feedback privacy/hosted-phase proposal](FEEDBACK.md).
+
+## 2026-09-07 - Working-instruction and state cleanup
+
+Read the official GPT-6 Astra prompting and Codex AGENTS.md guides, then audited the
+repository instructions against current code and release metadata. AGENTS.md now
+routes to shared rules and scoped verification; CLAUDE.md is a short compatibility
+entry. The Claude verify command now checks TypeScript/Bun instead of the frozen
+Python port, and secret-scan uses redacted gitleaks. The obsolete Python port command
+and unreferenced remote-sandbox sketch were removed; both remain recoverable in Git.
+
+ROADMAP now records published v1.5.1 at `c03012a`. The duplicated self-improve state
+and campaign narrative were reduced to canonical links. R6's local manifest and summary
+were inspected and hashed: ten terminal results, two interrupted, six pending, and no
+eligible improvement claim. EVALUATION holds the snapshot; execution remains paused.
+The old self-improve runner is explicitly identified as a legacy unbounded, auto-commit/
+revert workflow, not an approved maintenance command. Its implementation was not changed.
+
+This is repository guidance/documentation work. Product sources, provider defaults,
+runtime permissions, dependency versions, and benchmark artifacts are untouched.
+The dated [Astra review](../research/codex-astra-instructions-2026-09-07.md) records
+sources, applied decisions, and the verification scope.
+
 ## 2026-09-04 - v1.5.1 resumable compressed release transport
 
 A field upgrade from v0.19.0 to v1.5.0 repeatedly timed out on a route delivering the 89.5 MiB Windows binary at
@@ -25,6 +196,9 @@ The targeted updater and installer tests cover slow continuous progress, stalled
 range resume, a server ignoring Range, archive expansion bounds, persistent cleanup, and release asset accounting.
 The exact release candidate subsequently passed the full suite: 1,581 tests, 16 explicit skips, and zero failures
 across 147 files. The tracked Git history and working diff also passed the gitleaks gate.
+
+Published as [v1.5.1](https://github.com/meiiie/neko-core/releases/tag/v1.5.1)
+on 2026-09-04 at commit `c03012af31b81d04b13b8f65757f0f23d3cafe51`.
 
 ## 2026-09-04 - v1.5.0 host-shell routing and stabilization
 
@@ -175,7 +349,7 @@ heartbeat left behind.
 
 ## 2026-08-28 - Stable 1.x platform
 
-Neko Core 1.5.0 is the current release candidate. The 1.x baseline includes the stable CLI and
+The stable 1.x platform includes the CLI and
 Ink TUI, provider/account routing, durable sessions, ACP v1, governed native/MCP tools,
 browser and Office integrations, OS sandboxing, global skills, verified updater and
 rollback, and compiled Windows/Linux/macOS artifacts.
@@ -190,7 +364,7 @@ Windows control.
 ACP host profiles provide a separate exclusive tool surface for embedding products,
 beginning with NekoCut. They do not narrow or alter normal Neko sessions.
 
-## Current verification state
+## Historical verification snapshot (2026-08-31)
 
 The completion/ProgramBench changes pass focused Agent/Harbor and Python protocol
 tests. After the R4 lifecycle repair, a clean full Bun run on 2026-08-31 reported
@@ -205,9 +379,8 @@ freeze. An earlier full-suite attempt with the Windows user TEMP on a nearly ful
 drive produced one `ENOSPC` fixture failure and three load timeouts; all four passed in
 isolation, and the complete clean run used an outside-repository TEMP on E:.
 
-## Active objective
+## Objective and execution state
 
-The active harness objective and stopping rules are in
-[HARNESS-GOAL.md](HARNESS-GOAL.md). Work proceeds from deterministic correctness to a
-frozen multi-task, multi-replicate, compute-matched ProgramBench campaign. No SOTA or
-general-lift statement is allowed before the public claim gate in EVALUATION is met.
+The harness objective and stopping rules are in [HARNESS-GOAL.md](HARNESS-GOAL.md).
+Execution is paused; current progress belongs in ROADMAP and EVALUATION. No SOTA or
+general-lift statement is allowed before the public claim gate is met.

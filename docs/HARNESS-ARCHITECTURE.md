@@ -108,6 +108,11 @@ tool available.
 Read-only Bash is still treated as a command execution surface. When sandboxed, it receives only the exact
 filesystem roots and one-call network domains granted by policy. An unhealthy configured sandbox fails closed.
 
+Ordinary sessions use host Bash by default. It retains permission/seatbelt checks but has no OS filesystem
+or network containment; structured-file limits do not confine host shell commands. Explicit `sandbox: true`
+selects the separate fail-closed boundary. Computer Use is not a shell fallback. See
+[SANDBOX.md](process/SANDBOX.md) for the exact scope of each guard.
+
 ## Provider and protocol integrity
 
 Providers implement the `Provider` port. They translate canonical messages and tools to a vendor protocol,
@@ -164,7 +169,8 @@ effect path from a provider to the host.
 
 The current long-horizon experiment is governed by
 [process/HARNESS-GOAL.md](process/HARNESS-GOAL.md) and
-[process/EVALUATION.md](process/EVALUATION.md). The architecture follows a validator wall: an independent
+[process/EVALUATION.md](process/EVALUATION.md); execution is paused pending owner resumption.
+The architecture follows a validator wall: an independent
 completion instrument is defined before implementation, raw cases stay private to the validator, and only
 clustered outcome gaps cross back to the implementer. This is an experimental controller layer, not authority
 to weaken tools, sandboxing, or normal CLI behavior.

@@ -86,6 +86,27 @@ test("expired ChatGPT credentials refresh and retain the old refresh token when 
   expect(loadChatGptCredentials()?.accessToken).toBe(refreshed.accessToken);
 });
 
+test("cancelling one catalog waiter does not cancel a shared credential refresh", async () => {
+  isolatedHome();
+  saveChatGptCredentials({ accessToken: "old", refreshToken: "refresh", expiresAt: 1 });
+  let finish!: (response: Response) => void;
+  let requests = 0;
+  const fetchImpl = asFetch(async (_url: string | URL | Request, init?: RequestInit) => {
+    requests++;
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    return new Promise<Response>((resolve) => { finish = resolve; });
+  });
+  const controller = new AbortController();
+  const cancelled = validChatGptCredentials(fetchImpl, "https://issuer.test", false, controller.signal);
+  const remaining = validChatGptCredentials(fetchImpl, "https://issuer.test");
+  controller.abort();
+  await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+  finish(Response.json({ access_token: "fresh", expires_in: 3600 }));
+  expect((await remaining).accessToken).toBe("fresh");
+  expect(requests).toBe(1);
+  expect(loadChatGptCredentials()?.accessToken).toBe("fresh");
+});
+
 test("an access-only Harbor lease refuses refresh locally without changing its bytes", async () => {
   const home = isolatedHome();
   saveChatGptCredentials({

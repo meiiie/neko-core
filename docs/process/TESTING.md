@@ -4,7 +4,22 @@ The suite is organized by failure class, not by a target test count. A test earn
 distinct behavior, boundary, incident, or platform integration. Old run logs belong in WORKLOG.md; this file
 contains only the current contract.
 
-## Required local gate
+## Choose the verification scope
+
+- Documentation/instruction-only edits: check relative links and referenced commands/paths,
+  review for contradictory or stale guidance, and run `git diff --check`. No provider call
+  or production rebuild is required unless the edit changes packaged/runtime behavior.
+- Code changes: add or update a regression for the changed behavior, run the affected
+  subsystem tests, typecheck and lint. Shared loop, authority, persistence, transport,
+  or lifecycle changes also require the full local gate below.
+- Releases: run the full gate and applicable real-terminal checks on the exact candidate,
+  following [RELEASE.md](RELEASE.md). A docs-only release still needs release verification.
+
+Do not add tests that merely reproduce prose or implementation structure. Once checks
+pass, rerun them only after a relevant change, failure, or unresolved concern. Keep
+resource-heavy checks sequential; benchmarks are opt-in and never a substitute for tests.
+
+## Full local gate
 
 Run from the repository root with the stable Bun version pinned in CI:
 

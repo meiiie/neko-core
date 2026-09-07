@@ -13,6 +13,16 @@ export function requestSignal(signal?: AbortSignal, timeoutMs = 30_000): AbortSi
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
+export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) { void promise.catch(() => {}); return Promise.reject(userAbortError()); }
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () => reject(userAbortError());
+    signal.addEventListener("abort", aborted, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", aborted));
+  });
+}
+
 /** setTimeout that rejects immediately when its owning UI operation is cancelled. */
 export function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   throwIfAborted(signal);

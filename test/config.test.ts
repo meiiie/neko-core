@@ -18,6 +18,17 @@ function tmpConfig(data: any): string {
   return path;
 }
 
+test("legacy Z.AI Messages route is repaired only for the built-in Coding Plan profile", () => {
+  const path = tmpConfig({ active_profile: "zai", base_url: "https://api.z.ai/api/paas/v4" });
+  expect(loadConfig({ path }).baseUrl).toBe("https://api.z.ai/api/anthropic");
+  expect(loadConfig({ path, profile: "zai-openai" }).baseUrl).toBe("https://api.z.ai/api/paas/v4");
+  const custom = tmpConfig({ active_profile: "zai", profiles: { zai: { base_url: "https://gateway.example/anthropic" } } });
+  expect(loadConfig({ path: custom }).baseUrl).toBe("https://gateway.example/anthropic");
+  process.env.NEKO_BASE_URL = "https://api.z.ai/api/paas/v4";
+  try { expect(loadConfig({ path }).baseUrl).toBe("https://api.z.ai/api/paas/v4"); }
+  finally { delete process.env.NEKO_BASE_URL; }
+});
+
 function configAtHome(data: any, home: string): NekoConfig {
   return new NekoConfig(data, null, {}, "", null, [], { state: "none", files: [] }, home);
 }

@@ -9,6 +9,7 @@ import { HIT_SENTINEL } from "./frame-diff.ts";
 import { hitIndexAt } from "./hit-targets.ts";
 import { parseLastPointer, parseWheelAll } from "./mouse.ts";
 import { isEscapeResidue } from "./text-input.tsx";
+import type { TextPromptOptions } from "./text-prompt.tsx";
 
 export interface SelectItem {
   id: string;
@@ -23,6 +24,7 @@ export interface Overlay {
   description?: string;
   items: SelectItem[];
   onSelect: (item: SelectItem) => void;
+  textInput?: TextPromptOptions;
   onCancel?: () => void;
   search?: boolean;
   showCount?: boolean;

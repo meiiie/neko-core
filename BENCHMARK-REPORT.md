@@ -3,8 +3,9 @@
 > **Historical calibration artifact (2026-08-06).** These numbers describe the then-current easy-suite
 > harness only. The v0.23.0 evaluator subsequently hardened its oracle, production-completion intersection,
 > infrastructure classification, fingerprints and trajectory accounting; do not compare or publish this file
-> as a current leaderboard result. Current methodology and caveats live in
-> `docs/research/harness-sota-2026-08-09.md` and `docs/research/frontier-v2-design-2026-08-10.md`.
+> as a current leaderboard result. Current methodology, evidence, and claim gates live in
+> [docs/process/EVALUATION.md](docs/process/EVALUATION.md). The dated research files
+> remain historical design inputs.
 
 **Date:** 2026-08-06 · **Model under test:** `glm-5.2` (effort=max) · **Suite:** easy (16 tasks)
 **Config budget cap:** `--max-steps 25` (interactive-tier, ~SWE-bench scale)

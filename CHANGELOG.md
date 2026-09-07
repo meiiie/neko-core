@@ -6,6 +6,37 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-08
+
+### Added
+
+- `/feedback` collects optional notes and current-session text/tool logs for the private maintainer inbox.
+  It requires a scrubbed attachment preview and explicit confirmation before sending, saves a local copy,
+  and offers JSON/email-draft export. Images, hidden reasoning, credential stores and other sessions are
+  excluded. Unknown delivery outcomes are not automatically resent; service acceptance is not Inbox confirmation.
+  See [feedback and privacy](docs/process/FEEDBACK.md) for limits and retention.
+- ChatGPT model selection and transport routing use account-catalog metadata, including native-only models
+  such as GPT-6 Astra and future entries without a model-name allowlist. Availability still depends on account
+  access and the required Codex Support Pack version; Astra requires at least 0.153.4.
+
+### Fixed
+
+- Switching profiles no longer carries an old provider's endpoint or key settings into the new connection.
+  Existing built-in Z.AI Coding Plan profiles with an OpenAI-shaped endpoint are migrated to Anthropic Messages;
+  explicit protocol mismatches fail locally instead of requesting `/v4/v1/messages` and returning HTTP 404.
+- ChatGPT native transport starts when Neko is launched directly in the user's home directory, while retaining
+  rejection of unsafe project-contained or redirected transport directories.
+- Catalog lookup and shared credential-refresh waiting honor cancellation. Native-model support installation
+  can update an older managed pack while preserving sign-in.
+- The completed-turn resize regression now isolates personal configuration, waits for the actual idle frame,
+  and cleans up even on assertion failure, rather than assuming every turn finishes within 450 ms.
+
+### Documentation
+
+- Consolidated repository instructions and current architecture/evaluation guidance; retired obsolete Python-port
+  and remote-sandbox instructions. ProgramBench stays paused. This release does not change the completion
+  controller, ordinary host-Bash defaults, permission modes, ACP host isolation, or session format.
+
 ## [1.5.1] - 2026-09-04
 
 ### Fixed

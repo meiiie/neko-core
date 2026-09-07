@@ -31,6 +31,10 @@ export class AnthropicProvider implements Provider {
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
     if (!this.cfg.baseUrl) throw new Error("anthropic provider needs a base_url (e.g. https://api.z.ai/api/anthropic).");
+    const endpoint = new URL(this.cfg.baseUrl);
+    if (endpoint.hostname === "api.z.ai" && /^\/api\/(?:paas|coding)\/v4\/?$/.test(endpoint.pathname)) {
+      throw new Error("Z.AI endpoint/protocol mismatch: Anthropic Messages needs https://api.z.ai/api/anthropic. Set profiles.zai.base_url to that URL for GLM Coding Plan, or select /provider zai-openai for the paid OpenAI-compatible API. Check NEKO_BASE_URL too; no request was sent.");
+    }
     if (!this.cfg.model) throw new Error("anthropic provider needs a model (e.g. glm-5.3 or claude-sonnet-5).");
     const key = await this.resolveApiKey();
     if (!key && !this.cfg.isLocalEndpoint) throw new Error("No API key for the anthropic provider. Set it in the profile's api_key or NEKO_API_KEY.");

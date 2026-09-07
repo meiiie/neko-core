@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { terminateProcessTree } from "../src/core/tool-runtime.ts";
 
 // End-to-end offline smoke: proves runEval's full pipeline (Agent loop -> onEvent trace capture ->
 // constraint `keep` resolution -> CLEAR metric aggregation -> scorecard render) with NO live API, via a
@@ -1053,28 +1054,29 @@ test("bounded benchmark supervisor force-stops a target that ignores SIGTERM", a
   const pidFile = join(root, "target.pid");
   try {
     writeFileSync(join(root, "bunfig.toml"), "# intentionally empty\n", "utf8");
-    writeFileSync(
-      join(root, "ignore-term.mjs"),
-      [
-        'import { writeFileSync } from "node:fs";',
-        'writeFileSync("target.pid", String(process.pid));',
-        'process.on("SIGTERM", () => {});',
-        'setInterval(() => {}, 60_000);',
-        "",
-      ].join("\n"),
-      "utf8",
-    );
+    const script = [
+      'import { writeFileSync } from "node:fs";',
+      'process.on("SIGTERM", () => {});',
+      'writeFileSync("target.pid", String(process.pid));',
+      'setInterval(() => {}, 60_000);',
+    ].join("\n");
     const started = Date.now();
     const result = await __runBoundedBenchProcessForTest(
       {
         file: process.execPath,
-        args: ["--no-env-file", "--no-install", "--config=./bunfig.toml", "./ignore-term.mjs"],
+        args: ["--no-env-file", "--no-install", "--config=./bunfig.toml", "--eval", script],
         shell: false,
       },
       root,
       process.env,
       750,
       1024 * 1024,
+      async (child) => {
+        // Exercise the installed signal handler, not cold-start speed. The supervisor's deadline stays 750 ms.
+        const readyDeadline = Date.now() + 5000;
+        while (!existsSync(pidFile) && Date.now() < readyDeadline) await Bun.sleep(25);
+        return terminateProcessTree(child);
+      },
     );
     const elapsed = Date.now() - started;
     const pid = Number(readFileSync(pidFile, "utf8"));
@@ -1086,7 +1088,7 @@ test("bounded benchmark supervisor force-stops a target that ignores SIGTERM", a
     expect(pid).toBeGreaterThan(0);
     expect(processIsLive(pid)).toBe(false);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }, 15000);
 
@@ -1094,16 +1096,12 @@ test("bounded benchmark supervisor caps output and stops the flooding target", a
   const root = mkdtempSync(join(tmpdir(), "neko-bench-output-test-"));
   try {
     writeFileSync(join(root, "bunfig.toml"), "# intentionally empty\n", "utf8");
-    writeFileSync(
-      join(root, "flood.mjs"),
-      'const block = "x".repeat(8192);\nfor (;;) process.stdout.write(block);\n',
-      "utf8",
-    );
+    const script = 'const block = "x".repeat(8192);\nsetInterval(() => process.stdout.write(block), 1);\n';
     const maxOutputBytes = 4096;
     const result = await __runBoundedBenchProcessForTest(
       {
         file: process.execPath,
-        args: ["--no-env-file", "--no-install", "--config=./bunfig.toml", "./flood.mjs"],
+        args: ["--no-env-file", "--no-install", "--config=./bunfig.toml", "--eval", script],
         shell: false,
       },
       root,
@@ -1117,7 +1115,7 @@ test("bounded benchmark supervisor caps output and stops the flooding target", a
     expect(result.treeCleanupConfirmed).toBe(true);
     expect(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(maxOutputBytes);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }, 15000);
 

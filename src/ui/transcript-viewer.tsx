@@ -14,19 +14,19 @@ import type { Line } from "./transcript.tsx";
 import { flattenLines } from "./scroll.tsx";
 import { parseLastPointer, parseWheelAll } from "./mouse.ts";
 
-export function TranscriptViewer({ lines, cols, rows: termRows, onClose }: { lines: Line[]; cols: number; rows: number; onClose: () => void }) {
+export function TranscriptViewer({ lines, cols, rows: termRows, onClose, title = "Conversation", unabridged = false }: { lines: Line[]; cols: number; rows: number; onClose: () => void; title?: string; unabridged?: boolean }) {
   const [query, setQuery] = useState("");
   const width = Math.max(20, cols - 2);
   const viewH = Math.max(3, termRows - 7); // leave room for border + header + hint + a little breathing space
 
   const q = query.trim().toLowerCase();
   const matched = q ? lines.filter((l) => l.text.toLowerCase().includes(q) || (l.summary ?? "").toLowerCase().includes(q)) : lines;
-  const all = useMemo(() => flattenLines(matched, width), [matched, width]);
+  const all = useMemo(() => flattenLines(matched, width, unabridged), [matched, width, unabridged]);
   const maxOffset = Math.max(0, all.length - viewH);
-  const [offset, setOffset] = useState(maxOffset); // open at the BOTTOM (most recent), scroll up for older
+  const [offset, setOffset] = useState(unabridged ? 0 : maxOffset); // open at the BOTTOM (most recent), scroll up for older
   // Re-anchor when the content changes: a new search jumps to the first match (top); clearing it or a
   // resize snaps back to the bottom. Keeps offset valid so we never window past the ends.
-  useEffect(() => { setOffset(q ? 0 : Math.max(0, all.length - viewH)); }, [q, all.length, viewH]);
+  useEffect(() => { setOffset(q || unabridged ? 0 : Math.max(0, all.length - viewH)); }, [q, all.length, viewH, unabridged]);
 
   const off = Math.min(Math.max(0, offset), maxOffset);
   const window = all.slice(off, off + viewH);
@@ -56,7 +56,7 @@ export function TranscriptViewer({ lines, cols, rows: termRows, onClose }: { lin
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#4d9fff" paddingX={1} width={cols}>
       <Text>
-        <Text bold color="#4d9fff">Conversation</Text>
+        <Text bold color="#4d9fff">{title}</Text>
         <Text dimColor>{"  "}{lines.length} entr{lines.length === 1 ? "y" : "ies"}{q ? ` · found ${matched.length}` : ""} · {pos}</Text>
       </Text>
       <Box flexDirection="column" height={viewH}>

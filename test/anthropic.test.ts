@@ -5,6 +5,14 @@ import { NekoConfig } from "../src/adapters/config.ts";
 import { SESSION_CONTEXT_MARK } from "../src/core/agent-constants.ts";
 import { ProviderAttemptError } from "../src/core/ports.ts";
 
+test.each(["paas", "coding"])("Z.AI %s/v4 cannot send a Messages request or resolve credentials", async (route) => {
+  let credentialsRead = false;
+  const cfg = new NekoConfig({ provider: "anthropic", base_url: `https://api.z.ai/api/${route}/v4`, model: "glm-5.3" }, "zai", {}, "");
+  const provider = new AnthropicProvider(cfg, () => { credentialsRead = true; return "SECRET"; });
+  await expect(provider.complete([{ role: "user", content: "hello" }])).rejects.toThrow("endpoint/protocol mismatch");
+  expect(credentialsRead).toBe(false);
+});
+
 test("thinkingBudget maps the effort ladder; off/unset => 0 (no extended thinking)", () => {
   expect(thinkingBudget("off")).toBe(0);
   expect(thinkingBudget("")).toBe(0);

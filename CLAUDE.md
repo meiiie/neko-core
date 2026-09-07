@@ -1,55 +1,8 @@
-# Neko Core — working notes for Claude Code
+# Neko Core — Claude Code entry point
 
-**Neko Core** is a local-first terminal coding agent (Claude-Code / Codex-CLI class), built
-in **TypeScript + Bun + Ink**. Its engine/library is the package `neko-core`.
-The command is `neko`. Roadmap + history: `docs/process/ROADMAP.md`, `docs/process/WORKLOG.md`.
-Working rules: `docs/process/RULES.md`.
+Read [AGENTS.md](AGENTS.md) for the shared repository instructions, then follow its
+task-specific documentation links. If AGENTS.md is already in context, do not load
+another copy. Keep all shared rules there and in `docs/process/RULES.md`.
 
-## Codebase map (`src/`, run by Bun)
-
-Ports & Adapters — dependencies point inward (`docs/process/ARCHITECTURE.md`,
-enforced by `test/architecture.test.ts`).
-
-| Layer / Module | Role |
-|---|---|
-| **`core/`** (pure domain) | |
-| `core/ports.ts` | The interfaces core depends on: `Provider` (LLM), `McpTools`, plus `ToolCall`/`ProviderResponse`/`DeltaHook`. |
-| `core/agent.ts` | The agent loop (`complete → tool_calls → observe`, `max_steps`) + cost; `compact()`; `appendSystem()`. |
-| `core/tools.ts` · `core/tool-runtime.ts` | Tool contracts (safe: read_file/search/glob/ls/todo_write · gated: write_file/edit/bash) + `describeToolCall` + executable `ToolRegistry`. **Reads may leave the project root** (`read_outside_root`, default on); writes/edits never may, and credential paths (`OUTSIDE_DENIED`) are refused either way. |
-| `core/permissions.ts` · `core/cost.ts` | Permission modes (default/accept-edits/plan/auto) · token usage. |
-| **`adapters/`** (edge) | |
-| `adapters/providers.ts` | `openai_compat` over `fetch`: SSE streaming, retry, abort (implements `Provider`). |
-| `adapters/config.ts` | Config-first loader: overlay (built-in → profile preset → `~/.neko-core` → `./.neko-core` → `NEKO_*`) + profiles. Key read on demand, never stored/printed. |
-| `adapters/mcp.ts` · `adapters/session.ts` · `adapters/context.ts` · `adapters/skills.ts` | MCP client · session persistence/resume · global identity + project context (NEKO.md/AGENTS.md/CLAUDE.md) · `.md` skills. |
-| `adapters/oracle.ts` · `adapters/oracle-tools.ts` | Second opinion from a *different* model: curated file bundle (secrets refused/masked, whole-file budget), no tools, durable sessions + follow-up. Gated via the MCP seam. `docs/process/ORACLE.md`. |
-| `adapters/tool-registry.ts` | Shared CLI/TUI/subagent composition for native web, skills, vision, sandbox and inherited safety boundaries. |
-| `adapters/registry.ts` · `adapters/doctor.ts` · `adapters/project.ts` | capabilities + `policy` audit · `doctor` diagnostics · `init` scaffolds. |
-| **`shared/`** | `version.ts` (leaf). |
-| **`ui/`** | Ink REPL, split by concern: `chat.tsx` (lifecycle + turn loop + render), `commands.ts` (slash commands + `runSlashCommand`), `transcript.tsx` (line renderer), `select-list.tsx` (reusable picker), `thinking-line.tsx`, `approval-box.tsx`, `markdown.tsx`, `highlight.tsx`, `logo.tsx`, `text-input.tsx`, `format.ts`. |
-| `bin/neko.ts` | The `neko` CLI entry point. |
-| `reference/python/` | The Python **spec/reference** (original port). Not shipped; read it, don't depend on it. |
-
-## Critical gotchas
-
-- **`bang_c` is FROZEN** (sibling `E:\Sach\Sua\bang_c`). Read to learn; never edit.
-- **Clean-room only.** The local `claude-code` tree is studied for patterns/UX, **never copied**
-  into this public repo. Learn ideas ✅, copy proprietary code ❌.
-- **Reference clones** live in `../neko-refs/` (sibling, untracked — e.g. Goose). Study them
-  clean-room for ideas; never copy code in.
-- **Secrets never committed/printed.** Key via env (`NEKO_API_KEY` / `OPENAI_API_KEY` /
-  `NVIDIA_API_KEY`) or gitignored `~/.neko-core/config.json`. Run `/secret-scan` before any push.
-- **Config-first.** A new model/endpoint is a profile, not a code change.
-- **Windows console is cp1252.** Keep *printed* strings ASCII (an em-dash mojibakes).
-- **Safe-by-default.** `write_file`/`edit`/`bash` are approval-gated; modes are a *named* state.
-
-## Verify loop
-
-```bash
-rtk bun run typecheck          # tsc --noEmit
-rtk bun test                   # the test suite
-rtk node bin/neko-source.cjs doctor # resolved provider/model/key (no model call)
-rtk node bin/neko-source.cjs policy # safe/gated boundary audit
-rtk bun run build                  # bun build --compile -> dist/neko (single binary)
-```
-
-(Prefix shell commands with `rtk` per the global RTK rule.)
+Project commands live in `.claude/commands/`; their verification and release rules
+must agree with `docs/process/TESTING.md` and `docs/process/RELEASE.md`.

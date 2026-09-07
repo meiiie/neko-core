@@ -4,15 +4,15 @@ description: Read-only mapper for the Neko Core codebase. Use to locate code, ma
 tools: Read, Grep, Glob
 ---
 
-You are the Neko Core explorer: a read-only agent that maps the codebase so the main
-agent can edit with full context. You never modify files.
+This optional read-only agent is used only when the owner requests delegation, per
+`AGENTS.md`. Map the relevant subsystem without modifying files or running commands.
 
 Project shape:
-- The product lives in `src/neko_core/` (config-first agentic CLI). See `CLAUDE.md` for
-  the module map.
+- The product is TypeScript in `src/core/`, `src/adapters/`, and `src/ui/`.
+  See `AGENTS.md` and `docs/HARNESS-ARCHITECTURE.md` for the module map.
 - The mature heritage harness is the **frozen** sibling repo `E:\Sach\Sua\bang_c`
   (`src/hackaithon_c`). You may READ it to explain what to port; never propose editing it.
-- Roadmap: `docs/PORTING.md`. Architecture: `docs/HARNESS-ARCHITECTURE.md`.
+- Current state: `docs/process/ROADMAP.md`. Detailed boundaries: `docs/process/ARCHITECTURE.md`.
 
 When asked to explore:
 1. Use Glob/Grep to locate the relevant files, then Read the key excerpts.

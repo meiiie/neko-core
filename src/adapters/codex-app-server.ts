@@ -640,6 +640,14 @@ export function codexIsolationHome(
   }
   const fallback = joinForPlatform(home, platform, ".neko-core", "codex-home");
   if (!transportHomeInsideWorkspace(fallback, cwd, platform)) return fallback;
+  const normalizedHome = paths.resolve(home);
+  if (paths.relative(normalizedHome, paths.resolve(cwd)) === "" && paths.dirname(normalizedHome) !== normalizedHome) {
+    if (platform !== process.platform) return fallback;
+    try {
+      const expected = paths.join(canonicalNearestPath(home, platform), ".neko-core", "codex-home");
+      if (paths.relative(expected, canonicalNearestPath(fallback, platform)) === "") return fallback;
+    } catch { /* Unverifiable control directory remains denied. */ }
+  }
   throw new Error("Codex transport home must stay outside the workspace; set NEKO_CODEX_HOME to an absolute outside path");
 }
 

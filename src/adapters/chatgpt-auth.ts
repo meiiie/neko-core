@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 
 import { atomicWriteFileSync } from "../shared/atomic.ts";
-import { abortableDelay, requestSignal, throwIfAborted, userAbortError } from "../shared/abort.ts";
+import { abortable, abortableDelay, requestSignal, throwIfAborted, userAbortError } from "../shared/abort.ts";
 import { homeDir } from "../shared/home.ts";
 import { VERSION } from "../shared/version.ts";
 
@@ -117,7 +117,8 @@ function fromTokenResponse(tokens: TokenResponse, previousRefresh = ""): ChatGpt
 
 let refreshInFlight: Promise<ChatGptCredentials> | null = null;
 
-export async function validChatGptCredentials(fetchImpl: typeof fetch = fetch, issuer = CHATGPT_ISSUER, forceRefresh = false): Promise<ChatGptCredentials> {
+export async function validChatGptCredentials(fetchImpl: typeof fetch = fetch, issuer = CHATGPT_ISSUER, forceRefresh = false, signal?: AbortSignal): Promise<ChatGptCredentials> {
+  throwIfAborted(signal);
   const current = loadChatGptCredentials();
   if (!current) throw new Error("ChatGPT is not signed in. Run `neko login chatgpt`.");
   if (!forceRefresh && current.expiresAt > Date.now() + EXPIRY_MARGIN_MS) return current;
@@ -131,6 +132,7 @@ export async function validChatGptCredentials(fetchImpl: typeof fetch = fetch, i
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: current.refreshToken, client_id: CLIENT_ID }),
+        signal: requestSignal(undefined),
       });
       if (!response.ok) throw new Error(`ChatGPT token refresh failed (HTTP ${response.status}). Run \`neko login chatgpt\` again.`);
       // SAFETY: token endpoint JSON; the field checks that follow establish the contract.
@@ -140,7 +142,7 @@ export async function validChatGptCredentials(fetchImpl: typeof fetch = fetch, i
       return refreshed;
     })().finally(() => { refreshInFlight = null; });
   }
-  return refreshInFlight;
+  return abortable(refreshInFlight, signal);
 }
 
 function pkce() {

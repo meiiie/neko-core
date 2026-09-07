@@ -53,9 +53,23 @@ test("Codex transport home ignores relative and workspace overrides", () => {
     .toBe("C:\\transport\\codex-home");
   expect(codexIsolationHome(home, { NEKO_CODEX_HOME: "C:\\work\\project-sibling" }, "win32", workspace))
     .toBe("C:\\work\\project-sibling");
-  expect(() => codexIsolationHome(workspace, {}, "win32", workspace)).toThrow(/outside the workspace/);
+  expect(codexIsolationHome(home, {}, "win32", home)).toBe(fallback);
+  expect(() => codexIsolationHome(home, {}, "win32", `${home}\\.neko-core`)).toThrow(/outside the workspace/);
+  expect(() => codexIsolationHome("C:\\", {}, "win32", "C:\\")).toThrow(/outside the workspace/);
   expect(codexIsolationHome(workspace, { NEKO_CODEX_HOME: "C:\\transport\\codex-home" }, "win32", workspace))
     .toBe("C:\\transport\\codex-home");
+});
+
+test("home-directory startup allows only the canonical Neko control directory, not junction redirects", () => {
+  const home = mkdtempSync(join(tmpdir(), "neko-home-transport-"));
+  try {
+    const expected = join(home, ".neko-core", "codex-home");
+    expect(codexIsolationHome(home, {}, process.platform, home)).toBe(expected);
+    const project = join(home, "project");
+    mkdirSync(project);
+    symlinkSync(project, join(home, ".neko-core"), process.platform === "win32" ? "junction" : "dir");
+    expect(() => codexIsolationHome(home, {}, process.platform, home)).toThrow(/outside the workspace/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 test("Codex transport home rejects a missing path through a junction into the workspace", () => {

@@ -1,5 +1,9 @@
 # RESEARCH: Neko Core UX/UI & Micro-interactions — deep analysis (2026-07-07)
 
+> Historical research, not current implementation or performance measurements. Current
+> architecture is in [docs/HARNESS-ARCHITECTURE.md](docs/HARNESS-ARCHITECTURE.md);
+> use [the testing contract](docs/process/TESTING.md) for new before/after evidence.
+
 Multi-angle synthesis: (A) objective TUI benchmark data, (B) expert micro-interaction principles,
 (C) gap analysis against neko's current implementation. Goal: identify the highest-leverage, lowest-risk
 UX/perf improvements, grounded in measurement + expert consensus, not taste.

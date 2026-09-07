@@ -1,17 +1,15 @@
 ---
-description: Scan the working tree for secrets before any public push
+description: Scan release content for secrets before an authorized public push
 ---
 
-Before pushing Neko Core publicly, scan for leaked secrets and excluded artifacts
-(`docs/PORTING.md` "Hard exclusions"). Be thorough; report `file:line` for every hit,
-and if clean, say so explicitly.
+Use the canonical redacted scan in `docs/process/RELEASE.md`:
 
-1. Enumerate tracked files with `rtk git ls-files` (do NOT scan ignored/scratch dirs).
-2. Search those files for credential patterns:
-   - API keys/tokens: `nvapi-`, `sk-`, `AKIA`, `ghp_`, `xox[baprs]-`
-   - Inline keys: `api_key"\s*:\s*"[^"]+"`, `Authorization: Bearer `
-   - Private keys: `BEGIN [A-Z ]*PRIVATE KEY`
-3. Confirm none of these are tracked: `.env*`, `*.gguf`/`*.bin`/`*.safetensors`,
-   any `.neko-core/config.json`, `run-*/`, `output-*/`, `traces-*/`, finetune data/scripts,
-   or competition-only docs.
-4. Summarize: CLEAN or a list of findings to fix before pushing.
+1. `gitleaks git . --config .gitleaks.toml --redact`
+2. Pipe `git diff --no-ext-diff --unified=0` into
+   `gitleaks stdin --config .gitleaks.toml --redact`.
+3. Inspect the intended staged/new-file set too; unstaged diff alone misses new files.
+   Ensure auth stores, private data, and ignored dependency caches are not being published.
+
+Report only rule and `file:line`, never the matched credential. If gitleaks is unavailable,
+report the missing gate rather than treating a plain-text search as equivalent. Do not
+push while a finding is unresolved. The scan itself does not authorize publication.

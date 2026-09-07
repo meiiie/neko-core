@@ -1,56 +1,62 @@
-# Neko Core — working notes for Codex
+# Neko Core — repository instructions
 
-**Neko Core** is a local-first terminal coding agent (Codex / Codex-CLI class), built
-in **TypeScript + Bun + Ink**. Its engine/library is the package `neko-core`.
-The command is `neko`. Roadmap + history: `docs/process/ROADMAP.md`, `docs/process/WORKLOG.md`.
-Working rules: `docs/process/RULES.md`.
+Neko Core is a local-first coding agent: TypeScript + Bun + Ink, package `neko-core`,
+command `neko`. This file governs work on the repository; it does not select Neko's
+runtime model or grant its tools permissions.
 
-## Codebase map (`src/`, run by Bun)
+## Start and finish
 
-Ports & Adapters — dependencies point inward (`docs/process/ARCHITECTURE.md`,
-enforced by `test/architecture.test.ts`).
+- Read [working rules](docs/process/RULES.md) and [current state](docs/process/ROADMAP.md),
+  then only the subsystem documents needed for the task. [Docs index](docs/README.md).
+- Check `git status --short` and recent commits before editing. Preserve existing work.
+  Verify release claims against GitHub; a version string alone does not prove publication.
+- Follow the latest user request. Continue authorized work with reasonable assumptions;
+  ask when a missing choice changes scope, authority, or a major architectural decision.
+- Work solo unless the owner explicitly requests delegation. Batch independent reads
+  when useful; keep resource-heavy checks sequential on this workstation.
+- Define the observable outcome, make a focused change, verify it, and review the diff.
+  Report results and remaining blockers concisely in the user's language.
+- Skills guide execution within the task. Explicit user instructions take precedence
+  over skill guidelines, subject to system/developer constraints. Identify the exact
+  skill instruction if it causes a pause or change of direction.
 
-| Layer / Module | Role |
+## Where to work
+
+| Concern | Entry points |
 |---|---|
-| **`core/`** (pure domain) | |
-| `core/ports.ts` | The interfaces core depends on: `Provider` (LLM), `McpTools`, plus `ToolCall`/`ProviderResponse`/`DeltaHook`. |
-| `core/agent.ts` | The agent loop (`complete → tool_calls → observe`, `max_steps`) + cost; `compact()`; `appendSystem()`. |
-| `core/tools.ts` · `core/tool-runtime.ts` | Tool contracts (safe: read_file/search/glob/ls/todo_write · gated: write_file/edit/bash) + `describeToolCall` + executable `ToolRegistry`; path-escape refused. |
-| `core/permissions.ts` · `core/cost.ts` | Permission modes (default/accept-edits/plan/auto) · token usage. |
-| **`adapters/`** (edge) | |
-| `adapters/providers.ts` | `openai_compat` over `fetch`: SSE streaming, retry, abort (implements `Provider`). |
-| `adapters/config.ts` | Config-first loader: overlay (built-in → profile preset → `~/.neko-core` → `./.neko-core` → `NEKO_*`) + profiles. Key read on demand, never stored/printed. |
-| `adapters/mcp.ts` · `adapters/session.ts` · `adapters/context.ts` · `adapters/skills.ts` | MCP client · session persistence/resume · global identity + project context (NEKO.md/AGENTS.md) · `.md` skills. |
-| `adapters/registry.ts` · `adapters/doctor.ts` · `adapters/project.ts` | capabilities + `policy` audit · `doctor` diagnostics · `init` scaffolds. |
-| `adapters/tool-registry.ts` | Shared CLI/TUI/subagent composition for native web, skills, vision, sandbox and inherited safety boundaries. |
-| `adapters/office-tools.ts` · `adapters/office-support-pack.ts` | Typed, workspace-bounded Office tools + optional checksummed OfficeCLI support pack. |
-| `adapters/mcp-compose.ts` | Composes independent edge-tool sources behind the single `McpTools` port. |
-| **`shared/`** | `version.ts` (leaf). |
-| **`ui/`** | Ink REPL, split by concern: `chat.tsx` (lifecycle + turn loop + render), `commands.ts` (slash commands + `runSlashCommand`), `transcript.tsx` (line renderer), `select-list.tsx` (reusable picker), `thinking-line.tsx`, `approval-box.tsx`, `markdown.tsx`, `highlight.tsx`, `logo.tsx`, `text-input.tsx`, `format.ts`. |
-| `bin/neko-source.cjs` · `bin/neko.ts` | Safe Node source bootstrap · internal Bun CLI entry. |
-| `reference/python/` | The Python **spec/reference** (original port). Not shipped; read it, don't depend on it. |
+| Loop, tools, authority | `src/core/agent.ts`, `ports.ts`, `tools.ts`, `tool-runtime.ts`, `permissions.ts` |
+| Runtime, profiles, transport | `src/adapters/agent-runtime.ts`, `tool-registry.ts`, `config.ts`, `providers.ts` |
+| Completion experiments | `src/adapters/completion-supervisor.ts`, [evaluation policy](docs/process/EVALUATION.md) |
+| Sessions, clients, Wiii | `src/adapters/session.ts`, `acp.ts`, `acp-computer.ts`, [ACP](docs/process/ACP.md) |
+| Terminal | `src/ui/`, `bin/neko-source.cjs`, `bin/neko.ts` |
+| Delivery | `src/adapters/update.ts`, `install.ps1`, `install.sh`, `.github/workflows/` |
 
-## Critical gotchas
+See [harness architecture](docs/HARNESS-ARCHITECTURE.md) for context, persistence,
+extension seams, and lifecycle. Dependencies point inward; core must not import adapters/UI.
 
-- **`bang_c` is FROZEN** (sibling `E:\Sach\Sua\bang_c`). Read to learn; never edit.
-- **Clean-room only.** The local `Codex` tree is studied for patterns/UX, **never copied**
-  into this public repo. Learn ideas ✅, copy proprietary code ❌.
-- **Reference clones** live in `../neko-refs/` (sibling, untracked — e.g. Goose). Study them
-  clean-room for ideas; never copy code in.
-- **Secrets never committed/printed.** Key via env (`NEKO_API_KEY` / `OPENAI_API_KEY` /
-  `NVIDIA_API_KEY`) or gitignored `~/.neko-core/config.json`. Run `/secret-scan` before any push.
-- **Config-first.** A new model/endpoint is a profile, not a code change.
-- **Windows console is cp1252.** Keep *printed* strings ASCII (an em-dash mojibakes).
-- **Auto-by-default, consequence-gated.** The default permission mode is `auto` (bounded autonomy, matching 2026 industry practice); only consequential surfaces ask - host `computer` control, the policy file itself, catastrophic shell (seatbelt), credential paths, and anything outside the workspace. Modes remain a *named* state (Shift+Tab).
+## Non-negotiables
 
-## Verify loop
+- `E:\Sach\Sua\bang_c` is frozen. Reference clones in `../neko-refs/` and `reference/python/`
+  are study material. Never copy proprietary implementation into this public repo.
+- Keep secrets out of prompts, transcripts, logs, commits, and reports. The redacted
+  pre-push scan is specified in [RELEASE.md](docs/process/RELEASE.md).
+- Prefer config profiles for compatible endpoints; new protocols belong in adapters.
+- Normal Neko uses host Bash by default. Explicit sandboxing must fail closed. Keep
+  permission modes, structured-file bounds, ACP host isolation, and secret/seatbelt
+  checks intact; [SANDBOX.md](docs/process/SANDBOX.md) defines their distinct scopes.
+- Preserve the founding principle in [SOVEREIGNTY.md](docs/process/SOVEREIGNTY.md).
+- ProgramBench is paused until the owner explicitly resumes it. Never launch a paid
+  campaign or `scripts/self-improve.ts` as routine verification. Preserve frozen evidence.
 
-```bash
-rtk bun run typecheck          # tsc --noEmit
-rtk bun test                   # the test suite
-rtk node bin/neko-source.cjs doctor # resolved provider/model/key (no model call)
-rtk node bin/neko-source.cjs policy # safe/gated boundary audit
-rtk bun run build                  # bun build --compile -> dist/neko (single binary)
-```
+## Verification
 
-(Prefix shell commands with `rtk` per the global RTK rule.)
+Use `rtk` if available; otherwise run the underlying command directly. Read/write docs
+as UTF-8. Follow [TESTING.md](docs/process/TESTING.md) for the check scope:
+docs-only changes need link/path checks, stale-guidance review, and `git diff --check`;
+behavior changes need relevant regressions; releases require the complete gate.
+Once sufficient checks pass, repeat or broaden only for new changes or unresolved risk.
+
+Full gate: `bun run typecheck`, `bun run lint`, `bun test`,
+`node bin/neko-source.cjs doctor`, `node bin/neko-source.cjs policy`, `bun run build`.
+Use the Bun version pinned in CI. Do not substitute the frozen Python reference tests.
+Commit/push/release only within the user's requested scope; follow [RELEASE.md](docs/process/RELEASE.md).

@@ -15,9 +15,12 @@ import { hitIndexAt } from "./hit-targets.ts";
 import { isInteractiveBrowserRequest, runSlashCommand, SLASH } from "./commands.ts";
 import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { loadPrefs, savePrefs } from "../adapters/prefs.ts";
+import { feedbackSessionLog } from "../adapters/feedback.ts";
+import { sendFeedback } from "../adapters/feedback-delivery.ts";
 import { clampFps, detectRefreshRate, resolveUiFps } from "../adapters/display.ts";
 import { Markdown } from "./markdown.tsx";
 import { SelectList, type Overlay } from "./select-list.tsx";
+import { TextPrompt } from "./text-prompt.tsx";
 import { TranscriptViewer } from "./transcript-viewer.tsx";
 import { isEscapeResidue, MAX_INPUT_LINES, TextInput } from "./text-input.tsx";
 import { openExternalEditor } from "./external-editor.ts";
@@ -220,6 +223,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const multilineRef = useRef("");
   const queueRef = useRef<string[]>([]);
   const controllerRef = useRef<AbortController | null>(null);
+  const feedbackRequestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { feedbackRequestRef.current?.abort(); feedbackRequestRef.current = null; }, []);
   const verbRef = useRef(VERBS[0]); // playful "thinking" verb, repicked each turn
   const startRef = useRef(0);
   const resumedRef = useRef<Session | null>(resumedSession ?? (resume ? latestSession(process.cwd()) : null));
@@ -425,6 +430,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const pinnedTitleRef = useRef(resumedSession?.title ?? ""); // full persisted /title; tab text stays truncated separately
   const altDisposeRef = useRef<null | (() => void)>(preAltDispose ?? null); // alt-screen teardown (adopts runChat's pre-render guard)
   const [viewer, setViewer] = useState<Line[] | null>(null); // /transcript: full-thread scroll+search viewer
+  const feedbackPreviewCloseRef = useRef<(() => void) | null>(null);
   const [search, setSearch] = useState<{ q: string; matches: number[]; idx: number } | null>(null); // fullscreen in-viewport find
   const [compacting, setCompacting] = useState<{ start: number } | null>(null); // shows the compacting progress bar
   const compactingRef = useRef(false); // guard: never overlap two compactions
@@ -2267,6 +2273,41 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         },
         nextId: () => idRef.current++,
         setOverlay,
+        feedbackLog: () => [
+          ...feedbackSessionLog(agentRef.current!.messages),
+          ...lines.filter((line) => line.kind === "error" || line.kind === "info"),
+        ],
+        previewFeedback: (text, onClose) => {
+          setViewer(text.split("\n").map((line) => ({ id: idRef.current++, kind: "info", text: line })));
+          feedbackPreviewCloseRef.current = onClose;
+        },
+        submitFeedback: async (report, savedPath) => {
+          if (busyRef.current) { addLine("info", `Feedback NOT sent: another operation is active. Local copy: ${savedPath}`); return; }
+          const controller = new AbortController();
+          feedbackRequestRef.current = controller;
+          controllerRef.current = controller;
+          busyRef.current = true;
+          setBusy(true);
+          addLine("info", "Sending reviewed feedback... Esc cancels waiting; an uploaded report may still be delivered.");
+          try {
+            const outcome = await sendFeedback(report, controller.signal);
+            if (feedbackRequestRef.current !== controller) return;
+            const status = outcome === "accepted" ? "Feedback accepted by the email service. Inbox delivery is not independently confirmed."
+              : outcome === "rejected" || outcome === "not_sent" ? "Feedback was not accepted for sending. You can attach the saved report manually."
+              : "Feedback delivery is unconfirmed. It may still arrive; do not resend automatically.";
+            addLine("info", `${status}\nReport: ${report.reportId}\nLocal copy: ${savedPath}`);
+          } finally {
+            if (controllerRef.current === controller) controllerRef.current = null;
+            if (feedbackRequestRef.current === controller) {
+              feedbackRequestRef.current = null;
+              busyRef.current = false;
+              setBusy(false);
+              const next = queueRef.current.shift();
+              setQueued(queueRef.current.length);
+              if (next !== undefined) void handle(next).catch((error) => addLine("error", error instanceof Error ? error.message : String(error)));
+            }
+          }
+        },
         setBusy,
         setQueued,
         resumeInto,
@@ -3352,9 +3393,17 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       ) : null}
 
       {viewer ? (
-        <TranscriptViewer lines={viewer} cols={contentCols} rows={rows} onClose={() => setViewer(null)} />
+        <TranscriptViewer lines={viewer} cols={contentCols} rows={rows}
+          title={feedbackPreviewCloseRef.current ? "Feedback attachment" : undefined}
+          unabridged={Boolean(feedbackPreviewCloseRef.current)} onClose={() => {
+          setViewer(null);
+          const after = feedbackPreviewCloseRef.current;
+          feedbackPreviewCloseRef.current = null;
+          after?.();
+        }} />
       ) : overlay ? (
-        <SelectList
+        overlay.textInput ? <TextPrompt key={overlay.title} title={overlay.title} description={overlay.description}
+          options={overlay.textInput} cols={contentCols} onCancel={() => { setOverlay(null); overlay.onCancel?.(); }} /> : <SelectList
           key={overlay.title}
           title={overlay.title}
           description={overlay.description}

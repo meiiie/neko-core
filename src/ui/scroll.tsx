@@ -74,19 +74,19 @@ export function stickyPromptAnchor(
 
 /** Flatten Lines into fixed-width display rows: wrap long lines, clip a noisy entry to a few rows with a
  * "+N more" marker, blank separator between entries. Uniform rows -> trivial windowed scroll. */
-export function flattenLines(lines: Line[], width: number): Row[] {
+export function flattenLines(lines: Line[], width: number, unabridged = false): Row[] {
   const rows: Row[] = [];
   for (const l of lines) {
     if (l.kind === "welcome") continue;
     const { glyph, color, background, dim } = styleFor(l.kind);
-    const body = l.kind === "tool_result" && l.summary ? l.summary : l.text;
+    const body = !unabridged && l.kind === "tool_result" && l.summary ? l.summary : l.text;
     const wrap = Math.max(8, width - glyph.length);
     const segs: string[] = [];
     for (const raw of String(body).split("\n")) {
       if (!raw.length) { segs.push(""); continue; }
       for (let i = 0; i < raw.length; i += wrap) segs.push(raw.slice(i, i + wrap));
     }
-    const clip = l.kind === "user" || l.kind === "assistant" ? 12 : 4;
+    const clip = unabridged ? Number.POSITIVE_INFINITY : l.kind === "user" || l.kind === "assistant" ? 12 : 4;
     const shown = segs.slice(0, clip);
     shown.forEach((s, i) => rows.push({ text: (i === 0 ? glyph : " ".repeat(glyph.length)) + s, color, background, dim }));
     if (segs.length > clip) rows.push({ text: " ".repeat(glyph.length) + `… +${segs.length - clip} more lines`, color: "gray", dim: true });

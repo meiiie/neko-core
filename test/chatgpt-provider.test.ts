@@ -1,14 +1,15 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
-import { HybridChatGptProvider } from "../src/adapters/chatgpt-app-server-provider.ts";
+import { ChatGptAppServerProvider, HybridChatGptProvider } from "../src/adapters/chatgpt-app-server-provider.ts";
 import { CHATGPT_CODEX_COMPAT_VERSION, ChatGptProvider, getChatGptUsage, isDirectChatGptModel, listChatGptModelCatalog, listChatGptModels, parseResponsesStream, RESPONSES_STREAM_LIMITS, resolveChatGptEffort, toResponsesInput, toResponsesTools } from "../src/adapters/chatgpt-provider.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
 import { getProvider, listModelOptions, listModels } from "../src/adapters/providers.ts";
 import { ProviderAttemptError } from "../src/core/ports.ts";
+import { chatGptCatalogClientVersion, chatGptMinimumCodexVersion, needsCodexTransport, rememberChatGptCatalog, resolveChatGptModelInfo, type ChatGptModelInfo } from "../src/adapters/chatgpt-provider.ts";
 
 const originalFetch = globalThis.fetch;
 const oldHome = process.env.HOME;
@@ -297,21 +298,76 @@ test("ChatGPT model picker uses the live account catalog and hides non-list mode
   expect(account).toBe("acct-1");
 });
 
-test("live model options expose GPT-5.6 for the optional App Server route", async () => {
+test("live model options expose GPT-5.6 and Astra with account metadata and optional App Server", async () => {
   const cfg = setup();
   // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) => Response.json({ models: [
     { slug: "gpt-5.6-luna", display_name: "GPT-5.6-Luna", visibility: "list", use_responses_lite: true, tool_mode: "code_mode_only", input_modalities: ["text", "image"] },
     { slug: "gpt-5.5", display_name: "GPT-5.5", visibility: "list", use_responses_lite: false, input_modalities: ["text", "image"] },
+    { slug: "gpt-6-astra", display_name: "GPT-6 Astra", visibility: "list", use_responses_lite: true, tool_mode: "code_mode_only", context_window: 1050000, supported_reasoning_levels: [{ effort: "max" }], input_modalities: ["text", "image"] },
+    { slug: "future-native-model", visibility: "list", tool_mode: "code_mode_only", minimal_client_version: "0.200.0" },
   ] })) as typeof fetch;
-  const withSupport = await listModelOptions(cfg, { state: "ready", detail: "path 0.144.1" });
-  expect(withSupport.map((model) => model.id)).toEqual(["gpt-5.6-luna", "gpt-5.5"]);
+  const withSupport = await listModelOptions(cfg, { state: "ready", detail: "path 0.153.4", executable: { path: "/trusted/codex", kind: "cli", source: "path", version: "0.153.4" } });
+  expect(withSupport.map((model) => model.id)).toEqual(["gpt-5.6-luna", "gpt-5.5", "gpt-6-astra", "future-native-model"]);
+  expect(withSupport.find((model) => model.id === "future-native-model")?.available).toBe(false);
+  const newer = await listModelOptions(cfg, { state: "ready", detail: "ready", executable: { path: "/trusted/codex", kind: "cli", source: "path", version: "0.200.0" } });
+  expect(newer.find((model) => model.id === "future-native-model")?.available).toBe(true);
+  expect(withSupport.find((model) => model.id === "gpt-6-astra")).toMatchObject({ contextWindow: 1050000, efforts: [{ effort: "max", description: "" }], vision: true, requiresCodexSupport: true });
+  expect(withSupport.find((model) => model.id === "gpt-6-astra")?.available).toBe(true);
+  const oldSupport = await listModelOptions(cfg, { state: "ready", detail: "path 0.145.0", executable: { path: "/trusted/codex", kind: "cli", source: "path", version: "0.145.0" } });
+  expect(oldSupport.find((model) => model.id === "gpt-6-astra")?.available).toBe(false);
+  expect(oldSupport.find((model) => model.id === "gpt-5.6-luna")?.available).toBe(true);
   const withoutSupport = await listModelOptions(cfg, { state: "missing", detail: "not installed" });
   expect(withoutSupport.find((model) => model.id === "gpt-5.6-luna")).toMatchObject({
     requiresCodexSupport: true,
     available: false,
   });
   expect(withoutSupport.find((model) => model.id === "gpt-5.5")?.available).toBe(true);
+  expect(withoutSupport.find((model) => model.id === "gpt-6-astra")?.available).toBe(false);
+});
+
+test("an unseen native model routes by catalog metadata and a live direct declaration overrides a legacy name", async () => {
+  const cfg = setup();
+  const native: ChatGptModelInfo = { slug: "unseen-native", displayName: "Future", description: "", defaultEffort: "medium", efforts: [], inputModalities: ["text"], useResponsesLite: true, minimalClientVersion: "0.200.0" };
+  const direct = { ...native, slug: "gpt-6-astra", useResponsesLite: false };
+  rememberChatGptCatalog(cfg, [native, direct]);
+  expect(needsCodexTransport(native.slug, native)).toBe(true);
+  expect(needsCodexTransport(direct.slug, direct)).toBe(false);
+  expect(chatGptMinimumCodexVersion(native.slug, native)).toBe("0.200.0");
+  expect(chatGptCatalogClientVersion("0.200.0")).toBe("0.200.0");
+  expect(chatGptCatalogClientVersion("0.100.0")).toBe(CHATGPT_CODEX_COMPAT_VERSION);
+  const bridge = spyOn(ChatGptAppServerProvider.prototype, "complete").mockResolvedValue({ content: "native", tool_calls: [] });
+  const hybrid = new HybridChatGptProvider(cfg, { complete: async () => ({ content: "direct", tool_calls: [] }) });
+  try {
+    cfg.data.model = native.slug;
+    expect((await hybrid.complete([{ role: "user", content: "hi" }])).content).toBe("native");
+    expect(bridge.mock.calls[0][5]).toEqual(native);
+    cfg.data.model = direct.slug;
+    expect((await hybrid.complete([{ role: "user", content: "hi" }])).content).toBe("direct");
+    expect(bridge).toHaveBeenCalledTimes(1);
+  } finally { await hybrid.dispose(); bridge.mockRestore(); }
+});
+
+test("catalog state does not survive an account change and cancellation interrupts catalog discovery", async () => {
+  const cfg = setup();
+  cfg.data.model = "unseen-native";
+  rememberChatGptCatalog(cfg, [{ slug: cfg.model, displayName: "Old account", description: "", defaultEffort: "", efforts: [], inputModalities: [], useResponsesLite: true }]);
+  saveChatGptCredentials({ accessToken: "access", refreshToken: "refresh", expiresAt: Date.now() + 3_600_000, accountId: "acct-2" });
+  globalThis.fetch = Object.assign(async (_input: string | URL | Request, init?: RequestInit) => {
+    expect(new Headers(init?.headers).get("ChatGPT-Account-Id")).toBe("acct-2");
+    return Response.json({ models: [] });
+  }, { preconnect: originalFetch.preconnect });
+  expect(await resolveChatGptModelInfo(cfg)).toBeUndefined();
+  expect(await listModelOptions(cfg)).toEqual([]);
+  const next = new NekoConfig({ provider: "chatgpt", model: "unknown" }, "chatgpt", {}, "");
+  globalThis.fetch = Object.assign(async (_input: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true });
+  }), { preconnect: originalFetch.preconnect });
+  const controller = new AbortController();
+  const pending = resolveChatGptModelInfo(next, controller.signal);
+  await Bun.sleep(1);
+  controller.abort();
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" });
 });
 
 test("the direct adapter still self-heals an accidental 5.6 request instead of spoofing Codex", async () => {

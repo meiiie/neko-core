@@ -1,12 +1,14 @@
 # Neko Core — Working Rules
 
-Conventions for anyone (human or AI) developing Neko Core. Complements the lean
-`CLAUDE.md`; this file is the fuller "how we work" record. See `WORKLOG.md` for the
-running journal of what was done and why.
+Conventions for anyone (human or AI) developing Neko Core. Start at
+[AGENTS.md](../../AGENTS.md); `CLAUDE.md` points to the same instructions.
+Current state lives in [ROADMAP.md](ROADMAP.md), engineering history in
+[WORKLOG.md](WORKLOG.md), and benchmark evidence in [EVALUATION.md](EVALUATION.md).
 
 ## Process
-- **Solo, no subagents.** Do the work directly and proactively — do **not** delegate to
-  subagents or background workflows. (Owner, 2026-06-22.)
+- **Solo by default.** Do the work directly unless the owner explicitly requests
+  delegation. Background commands are allowed within scope; an autonomous campaign
+  requires separate owner direction.
 - **Run + commit incrementally.** One logical change per commit, a clear message, and
   verify *before* committing.
 - **Ask before large architecture decisions.** Surface the tradeoffs; never pick silently
@@ -18,8 +20,11 @@ running journal of what was done and why.
 ## Product & code
 - **Config-first.** Behaviour lives in config (`DEFAULTS` + profiles + overlays), not code.
   A new model/endpoint is a profile, not a code change.
-- **Provider-agnostic, auto-by-default (owner, 2026-08-17).** The default mode is `auto` - bounded autonomy out of the box, matching the 2026 industry shift (Claude Code ships auto-default). Only consequential surfaces ask: host computer control, the policy file, catastrophic shell, credential paths, outside-workspace targets. Set `"mode": "default"` in config to restore the classic prompt-first posture. `--yolo`
-  (`approval=auto`) is a *named* bounded-autonomous state, audited by `neko policy`.
+- **Provider-agnostic, auto-by-default.** The default mode is `auto`. Ordinary auto
+  still asks for host Computer control; explicit `--yolo` pre-authorizes approval
+  prompts while auto remains active. Hard denials and host-profile restrictions
+  remain independent. `plan` is read-only. Set `"mode": "default"` for prompt-first
+  behavior. Read [SANDBOX.md](SANDBOX.md) before changing these boundaries.
 - **Bash-first host routing (owner, 2026-09-04).** Ordinary `neko` and `neko --yolo` run Bash on the same host
   and identity as Neko, with hidden Windows child consoles and explicit background-process support. Computer Use
   is GUI-only and never a shell fallback. `sandbox: true` is an explicit fail-closed containment policy; it must
@@ -34,8 +39,8 @@ running journal of what was done and why.
   `ApprovalGate`) — **never** on `ui/` or a UI framework. Enforced by `test/architecture.test.ts`.
 - **Adapters at the edge.** Anything that touches the outside world (HTTP, MCP, disk, config)
   is an adapter; swap a backend by adding an adapter, not by editing the core.
-- **Extend by the seams.** New tool → `tools.ts` + `tool-runtime.ts`. New backend → a profile
-  (config) or a new `Provider`. New command → a `case` in `chat.tsx`. New skill → a `.md` file.
+- **Extend by the seams.** Use [EXTENDING.md](../EXTENDING.md) and the relevant runtime
+  composition path. Do not bypass the tool registry from a provider, client, or UI.
 
 ## Code laws
 - **Clean code, lazy by default (ponytail).** Stop at the first rung that works; no
@@ -45,10 +50,11 @@ running journal of what was done and why.
   surrounding style; don't reformat untouched code.
 - **TypeScript stays strict** (`tsc --noEmit` clean — no `any` leaks at boundaries, no `// @ts-ignore`
   without a reason).
-- **Validate at trust boundaries; never swallow data-loss errors.** Tool args, config JSON, API
-  responses, and path-escapes are checked; secrets are read on demand, never stored/printed.
-- **One runnable check per non-trivial logic** (a branch, loop, parser, money/security/abort
-  path). Trivial one-liners need none.
+- **Validate at trust boundaries; never swallow data-loss errors.** Tool args, config JSON,
+  API responses, and path escapes are checked. Credentials may persist in their dedicated
+  local auth/config stores; never copy them into logs, project docs, or model context.
+- **Test behavior and boundaries.** A test should catch a distinct regression, not mirror
+  an implementation. Verification scope is defined in [TESTING.md](TESTING.md).
 
 ## Founding principle (permanent — never remove)
 - **Vietnam sovereignty.** Neko Core is a Vietnamese product and respects Vietnam's sovereignty:
@@ -61,14 +67,18 @@ running journal of what was done and why.
 
 ## Safety
 - **Secrets never committed or printed.** Key via env (`NEKO_API_KEY` / `OPENAI_API_KEY` /
-  `NVIDIA_API_KEY`) or the gitignored `~/.neko-core/config.json`. Run `/secret-scan` before
-  any public push; push public only with owner sign-off.
-- **Windows console is cp1252.** Keep *printed* strings ASCII (an em-dash mojibakes to `?`).
+  `NVIDIA_API_KEY`) or the gitignored `~/.neko-core/config.json`. Use the redacted
+  gitleaks commands in [RELEASE.md](RELEASE.md) before an authorized public push.
+- **Windows encoding.** Read and write source/docs as UTF-8. Keep plain CLI diagnostics
+  ASCII-compatible where required by legacy consoles; preserve the TUI's Unicode and
+  natural Vietnamese. Do not assume every Windows terminal uses one code page.
 
 ## Tooling
-- Prefix shell commands with `rtk` (the token-saving wrapper).
-- Verify loop (before every commit): `bun run typecheck` · `bun test` · `node bin/neko-source.cjs doctor`
-  · `node bin/neko-source.cjs policy` · `bun run build`.
+- Use `rtk` when installed; fall back to the direct command when unavailable.
+- Use [TESTING.md](TESTING.md) for scoped checks and the full gate. Do not run heavy
+  suites in parallel, paid benchmarks, or the legacy self-improve runner for doc edits.
+- Resolve contradictory working instructions instead of appending another exception.
+  Keep reusable rules here, current status in ROADMAP, and dated research non-normative.
 
 ## Releasing
 - Follow `docs/process/RELEASE.md` — gates, docs, tag-watch-verify, curated notes, the re-tag

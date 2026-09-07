@@ -4,18 +4,30 @@ import { randomUUID } from "node:crypto";
 import type { Usage } from "../core/cost.ts";
 import { ProviderAttemptError, type CompleteOptions, type DeltaHook, type Provider, type ProviderResponse, type ToolCall } from "../core/ports.ts";
 import { VERSION } from "../shared/version.ts";
+import { requestSignal, throwIfAborted } from "../shared/abort.ts";
 import { isJsonObject, isObjectValue, isText, type JsonValue } from "../shared/wire.ts";
-import type { NekoConfig } from "./config.ts";
+import { DEFAULTS, type NekoConfig } from "./config.ts";
 import { providerScope } from "./provider-scope.ts";
 import { effortLevelsFromError, requestEffort, resolveEffort } from "./effort.ts";
 import { setModel } from "./project.ts";
-import { CHATGPT_CODEX_MODELS_URL, CHATGPT_CODEX_RESPONSES_URL, CHATGPT_CODEX_USAGE_URL, validChatGptCredentials } from "./chatgpt-auth.ts";
+import { compareCodexVersions, discoverCodexSupport } from "./codex-app-server.ts";
+import { CHATGPT_CODEX_MODELS_URL, CHATGPT_CODEX_RESPONSES_URL, CHATGPT_CODEX_USAGE_URL, loadChatGptCredentials, validChatGptCredentials } from "./chatgpt-auth.ts";
 
 const RETRYABLE = new Set([429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
 
 // The models endpoint filters entries by Codex client compatibility, not by Neko's app version.
 // Bump this only after checking the current Codex Responses/model contract remains supported here.
-export const CHATGPT_CODEX_COMPAT_VERSION = "0.144.0";
+export const CHATGPT_CODEX_COMPAT_VERSION = "0.153.4";
+
+export function needsCodexTransport(model: string, info?: ChatGptModelInfo): boolean {
+  if (info) return !isDirectChatGptModel(info);
+  return model.startsWith("gpt-5.6-") || model === "gpt-6-astra";
+}
+
+export function chatGptMinimumCodexVersion(model: string, info?: ChatGptModelInfo): string {
+  if (info?.minimalClientVersion) return info.minimalClientVersion;
+  return model.startsWith("gpt-5.6-") ? "0.144.0" : CHATGPT_CODEX_COMPAT_VERSION;
+}
 
 export interface ChatGptModelInfo {
   slug: string;
@@ -41,6 +53,36 @@ export function isDirectChatGptModel(model: Pick<ChatGptModelInfo, "useResponses
   return !model.useResponsesLite && model.toolMode !== "code_mode_only";
 }
 
+interface CatalogSnapshot { credential: string | undefined; accountId: string | undefined; expiresAt: number; models: ChatGptModelInfo[] }
+const accountCatalogs = new WeakMap<NekoConfig, CatalogSnapshot>();
+
+export function rememberChatGptCatalog(cfg: NekoConfig, models: ChatGptModelInfo[]): void {
+  const credentials = loadChatGptCredentials();
+  accountCatalogs.set(cfg, { credential: credentials?.accessToken, accountId: credentials?.accountId, expiresAt: Date.now() + 300_000, models });
+}
+
+export function chatGptCatalogClientVersion(installed = discoverCodexSupport().executable?.version): string {
+  return installed && compareCodexVersions(installed, CHATGPT_CODEX_COMPAT_VERSION) > 0 ? installed : CHATGPT_CODEX_COMPAT_VERSION;
+}
+
+export async function resolveChatGptModelInfo(cfg: NekoConfig, signal?: AbortSignal): Promise<ChatGptModelInfo | undefined> {
+  throwIfAborted(signal);
+  const cached = accountCatalogs.get(cfg);
+  const credentials = loadChatGptCredentials();
+  if (cached && cached.expiresAt > Date.now() && cached.credential === credentials?.accessToken && cached.accountId === credentials?.accountId) {
+    return cached.models.find((model) => model.slug === cfg.model);
+  }
+  if (DEFAULTS.profiles.chatgpt.models.includes(cfg.model)) return undefined;
+  try {
+    const models = await listChatGptModelCatalog(fetch, signal, chatGptCatalogClientVersion());
+    rememberChatGptCatalog(cfg, models);
+    return models.find((model) => model.slug === cfg.model);
+  } catch {
+    throwIfAborted(signal);
+    return undefined;
+  }
+}
+
 export interface ChatGptUsageWindow {
   usedPercent: number;
   windowSeconds: number;
@@ -64,11 +106,11 @@ export interface ChatGptUsageReport {
 }
 
 /** Fetch the account-aware Codex catalog including model-specific effort and context metadata. */
-export async function listChatGptModelCatalog(fetchImpl: typeof fetch = fetch): Promise<ChatGptModelInfo[]> {
+export async function listChatGptModelCatalog(fetchImpl: typeof fetch = fetch, signal?: AbortSignal, clientVersion = CHATGPT_CODEX_COMPAT_VERSION): Promise<ChatGptModelInfo[]> {
   const url = new URL(CHATGPT_CODEX_MODELS_URL);
-  url.searchParams.set("client_version", CHATGPT_CODEX_COMPAT_VERSION);
+  url.searchParams.set("client_version", clientVersion);
   // SAFETY: fetched catalog JSON; the models array shape is validated immediately below.
-  const data = await chatGptGetJson(url, "model catalog", fetchImpl) as { models?: any[] };
+  const data = await chatGptGetJson(url, "model catalog", fetchImpl, signal) as { models?: any[] };
   if (!Array.isArray(data.models)) throw new Error("ChatGPT model catalog returned an invalid response");
   const seen = new Set<string>();
   const models: ChatGptModelInfo[] = [];
@@ -97,7 +139,7 @@ export async function listChatGptModelCatalog(fetchImpl: typeof fetch = fetch): 
       inputModalities,
       useResponsesLite: raw?.use_responses_lite === true,
       toolMode: isText(raw?.tool_mode) ? raw.tool_mode : undefined,
-      minimalClientVersion: isText(raw?.minimal_client_version) ? raw.minimal_client_version : undefined,
+      minimalClientVersion: isText(raw?.minimal_client_version) && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(raw.minimal_client_version) ? raw.minimal_client_version : undefined,
     });
   }
   return models;
@@ -146,10 +188,11 @@ export async function getChatGptUsage(fetchImpl: typeof fetch = fetch): Promise<
   };
 }
 
-async function chatGptGetJson(url: string | URL, label: string, fetchImpl: typeof fetch): Promise<JsonValue> {
+async function chatGptGetJson(url: string | URL, label: string, fetchImpl: typeof fetch, signal?: AbortSignal): Promise<JsonValue> {
   let forceRefresh = false;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const credentials = await validChatGptCredentials(fetchImpl, undefined, forceRefresh);
+    throwIfAborted(signal);
+    const credentials = await validChatGptCredentials(fetchImpl, undefined, forceRefresh, signal);
     const headers: any = {
       Authorization: `Bearer ${credentials.accessToken}`,
       Accept: "application/json",
@@ -157,7 +200,7 @@ async function chatGptGetJson(url: string | URL, label: string, fetchImpl: typeo
       "User-Agent": `neko-core/${VERSION}`,
     };
     if (credentials.accountId) headers["ChatGPT-Account-Id"] = credentials.accountId;
-    const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(15_000) });
+    const response = await fetchImpl(url, { headers, signal: requestSignal(signal, 15_000) });
     if (response.status === 401 && attempt === 0) { forceRefresh = true; continue; }
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -193,14 +236,11 @@ export class ChatGptProvider implements Provider {
     const configuredEffort = requestEffort(this.cfg.effort, opts?.reasoningEffort);
     const effortNeedsCatalog = Boolean(configuredEffort && configuredEffort !== "off"
       && !["low", "medium", "high", "xhigh"].includes(configuredEffort));
-    // 5.6 is currently returned in the account catalog but gated to the official Codex identity.
-    // Recover old saved selections before spending a request on a guaranteed 404. The live picker
-    // filters these entries, so this path is primarily a migration for existing configurations.
-    if (modelId.startsWith("gpt-5.6-") || effortNeedsCatalog) {
+    if (needsCodexTransport(modelId) || effortNeedsCatalog) {
       this.catalog ??= listChatGptModelCatalog().catch(() => []);
       const catalog = await this.catalog;
       modelInfo = catalog.find((candidate) => candidate.slug === modelId);
-      if ((modelInfo && !isDirectChatGptModel(modelInfo)) || (!modelInfo && modelId.startsWith("gpt-5.6-"))) {
+      if ((modelInfo && !isDirectChatGptModel(modelInfo)) || (!modelInfo && needsCodexTransport(modelId))) {
         const fallback = catalog.find((candidate) => candidate.slug === "gpt-5.5" && isDirectChatGptModel(candidate))
           ?? catalog.find(isDirectChatGptModel)
           ?? fallbackDirectModel("gpt-5.5");

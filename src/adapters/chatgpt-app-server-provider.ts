@@ -1,4 +1,4 @@
-/** GPT-5.6 ChatGPT subscription transport through the official local Codex App Server. */
+/** ChatGPT subscription transport through the official local Codex App Server. */
 import { writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 
@@ -8,9 +8,10 @@ import type { NekoConfig } from "./config.ts";
 import { requestEffort } from "./effort.ts";
 import { isText, type JsonValue } from "../shared/wire.ts";
 import { validChatGptCredentials } from "./chatgpt-auth.ts";
-import { toResponsesInput } from "./chatgpt-provider.ts";
+import { chatGptMinimumCodexVersion, needsCodexTransport, resolveChatGptModelInfo, toResponsesInput, type ChatGptModelInfo } from "./chatgpt-provider.ts";
 import {
   discoverCodexSupport,
+  compareCodexVersions,
   codexIsolationHome,
   encodeCodexDynamicTools,
   startCodexAppServer,
@@ -55,8 +56,8 @@ function defaultClientFactory(handlers: CodexAppServerHandlers): RpcClient {
   const status = discoverCodexSupport();
   if (status.state !== "ready" || !status.executable) {
     throw new Error(
-      `GPT-5.6 needs the optional Codex support component (${status.detail}). ` +
-      "Install Codex CLI >= 0.144.0 or the Neko GPT-5.6 Support Pack; GPT-5.5 and other providers still work without it.",
+      `This ChatGPT model needs the optional Codex support component (${status.detail}). ` +
+      "Use /support chatgpt install; GPT-5.5 and other providers still work without it.",
     );
   }
   return startCodexAppServer(status.executable, handlers);
@@ -85,10 +86,16 @@ export class ChatGptAppServerProvider implements Provider {
     onDelta?: DeltaHook,
     signal?: AbortSignal,
     opts: CompleteOptions = {},
+    modelInfo?: ChatGptModelInfo,
   ): Promise<ProviderResponse> {
     if (this.active) throw new Error("Codex App Server already has an active turn");
     if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
-    if (!this.cfg.model.startsWith("gpt-5.6-")) throw new Error(`Codex App Server route is not required for ${this.cfg.model}`);
+    if (!needsCodexTransport(this.cfg.model, modelInfo)) throw new Error(`Codex App Server route is not required for ${this.cfg.model}`);
+    const minimumVersion = chatGptMinimumCodexVersion(this.cfg.model, modelInfo);
+    if (this.clientFactory === defaultClientFactory &&
+        compareCodexVersions(discoverCodexSupport().executable?.version ?? "0.0.0", minimumVersion) < 0) {
+      throw new Error(`${this.cfg.model} needs Codex >= ${minimumVersion}. Run /support chatgpt update; your current login is kept.`);
+    }
     if (tools.length && !opts.executeTool) throw new Error("Codex App Server tools need Neko's safe execution callback");
     // The keepalive timer runs only between turns.
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
@@ -528,14 +535,15 @@ function isObject(value: any): value is any {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-/** Route ordinary ChatGPT models directly and only use the optional sidecar for GPT-5.6. */
+/** Route ordinary ChatGPT models directly and supported native-only models through the optional sidecar. */
 export class HybridChatGptProvider implements Provider {
   private bridge: ChatGptAppServerProvider | null = null;
 
   constructor(private readonly cfg: NekoConfig, private readonly direct: Provider) {}
 
-  complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
-    if (!this.cfg.model.startsWith("gpt-5.6-")) {
+  async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
+    const modelInfo = await resolveChatGptModelInfo(this.cfg, signal);
+    if (!needsCodexTransport(this.cfg.model, modelInfo)) {
       // A live /model switch back to GPT-5.5 should release the optional process immediately.
       const bridge = this.bridge;
       this.bridge = null;
@@ -545,7 +553,7 @@ export class HybridChatGptProvider implements Provider {
       return this.direct.complete(messages, tools, onDelta, signal, opts);
     }
     this.bridge ??= new ChatGptAppServerProvider(this.cfg);
-    return this.bridge.complete(messages, tools, onDelta, signal, opts);
+    return this.bridge.complete(messages, tools, onDelta, signal, opts, modelInfo);
   }
 
   async dispose(): Promise<void> {

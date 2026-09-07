@@ -1,0 +1,16 @@
+{
+  "name": "neko-feedback-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types --env-interface FeedbackEnv",
+    "check": "bun run types && bun ../../node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+    "test:integration": "wrangler deploy --dry-run --outdir .wrangler/build && node integration.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "miniflare": "5.20260903.0-alpha",
+    "wrangler": "4.129.0"
+  }
+}

@@ -38,8 +38,9 @@ afterEach(() => {
   if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
 });
 
-test("GPT-5.6 provider authenticates externally, bridges one tool call, streams, and reports usage", async () => {
+test.each(["gpt-5.6-luna", "gpt-6-astra"])("%s authenticates externally, bridges one tool call, streams, and reports usage", async (model) => {
   const cfg = setup();
+  cfg.data.model = model;
   const requests: Array<{ method: string; params: any }> = [];
   let handlers!: CodexAppServerHandlers;
   let toolResult: any;
@@ -93,8 +94,9 @@ test("GPT-5.6 provider authenticates externally, bridges one tool call, streams,
   );
 
   expect(requests.find((request) => request.method === "account/login/start")?.params.type).toBe("chatgptAuthTokens");
+  expect(requests.find((request) => request.method === "thread/start")?.params.model).toBe(model);
   expect(requests.find((request) => request.method === "thread/start")?.params).toMatchObject({
-    model: "gpt-5.6-luna",
+    model,
     cwd: join(tempHome, ".neko-core", "codex-home"),
     sandbox: "read-only",
     approvalPolicy: "never",

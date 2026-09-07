@@ -1,35 +1,23 @@
-# Self-improvement harness protocol
+# Self-improvement experiment protocol
 
-Read [../HARNESS-ARCHITECTURE.md](../HARNESS-ARCHITECTURE.md) before changing the harness. This file defines
-the experiment protocol, not a second architecture.
+Read [repository instructions](../../AGENTS.md), [harness architecture](../HARNESS-ARCHITECTURE.md),
+and the relevant [evaluation contract](../process/EVALUATION.md). This protocol governs
+a deliberate experiment; it does not authorize the legacy unattended runner.
 
-## Choose one lever
+## One bounded change
 
-- **Quality:** task success, constraint adherence, recovery, or fresh verification.
-- **Efficiency:** provider calls, tokens, redundant tools, cold start, or rendering latency.
-- **Robustness:** malformed inputs, cancellation, crash recovery, and process cleanup.
-- **Security:** authority narrowing, secret isolation, sandbox enforcement, and effect integrity.
-- **Extensibility:** a smaller, clearer provider/tool/skill/ACP seam.
+1. State one falsifiable prediction and its user-visible outcome.
+2. Freeze the baseline, task, provider/model, effort, resource budget, and measurement.
+3. Implement one coherent change without weakening tests, authority, or completion criteria.
+4. Run checks appropriate to the change in [TESTING.md](../process/TESTING.md).
+5. Review the diff and evidence. Accept only demonstrated improvement; if inconclusive,
+   report it. Any revert must affect only the experiment's own changes.
+6. Record accepted work in [WORKLOG.md](../process/WORKLOG.md); scores belong in
+   [EVALUATION.md](../process/EVALUATION.md).
 
-State one falsifiable prediction before editing, for example: priming the fixed welcome row makes the header
-present when the composer first appears without warming session history. Name the direct regression test and
-the no-regression gate.
+Raw hidden validator cases must remain unavailable to the implementer. Benchmark
+failures, infrastructure exclusions, and interrupted runs remain distinct and immutable.
+A passing local test or a more capable development model alone does not establish lift.
 
-## Constraints
-
-1. One lever and one coherent diff per pass.
-2. No benchmark, oracle, timeout, or safety weakening to manufacture a pass.
-3. No credentials, private provider contracts, or proprietary copied code.
-4. No automatic commit, push, merge, tag, release, or external deployment without explicit owner authority.
-5. A failed or ambiguous experiment is reverted; its lesson may be recorded without keeping the code.
-
-## Required evidence
-
-- the smallest test that fails before and passes after;
-- relevant subsystem tests;
-- bun run typecheck, bun run lint, and the full bun test;
-- neko policy for any authority/tool/config change;
-- compiled binary and real-terminal probes for lifecycle, input, rendering, or process changes;
-- benchmark deltas only when the benchmark is unsaturated and the comparison contract is unchanged.
-
-Accepted work is summarized in STATE.md and the engineering detail goes to the process work log.
+Commit, push, release, paid inference, and unattended loops require owner direction
+within the current task. ProgramBench's pause remains in force.
