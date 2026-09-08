@@ -5,6 +5,35 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-09-09 - v1.6.1 released
+
+Published [v1.6.1](https://github.com/meiiie/neko-core/releases/tag/v1.6.1) at
+2026-09-08 18:17:03 UTC from `083c19ccddf5155587b87e700d63b83d6e0c8a74`.
+[Focused CI](https://github.com/meiiie/neko-core/actions/runs/34261639979) passed on
+Windows, macOS and Linux; [release](https://github.com/meiiie/neko-core/actions/runs/34261988680)
+passed all five builds, publication and the website version check. All 17 expected
+assets are public and latest resolves to v1.6.1.
+
+Downloaded the Windows gzip asset (41,150,599 bytes), decompressed it to 93,900,288
+bytes, matched both its sidecar and GitHub asset digest
+`6ddedeaa4ba4998b45c315b0399040bc923c3eb851a1e5bf844d48d4ff0f199f`, and executed
+`--version`: `neko-core 1.6.1`. Core agent/authority/completion files are unchanged.
+The published v1.6.0 Windows binary was 93,883,904 bytes: this patch adds 16,384 bytes, not the
+314.2 MiB optional ChatGPT package. No new runtime dependency was added.
+
+Feedback Worker version `d9623edc-e6c2-4dac-9b14-ac27039593ee` is deployed and
+`/health` returned ready. No real feedback report was resent. Site Worker version
+`aac81c42-56f0-4a75-816c-384809a7c75f` serves v1.6.1 in HTML and `/__release`;
+both installer routes still redirect to the correct main-branch scripts. The
+site's baked fallback was updated as well.
+
+Secret scan: 863 historical commits and the staged release diff passed redacted
+gitleaks. Fallback startup and three real ConPTY ghost/typing runs passed. The
+last local rebuild initially hit EPERM while a ghost probe owned the executable;
+after that probe exited normally, rebuilding and all artifact smokes passed.
+The isolated real-package probe copy remains local because temporary-directory
+cleanup was rejected by the execution environment. No user installation was deleted.
+
 ## 2026-09-09 - v1.6.1 candidate: automatic ChatGPT repair
 
 The owner authorized release and focused testing only. Automatic preflight now

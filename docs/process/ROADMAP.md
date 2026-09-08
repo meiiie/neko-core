@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-09-08) - v1.6.0 released
+## Current status (2026-09-09) - v1.6.1 released
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The current 1.x platform includes:
@@ -25,9 +25,9 @@ The current 1.x platform includes:
 - resumable, disk-streamed release downloads plus compressed transfer artifacts, with final binary digest and
   embedded-version verification before atomic activation.
 
-**Branch:** `main`. **Current release:** [v1.6.0](https://github.com/meiiie/neko-core/releases/tag/v1.6.0)
-is public, published 2026-09-07 18:05 UTC (2026-09-08 in Vietnam), commit
-`adbb74cd518ce60d85bb8d80b186066c9b529420`. Cross-platform CI and the release workflow
+**Branch:** `main`. **Current release:** [v1.6.1](https://github.com/meiiie/neko-core/releases/tag/v1.6.1)
+is public, published 2026-09-08 18:17 UTC (2026-09-09 in Vietnam), commit
+`083c19ccddf5155587b87e700d63b83d6e0c8a74`. Focused cross-platform CI and the release workflow
 passed; all 17 assets, latest-release routing, the downloaded Windows binary's SHA-256
 and version, and the public website were verified. See the [release record](WORKLOG.md).
 The 1.0 compatibility contract remains the long-term stable baseline. v1.5.0 makes host Bash the normal
@@ -59,15 +59,14 @@ silently narrow them.
 
 ### Current work and resume point
 
-- v1.6.1 release candidate (2026-09-09): install the complete official Codex App Server
+- Shipped in v1.6.1 (2026-09-09): install the complete official Codex App Server
   package, including Code Mode host/resources; reject incomplete legacy packs and
   verify a local dynamic-tool round trip before activation. Simplify `/feedback`
   to two screens with conversation off by default and safe support diagnostics.
   Repair existing managed packs automatically before requests, with cancellable
-  preparation and retained drafts. First-time setup remains opt-in. Publication
-  and feedback-service deployment are authorized; verify the release record below
-  before treating the candidate as published. The owner requested focused tests
-  instead of repeating the full suite for this patch.
+  preparation and retained drafts. First-time setup remains opt-in. Publication,
+  download integrity, website and feedback-service deployment are verified.
+  The owner requested focused tests instead of repeating the full suite for this patch.
   See [current work log](WORKLOG.md) and [feedback contract](FEEDBACK.md).
 - Repository instruction/documentation refresh for GPT-6 Astra, reviewed 2026-09-07.
   Shared instructions are in [AGENTS.md](../../AGENTS.md); model-specific rationale and

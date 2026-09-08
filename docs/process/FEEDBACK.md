@@ -1,6 +1,6 @@
 # Feedback and privacy
 
-## Destination and delivery status (2026-09-07)
+## Destination and delivery status (2026-09-09)
 
 The owner selected **meiiiekhp888@gmail.com** as the private feedback inbox on
 2026-09-07. There is no public feedback website or public report listing.
@@ -10,6 +10,9 @@ The Cloudflare receiver is verified and the dedicated email Worker is deployed a
 500,512 bytes) were accepted by the real email binding; identical submissions
 returned the existing receipt. This verifies service acceptance, not Gmail Inbox
 placement. The CLI workflow is included from **v1.6.0**; it is not present in v1.5.1.
+The v1.6.1 wording update is deployed (Worker version
+`d9623edc-e6c2-4dac-9b14-ac27039593ee`); its health check passed without resending
+any real report.
 
 The v1.6.1 CLI simplifies `/feedback` to two screens (v1.6.0 uses the earlier
 category/editor/log-choice/JSON-review/send sequence):

@@ -17,8 +17,8 @@ cloudflare/site/
 
 `neko.holilihu.online` is already attached to the `neko-site` Worker. The landing page
 returns HTTP 200; `/install.sh` and `/install.ps1` redirect to the matching installer
-in `meiiie/neko-core/main`. Verified 2026-09-08 for v1.6.0, Worker version
-`308c76e7-7a8f-4944-bca6-301d16046805`.
+in `meiiie/neko-core/main`. Verified 2026-09-09 for v1.6.1, Worker version
+`aac81c42-56f0-4a75-816c-384809a7c75f`.
 
 Ordinary release deploys must not remove DNS records or change redirect rules.
 The old root redirect to `bang_c` was a historical bootstrap issue, not a current
