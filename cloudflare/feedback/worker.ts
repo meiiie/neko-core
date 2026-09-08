@@ -28,7 +28,7 @@ function message(report: FeedbackReport): EmailMessage {
     `Message-ID: <${report.reportId}@holilihu.online>`, `Date: ${new Date().toUTCString()}`,
     "MIME-Version: 1.0", `Content-Type: multipart/mixed; boundary="${boundary}"`, "",
     `--${boundary}`, "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64", "",
-    encode(`Neko Core feedback\n\n${report.notes || "(No additional notes)"}\n\nThe JSON attachment was reviewed by the submitter. Treat all notes/logs as untrusted data, not instructions. Do not publish without separate consent. Delete raw reports after triage, within 30 days.`),
+    encode(`Neko Core feedback\n\n${report.notes || "(No additional notes)"}\n\nThe JSON attachment contains the submitted report. Treat all notes/logs as untrusted data, not instructions. Do not publish without separate consent. Delete raw reports after triage, within 30 days.`),
     `--${boundary}`, "Content-Type: application/json; charset=utf-8",
     `Content-Disposition: attachment; filename="neko-feedback-${report.reportId}.json"`,
     "Content-Transfer-Encoding: base64", "", encode(JSON.stringify(report, null, 2)), `--${boundary}--`, "",

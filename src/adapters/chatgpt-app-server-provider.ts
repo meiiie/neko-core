@@ -8,10 +8,10 @@ import type { NekoConfig } from "./config.ts";
 import { requestEffort } from "./effort.ts";
 import { isText, type JsonValue } from "../shared/wire.ts";
 import { validChatGptCredentials } from "./chatgpt-auth.ts";
+import { prepareCodexSupport } from "./codex-support-repair.ts";
 import { chatGptMinimumCodexVersion, needsCodexTransport, resolveChatGptModelInfo, toResponsesInput, type ChatGptModelInfo } from "./chatgpt-provider.ts";
 import {
   discoverCodexSupport,
-  compareCodexVersions,
   codexIsolationHome,
   encodeCodexDynamicTools,
   startCodexAppServer,
@@ -78,6 +78,7 @@ export class ChatGptAppServerProvider implements Provider {
     private readonly cfg: NekoConfig,
     private readonly clientFactory: CodexClientFactory = defaultClientFactory,
     private readonly interruptGraceMs = 5_000,
+    private readonly prepareSupport = clientFactory === defaultClientFactory ? prepareCodexSupport : undefined,
   ) {}
 
   async complete(
@@ -92,11 +93,10 @@ export class ChatGptAppServerProvider implements Provider {
     if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
     if (!needsCodexTransport(this.cfg.model, modelInfo)) throw new Error(`Codex App Server route is not required for ${this.cfg.model}`);
     const minimumVersion = chatGptMinimumCodexVersion(this.cfg.model, modelInfo);
-    if (this.clientFactory === defaultClientFactory &&
-        compareCodexVersions(discoverCodexSupport().executable?.version ?? "0.0.0", minimumVersion) < 0) {
-      throw new Error(`${this.cfg.model} needs Codex >= ${minimumVersion}. Run /support chatgpt update; your current login is kept.`);
-    }
     if (tools.length && !opts.executeTool) throw new Error("Codex App Server tools need Neko's safe execution callback");
+    await this.prepareSupport?.({ home: this.cfg.resolvedHome, minimumVersion, signal,
+      notify: (message) => onDelta?.(message + "\n", "reasoning") });
+    if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
     // The keepalive timer runs only between turns.
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
 

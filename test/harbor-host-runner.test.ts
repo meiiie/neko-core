@@ -1821,14 +1821,10 @@ test("GPT-5.6 digest gate hashes the executable actually chosen by managed-first
   const root = mkdtempSync(join(tmpdir(), "neko-harbor-codex-gate-"));
   const managedRoot = join(root, ".neko-core", "codex-support");
   mkdirSync(managedRoot, { recursive: true });
-  const managed = join(managedRoot, "managed-app-server.bin");
+  const managed = writeCodexPackageFixture(managedRoot, "0.144.0");
   const explicit = join(root, "explicit-app-server.bin");
   writeFileSync(managed, "managed selected bytes", "utf8");
   writeFileSync(explicit, "explicit override bytes", "utf8");
-  writeFileSync(join(managedRoot, "support-pack.json"), JSON.stringify({
-    protocolVersion: "0.144.0",
-    executable: "managed-app-server.bin",
-  }), "utf8");
 
   try {
     const status = discoverCodexSupport({
@@ -2169,3 +2165,4 @@ test("a deterministic single-file host artifact runs framed stdio and checkpoint
     await removeCompiledFixture(buildB);
   }
 }, 60_000);
+import { writeCodexPackageFixture } from "./fixtures/codex-package.ts";

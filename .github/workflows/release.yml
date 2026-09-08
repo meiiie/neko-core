@@ -5,6 +5,7 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -17,6 +18,7 @@ jobs:
   # prevents users and the installer from seeing a half-populated release. The final
   # publish job runs only after every target and checksum has uploaded successfully.
   release:
+    if: startsWith(github.ref, 'refs/tags/v')
     name: create draft release
     runs-on: ubuntu-latest
     outputs:

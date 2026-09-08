@@ -59,6 +59,16 @@ silently narrow them.
 
 ### Current work and resume point
 
+- v1.6.1 release candidate (2026-09-09): install the complete official Codex App Server
+  package, including Code Mode host/resources; reject incomplete legacy packs and
+  verify a local dynamic-tool round trip before activation. Simplify `/feedback`
+  to two screens with conversation off by default and safe support diagnostics.
+  Repair existing managed packs automatically before requests, with cancellable
+  preparation and retained drafts. First-time setup remains opt-in. Publication
+  and feedback-service deployment are authorized; verify the release record below
+  before treating the candidate as published. The owner requested focused tests
+  instead of repeating the full suite for this patch.
+  See [current work log](WORKLOG.md) and [feedback contract](FEEDBACK.md).
 - Repository instruction/documentation refresh for GPT-6 Astra, reviewed 2026-09-07.
   Shared instructions are in [AGENTS.md](../../AGENTS.md); model-specific rationale and
   official sources are in [the dated review](../research/codex-astra-instructions-2026-09-07.md).

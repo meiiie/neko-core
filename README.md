@@ -189,10 +189,11 @@ endpoint belongs in a profile; it should not require changing the agent core.
 
 ## Report a problem
 
-Run `/feedback` inside Neko to add private notes, optionally include the current
-session's text/tool log, and review the scrubbed attachment before sending to the
-maintainer. Nothing is sent automatically; local JSON and email-draft exports are
-also available. Scrubbing can miss sensitive content, so review before sharing.
+Run `/feedback` inside Neko to add private notes, review the sharing summary and
+send to the maintainer. Conversation/tool logs are optional; the full scrubbed
+attachment can be inspected before sending. Nothing is sent automatically; local
+JSON and email-draft exports are also available. Scrubbing can miss sensitive
+content, so review before sharing. The two-screen simplification is unreleased.
 See [feedback and privacy](docs/process/FEEDBACK.md) for the recipient and limits.
 
 ## Develop from source

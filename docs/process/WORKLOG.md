@@ -5,6 +5,78 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-09-09 - v1.6.1 candidate: automatic ChatGPT repair
+
+The owner authorized release and focused testing only. Automatic preflight now
+repairs Neko-owned incomplete/outdated Codex packages before the model request,
+preserving credentials and terminal drafts on failure/cancel. First-time setup
+still asks once; no external CLI is replaced. Metadata/downloads, extraction,
+signature checks and the local protocol probe honor cancellation. A cross-process
+installation lease serializes repairs; a second repair reuses the verified result.
+No tools are replayed and no model is silently substituted.
+
+Focused gate: **155 passed, zero failed** (153 in nine affected test files, one
+narrow feedback viewport test, one digest fixture test). Includes failed/cancelled
+preflight with zero RPC/tool calls, preserved draft + successful retry, and concurrent
+repair/cancel. Typecheck/lint and production build passed (951 modules); real PTY
+input, ACP v1 and startup/exit probes passed. An isolated installation of the real
+OpenAI 0.153.4 Windows package also passed async extraction, signatures and one
+Code Mode tool round trip against a synthetic localhost model: no paid inference.
+Global support files and the original feedback report were left untouched.
+The feedback Worker also passed generated types and local D1/email integration.
+Doctor/policy completed with expected trust/auto-mode/non-TTY warnings; these were
+not hidden or reclassified as successful confinement.
+
+CI has an explicitly selected `codex-feedback` dispatch scope for this authorized
+patch; automatic CI and the default dispatch scope still run the full suite.
+Release dispatch is allowed only on version tags. The candidate uses `[skip ci]`
+to avoid a duplicate automatic full run, then explicitly dispatches focused CI
+before tagging and dispatching release. Publication/deploy results follow when verified.
+
+## 2026-09-09 - Code Mode support repair and shorter feedback flow (initial checks)
+
+The first private feedback report described a missing `codex-code-mode-host.exe`
+after ordinary chat succeeded. Its attachment contained assistant text, not the
+underlying process failure, so it alone did not establish the cause. Local package
+inspection confirmed that the old installer kept only the App Server executable.
+The official 0.153.4 package contains the host and additional runtime resources.
+
+At this initial checkpoint there was no version bump, push, release or Worker
+deployment. Normal tools, authority, ACP, provider protocols and completion logic
+are unchanged; ProgramBench remains paused.
+
+- Install the complete official `codex-app-server-package` asset, preserve its
+  layout, verify archive digest, expected entries/types, metadata and applicable
+  binary signatures, then atomically activate. Incomplete same-version packs are
+  repairable without `force`; failed installs retain the prior pack. Discovery and
+  launch reject incomplete managed packages with `CODEX_SUPPORT_INCOMPLETE` and
+  `/support chatgpt install` guidance; credentials are not removed.
+- Installation now exercises actual Code Mode and one dynamic-tool callback using
+  a synthetic localhost model service, rather than only the initialize handshake.
+  The official Windows 0.153.4 package passed this probe in an isolated home: two
+  local response requests, one callback, no paid model inference. Download size was
+  109.0 MiB; installed files were 314.2 MiB. This remains an optional external pack,
+  not an embedded dependency in the base Neko executable. Other OS live probes and
+  the reporter's account have not been verified here.
+- `/feedback`: private notes, then sharing summary/send. Conversation/tool text is
+  off by default; optional full JSON view, note editing and secondary exports remain.
+  ChatGPT basic diagnostics identify local support state/version/component with
+  fixed codes, not raw paths, credentials or stderr. Wire v1 is unchanged. Email
+  copy no longer asserts that the submitter read every byte of the attachment.
+
+Focused checks passed for archive safety/repair, discovery, feedback consent and
+revocation, exact preview/upload matching, duplicate clicks, cancel/disconnect,
+ChatGPT voice and digest-pinned discovery. A real Ink/virtual-terminal 80x24 test
+keeps feedback consent/actions visible with long notes. Full local gate: typecheck
+and lint passed; **1,612 tests passed, 14 skipped, zero failed** across 150 files.
+Doctor and policy exited successfully with the expected local trust, auto-mode,
+bridge and non-TTY warnings. Production build bundled 949 modules; real PTY input,
+ACP smoke and first-frame/exit lifecycle probes passed. The feedback Worker passed
+generated-type checking and local Miniflare D1/email integration; dry-run only,
+no deployment. Raw user feedback was not copied into the repository or resent.
+
+Reference: [official package layout](https://github.com/openai/codex/blob/rust-v0.153.4/scripts/codex_package/layout.py).
+
 ## 2026-09-08 - v1.6.0 released
 
 Published [v1.6.0](https://github.com/meiiie/neko-core/releases/tag/v1.6.0) at

@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Owner-authorized test scope (automatic runs always use full)"
+        type: choice
+        default: full
+        options: [full, codex-feedback]
 
 jobs:
   feedback:
@@ -41,7 +48,7 @@ jobs:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - name: prepare the Linux sandbox primitive
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && inputs.suite != 'codex-feedback'
         shell: bash
         run: |
           sudo apt-get update -qq
@@ -55,6 +62,7 @@ jobs:
       - name: anti-slop lint
         run: bun run lint
       - name: full test suite
+        if: inputs.suite != 'codex-feedback'
         shell: pwsh
         run: |
           if ($env:RUNNER_OS -eq 'Windows') {
@@ -72,19 +80,29 @@ jobs:
             bun test
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+      - name: focused Codex support and feedback regressions
+        if: inputs.suite == 'codex-feedback'
+        run: bun test test/codex-support-pack.test.ts test/codex-app-server.test.ts test/chatgpt-app-server-provider.test.ts test/chatgpt-provider.test.ts test/chatgpt-voice.test.ts test/feedback.test.ts test/feedback-ui.test.tsx test/feedback-delivery.test.ts test/chat-ui.test.tsx
+      - name: focused narrow feedback viewport regression
+        if: inputs.suite == 'codex-feedback'
+        run: bun test test/fullscreen-sim.test.ts --test-name-pattern "feedback review"
+      - name: focused support fixture digest regression
+        if: inputs.suite == 'codex-feedback'
+        run: bun test test/harbor-host-runner.test.ts --test-name-pattern "digest gate"
       - name: require colored soft-wrap selection rendering
+        if: inputs.suite != 'codex-feedback'
         shell: pwsh
         env:
           FORCE_COLOR: "3"
         run: bun test test/fullscreen-sim.test.ts --test-name-pattern "fullscreen prompt drag-select copies every soft-wrapped row in both directions"
       - name: require a live benchmark-oracle sandbox
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && inputs.suite != 'codex-feedback'
         shell: bash
         env:
           NEKO_REQUIRE_SANDBOX_TESTS: "1"
         run: bun test test/bench-eval-e2e.test.ts test/frontier-bench.test.ts
       - name: require live Windows ACL and MCP launcher boundaries
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && inputs.suite != 'codex-feedback'
         shell: pwsh
         env:
           NEKO_REQUIRE_WINDOWS_ACL_TEST: "1"

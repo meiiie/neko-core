@@ -38,6 +38,25 @@ afterEach(() => {
   if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
 });
 
+test("support preparation fails or cancels before any RPC, credential forwarding or tool execution", async () => {
+  const cfg = setup();
+  let clients = 0;
+  const factory: CodexClientFactory = () => { clients++; throw new Error("must not start"); };
+  const messages = [{ role: "user", content: "keep this exact task" }];
+  for (const cancelled of [false, true]) {
+    const controller = new AbortController();
+    const provider = new ChatGptAppServerProvider(cfg, factory, 50, async (options) => {
+      expect(options.minimumVersion).toBe("0.144.0");
+      expect(options.signal).toBe(controller.signal);
+      if (cancelled) { controller.abort(); throw new DOMException("cancelled", "AbortError"); }
+      throw new Error("preparation failed");
+    });
+    await expect(provider.complete(messages, [], undefined, controller.signal)).rejects.toThrow(cancelled ? "cancelled" : "preparation failed");
+    expect(clients).toBe(0);
+    expect(messages).toEqual([{ role: "user", content: "keep this exact task" }]);
+  }
+});
+
 test.each(["gpt-5.6-luna", "gpt-6-astra"])("%s authenticates externally, bridges one tool call, streams, and reports usage", async (model) => {
   const cfg = setup();
   cfg.data.model = model;

@@ -34,6 +34,48 @@ class FakeStdin extends EventEmitter {
 }
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+test("feedback review keeps consent and actions visible on an 80x24 terminal with long notes", async () => {
+  const taskHome = mkdtempSync(join(tmpdir(), "neko-feedback-screen-"));
+  const originalHome = process.env.HOME, originalProfile = process.env.USERPROFILE;
+  const originalFetch = globalThis.fetch;
+  process.env.HOME = taskHome; process.env.USERPROFILE = taskHome;
+  globalThis.fetch = Object.assign(async () => { throw new Error("No network in feedback screen test"); }, { preconnect: originalFetch.preconnect });
+  const vt = new VirtualTerminal(80, 24);
+  const out = new FakeTtyOut(80, 24, vt);
+  const stdin = new FakeStdin();
+  // SAFETY: the fixture implements the TTY write, dimensions and event contract used by the guard.
+  const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+  // SAFETY: fixture streams provide the TTY and event methods consumed by Ink and the stdout wrapper.
+  const app = renderFS(React.createElement(ChatApp, {
+    yolo: true, sessionId: "feedback-screen", preAltDispose,
+    provider: { complete: async () => { throw new Error("Feedback must not call the model"); } },
+  }), { stdout: wrapStdoutForSync(out as any, { supported: true }), stdin: stdin as any, patchConsole: false, exitOnCtrlC: false });
+  const waitFor = async (text: string) => {
+    const end = Date.now() + 5000;
+    while (!vt.text().includes(text) && Date.now() < end) await tick(20);
+    expect(vt.text()).toContain(text);
+  };
+  try {
+    await waitFor("/help");
+    stdin.push("/feedback"); await tick(30); stdin.push("\r");
+    await waitFor("Feedback 1/2");
+    stdin.push(`\x1b[200~${"Synthetic long description. ".repeat(145)}\x1b[201~`);
+    await tick(80); stdin.push("\r");
+    await waitFor("Feedback 2/2");
+    expect(vt.text()).toContain("conversation OFF");
+    expect(vt.text()).toContain("Send feedback");
+    expect(vt.text()).toContain("Cancel");
+    expect(vt.text()).toContain("Esc cancel");
+    stdin.push("\x1b"); await waitFor("/help");
+  } finally {
+    app.unmount(); await tick(50);
+    globalThis.fetch = originalFetch;
+    if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+    if (originalProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = originalProfile;
+    rmSync(taskHome, { recursive: true, force: true });
+  }
+}, 15000);
+
 /** render() with fullscreen ON via the EXPLICIT ChatApp prop (never NEKO_FULLSCREEN mutation - racy
  * across files under bun's CI test scheduling), and Ink forced `interactive: true`: Ink otherwise
  * consults is-in-ci and stops writing frames entirely - on GitHub runners the sims' VirtualTerminal

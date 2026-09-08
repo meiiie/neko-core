@@ -1,6 +1,5 @@
-/** Install the optional, standalone Codex App Server used only by GPT-5.6 subscription models. */
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import {
   chmodSync,
   createReadStream,
@@ -13,18 +12,21 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import { homeDir } from "../shared/home.ts";
+import { requestSignal, throwIfAborted } from "../shared/abort.ts";
+import { acquireCodexInstallLock } from "./codex-support-lock.ts";
 import {
   clearCodexSupportCache,
   CODEX_APP_SERVER_MIN_VERSION,
   compareCodexVersions,
-  startCodexAppServer,
 } from "./codex-app-server.ts";
+import { verifyCodexToolRoundTrip } from "./codex-support-probe.ts";
 import { isObjectValue } from "../shared/wire.ts";
+import { codexPackageFiles, codexPackageProblem, validateCodexPackageEntries } from "./codex-package.ts";
 
 const RELEASE_API = "https://api.github.com/repos/openai/codex/releases/latest";
 const RELEASE_PAGE = "https://github.com/openai/codex/releases";
@@ -61,6 +63,7 @@ interface SupportPackManifest {
 export interface CodexSupportPackInfo extends SupportPackManifest {
   path: string;
   alreadyInstalled?: boolean;
+  complete: boolean;
 }
 
 export interface CodexSupportTarget {
@@ -77,9 +80,11 @@ export interface InstallCodexSupportOptions {
   force?: boolean;
   minimumVersion?: string;
   notify?: (message: string) => void;
-  extractArchive?: (archive: string, staging: string, entry: string) => void;
-  verifyBinary?: (path: string, platform: NodeJS.Platform) => void;
-  versionOf?: (path: string) => string | null;
+  signal?: AbortSignal;
+  repairOnly?: boolean;
+  extractArchive?: (archive: string, staging: string, entry: string) => void | Promise<void>;
+  verifyBinary?: (path: string, platform: NodeJS.Platform) => void | Promise<void>;
+  versionOf?: (path: string) => string | null | Promise<string | null>;
   verifyProtocol?: (path: string, version: string, probeHome: string) => Promise<void>;
   renamePath?: (from: string, to: string) => void;
 }
@@ -89,15 +94,15 @@ export function codexSupportTarget(
   arch: NodeJS.Architecture = process.arch,
 ): CodexSupportTarget {
   const cpu = arch === "x64" ? "x86_64" : arch === "arm64" ? "aarch64" : "";
-  if (!cpu) throw new Error(`GPT-5.6 Support Pack does not support CPU architecture ${arch}`);
+  if (!cpu) throw new Error(`ChatGPT Support Pack does not support CPU architecture ${arch}`);
   const os = platform === "win32" ? "pc-windows-msvc"
     : platform === "darwin" ? "apple-darwin"
     : platform === "linux" ? "unknown-linux-musl"
     : "";
-  if (!os) throw new Error(`GPT-5.6 Support Pack does not support ${platform}`);
+  if (!os) throw new Error(`ChatGPT Support Pack does not support ${platform}`);
   const triple = `${cpu}-${os}`;
-  const executable = `codex-app-server-${triple}${platform === "win32" ? ".exe" : ""}`;
-  return { triple, executable, archiveName: `${executable}.tar.gz` };
+  const executable = `bin/codex-app-server${platform === "win32" ? ".exe" : ""}`;
+  return { triple, executable, archiveName: `codex-app-server-package-${triple}.tar.gz` };
 }
 
 export function codexSupportRoot(home = homeDir()): string {
@@ -109,16 +114,23 @@ export function readCodexSupportPack(home = homeDir()): CodexSupportPackInfo | n
   try {
     // SAFETY: manifest JSON is validated field-by-field right after this parse.
     const manifest = JSON.parse(readFileSync(join(root, "support-pack.json"), "utf8")) as SupportPackManifest;
-    if (!manifest.executable || isAbsolute(manifest.executable) || /[\\/]/.test(manifest.executable)) return null;
+    if (!/^(?:bin\/)?codex-app-server(?:\.exe)?$/.test(manifest.executable)) return null;
     const path = join(root, manifest.executable);
-    if (!manifest.protocolVersion || !existsSync(path)) return null;
-    return { ...manifest, path };
+    if (!/^\d+\.\d+\.\d+$/.test(manifest.protocolVersion)) return null;
+    const platform = manifest.executable.endsWith(".exe") ? "win32" : process.platform;
+    return { ...manifest, path, complete: codexPackageProblem(root, platform, manifest.protocolVersion) === null };
   } catch {
     return null;
   }
 }
 
 export async function installCodexSupportPack(options: InstallCodexSupportOptions = {}): Promise<CodexSupportPackInfo> {
+  const release = await acquireCodexInstallLock(options.home ?? homeDir(), options.signal, options.notify);
+  try { return await installLocked(options); }
+  finally { release(); }
+}
+
+async function installLocked(options: InstallCodexSupportOptions): Promise<CodexSupportPackInfo> {
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
   const home = options.home ?? homeDir();
@@ -127,11 +139,17 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
   const renamePath = options.renamePath ?? renameSync;
   const target = codexSupportTarget(platform, arch);
   const minimumVersion = options.minimumVersion ?? CODEX_APP_SERVER_MIN_VERSION;
+  throwIfAborted(options.signal);
+  if (options.repairOnly) {
+    const current = readCodexSupportPack(home);
+    if (!current) throw new Error("ChatGPT support is not installed. Select this model again to set it up.");
+    if (current.complete && compareCodexVersions(current.protocolVersion, minimumVersion) >= 0) return current;
+  }
 
   notify("Checking the official OpenAI Codex release...");
   const releaseResponse = await fetchImpl(RELEASE_API, {
     headers: { Accept: "application/vnd.github+json", "User-Agent": "neko-core-codex-support" },
-    signal: AbortSignal.timeout(30_000),
+    signal: requestSignal(options.signal),
   });
   if (!releaseResponse.ok) throw new Error(`Could not read the official Codex release (HTTP ${releaseResponse.status})`);
   // SAFETY: GitHub API release JSON; required fields are re-validated before use.
@@ -139,8 +157,8 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
   const resolved = resolveRelease(release, target, minimumVersion);
 
   const current = readCodexSupportPack(home);
-  if (!options.force && current !== null && current.protocolVersion === resolved.version && current.assetDigest === resolved.digest) {
-    notify(`GPT-5.6 Support Pack ${resolved.version} is already installed.`);
+  if (!options.force && current?.complete && current.protocolVersion === resolved.version && current.assetDigest === resolved.digest) {
+    notify(`ChatGPT Support Pack ${resolved.version} is already installed.`);
     return { ...current, alreadyInstalled: true };
   }
 
@@ -156,30 +174,38 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
   let installed: CodexSupportPackInfo | undefined;
   try {
     notify(`Downloading ${formatMiB(resolved.size)} optional support component...`);
-    const downloaded = await downloadAsset(fetchImpl, resolved.url, archive, resolved.size, notify);
-    const digest = await sha256File(archive);
+    const downloaded = await downloadAsset(fetchImpl, resolved.url, archive, resolved.size, notify, options.signal);
+    const digest = await sha256File(archive, options.signal);
     if (`sha256:${digest}` !== resolved.digest) {
       throw new Error(`Codex Support Pack checksum mismatch (expected ${resolved.digest}, got sha256:${digest})`);
     }
-    notify("Checksum verified; extracting the standalone App Server...");
-    (options.extractArchive ?? extractTarGz)(archive, staging, target.executable);
+    notify("Checksum verified; extracting the complete Codex package...");
+    throwIfAborted(options.signal);
+    if (options.extractArchive) await options.extractArchive(archive, staging, target.executable);
+    else await extractTarGz(archive, staging, platform, options.signal);
+    const problem = codexPackageProblem(staging, platform, resolved.version, undefined, target.triple);
+    if (problem) throw new Error(`Codex Support Pack is incomplete: ${problem}`);
     const extracted = join(staging, target.executable);
     if (!existsSync(extracted) || !statSync(extracted).isFile()) throw new Error("Codex archive did not contain the expected App Server binary");
     try { chmodSync(extracted, 0o755); } catch { /* Windows uses Authenticode/ACLs instead. */ }
 
-    (options.verifyBinary ?? verifyOfficialBinary)(extracted, platform);
-    const version = (options.versionOf ?? binaryVersion)(extracted);
+    for (const file of codexPackageFiles(platform).slice(1).filter((file) => /(?:^|\/)codex-[^/]+$/.test(file))) {
+      throwIfAborted(options.signal);
+      if (options.verifyBinary) await options.verifyBinary(join(staging, file), platform);
+      else await verifyOfficialBinary(join(staging, file), platform, options.signal);
+    }
+    const version = options.versionOf ? await options.versionOf(extracted) : await binaryVersion(extracted, options.signal);
     if (!version || compareCodexVersions(version, resolved.version) !== 0) {
       throw new Error(`Codex binary version ${version ?? "unknown"} does not match release ${resolved.version}`);
     }
     notify("Checking Codex App Server protocol compatibility...");
     const probeHome = join(staging, ".protocol-probe");
-    await (options.verifyProtocol ?? verifyProtocolCompatibility)(extracted, version, probeHome);
+    throwIfAborted(options.signal);
+    if (options.verifyProtocol) await options.verifyProtocol(extracted, version, probeHome);
+    else await verifyCodexToolRoundTrip(extracted, version, probeHome, options.signal);
     await removeTemporaryTree(probeHome);
 
-    const installedName = platform === "win32" ? "codex-app-server.exe" : "codex-app-server";
-    const installedPath = join(staging, installedName);
-    renameSync(extracted, installedPath);
+    const installedName = target.executable;
     rmSync(archive, { force: true });
     const manifest: SupportPackManifest = {
       protocolVersion: version,
@@ -187,13 +213,15 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
       assetName: target.archiveName,
       assetDigest: resolved.digest,
       archiveBytes: downloaded,
-      installedBytes: statSync(installedPath).size,
+      installedBytes: [...codexPackageFiles(platform), "codex-resources/zsh/bin/zsh"]
+        .reduce((sum, file) => sum + (existsSync(join(staging, file)) ? statSync(join(staging, file)).size : 0), 0),
       installedAt: new Date().toISOString(),
       executable: installedName,
       sourceUrl: resolved.releaseUrl,
     };
     writeFileSync(join(staging, "support-pack.json"), `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 
+    throwIfAborted(options.signal);
     rmSync(backup, { recursive: true, force: true });
     if (existsSync(root)) {
       await renameWithTransientRetry(root, backup, renamePath);
@@ -212,8 +240,8 @@ export async function installCodexSupportPack(options: InstallCodexSupportOption
     }
     rmSync(backup, { recursive: true, force: true });
     clearCodexSupportCache();
-    notify(`GPT-5.6 Support Pack ${version} is ready (${formatMiB(manifest.installedBytes)} on disk).`);
-    installed = { ...manifest, path: join(root, installedName) };
+    notify(`ChatGPT Support Pack ${version} is ready (${formatMiB(manifest.installedBytes)} on disk).`);
+    installed = { ...manifest, path: join(root, installedName), complete: true };
   } catch (error) {
     installError = error;
   }
@@ -262,10 +290,11 @@ function resolveRelease(release: GitHubRelease, target: CodexSupportTarget, mini
   return { version, tag, digest, size, url, releaseUrl: releaseUrl.startsWith("https://github.com/openai/codex/") ? releaseUrl : RELEASE_PAGE };
 }
 
-async function downloadAsset(fetchImpl: typeof fetch, url: string, path: string, expectedBytes: number, notify: (message: string) => void): Promise<number> {
+async function downloadAsset(fetchImpl: typeof fetch, url: string, path: string, expectedBytes: number, notify: (message: string) => void, signal?: AbortSignal): Promise<number> {
+  const downloadSignal = requestSignal(signal, 10 * 60_000);
   const response = await fetchImpl(url, {
     headers: { "User-Agent": "neko-core-codex-support" },
-    signal: AbortSignal.timeout(10 * 60_000),
+    signal: downloadSignal,
   });
   if (!response.ok || !response.body) throw new Error(`Could not download Codex Support Pack (HTTP ${response.status})`);
   const announced = Number(response.headers.get("content-length") ?? 0);
@@ -275,69 +304,61 @@ async function downloadAsset(fetchImpl: typeof fetch, url: string, path: string,
   const meter = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       received += chunk.length;
+      if (received > expectedBytes) return callback(new Error("Codex Support Pack exceeds its declared download size"));
       const percent = Math.floor(received / expectedBytes * 100);
       if (percent >= reported + 25) { reported = percent; notify(`Download ${Math.min(100, percent)}%...`); }
       callback(null, chunk);
     },
   });
   // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
-  await pipeline(Readable.fromWeb(response.body as any), meter, createWriteStream(path, { flags: "wx", mode: 0o600 }));
+  await pipeline(Readable.fromWeb(response.body as any), meter, createWriteStream(path, { flags: "wx", mode: 0o600 }), { signal: downloadSignal });
   if (received !== expectedBytes) throw new Error(`Codex Support Pack download was incomplete (${received}/${expectedBytes} bytes)`);
   return received;
 }
 
-async function sha256File(path: string): Promise<string> {
+async function sha256File(path: string, signal?: AbortSignal): Promise<string> {
   const hash = createHash("sha256");
-  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  for await (const chunk of createReadStream(path, { signal })) hash.update(chunk);
   return hash.digest("hex");
 }
 
-function extractTarGz(archive: string, staging: string, entry: string): void {
-  if (basename(entry) !== entry) throw new Error("Unsafe Codex archive entry");
-  const listed = spawnSync("tar", ["-tzf", archive], { encoding: "utf8", timeout: 30_000, windowsHide: true });
-  if (listed.status !== 0) throw new Error(`Could not inspect Codex archive: ${(listed.stderr || "tar is unavailable").trim()}`);
-  const entries = listed.stdout.split(/\r?\n/).filter(Boolean);
-  if (entries.length !== 1 || entries[0] !== entry) throw new Error("Codex archive contains unexpected files");
-  const extracted = spawnSync("tar", ["-xzf", archive, "-C", staging, entry], { encoding: "utf8", timeout: 60_000, windowsHide: true });
-  if (extracted.status !== 0) throw new Error(`Could not extract Codex archive: ${(extracted.stderr || "tar failed").trim()}`);
+function runSupportCommand(file: string, args: string[], signal?: AbortSignal, env?: NodeJS.ProcessEnv): Promise<{ stdout: string; stderr: string }> {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { encoding: "utf8", timeout: 60_000, windowsHide: true, signal, env, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) reject(error);
+      else resolve({ stdout, stderr });
+    });
+  });
 }
 
-function verifyOfficialBinary(path: string, platform: NodeJS.Platform): void {
+async function extractTarGz(archive: string, staging: string, platform: NodeJS.Platform, signal?: AbortSignal): Promise<void> {
+  const listed = await runSupportCommand("tar", ["-tzf", archive], signal);
+  const entries = listed.stdout.split(/\r?\n/).filter(Boolean);
+  const verbose = await runSupportCommand("tar", ["-tvzf", archive], signal);
+  validateCodexPackageEntries(entries, verbose.stdout.split(/\r?\n/).filter(Boolean).map((line) => line[0]), platform);
+  await runSupportCommand("tar", ["-xzf", archive, "-C", staging], signal);
+}
+
+async function verifyOfficialBinary(path: string, platform: NodeJS.Platform, signal?: AbortSignal): Promise<void> {
   if (platform === "win32") {
     const script = "$s=Get-AuthenticodeSignature -LiteralPath $env:NEKO_CODEX_VERIFY_PATH; [pscustomobject]@{status=$s.Status.ToString();subject=$s.SignerCertificate.Subject}|ConvertTo-Json -Compress";
-    const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
-      encoding: "utf8",
-      timeout: 30_000,
-      windowsHide: true,
-      env: { ...process.env, NEKO_CODEX_VERIFY_PATH: path },
-    });
+    const result = await runSupportCommand("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], signal,
+      { ...process.env, NEKO_CODEX_VERIFY_PATH: path });
     let signature: any = {};
     try { signature = JSON.parse(result.stdout || "{}"); } catch { /* reported below */ }
-    if (result.status !== 0 || signature.status !== "Valid" || !/\bOpenAI OpCo, LLC\b/i.test(signature.subject ?? "")) {
+    if (signature.status !== "Valid" || !/\bOpenAI OpCo, LLC\b/i.test(signature.subject ?? "")) {
       throw new Error("Codex App Server does not have a valid OpenAI Windows signature");
     }
   } else if (platform === "darwin") {
-    const result = spawnSync("codesign", ["--verify", "--strict", path], { encoding: "utf8", timeout: 30_000 });
-    if (result.status !== 0) throw new Error("Codex App Server failed macOS code-signature verification");
+    await runSupportCommand("codesign", ["--verify", "--strict", path], signal);
   }
   // Linux release archives are authenticated by the SHA-256 digest from the official GitHub API.
 }
 
-function binaryVersion(path: string): string | null {
-  const result = spawnSync(path, ["--version"], { encoding: "utf8", timeout: 10_000, windowsHide: true });
-  if (result.status !== 0) return null;
+async function binaryVersion(path: string, signal?: AbortSignal): Promise<string | null> {
+  const result = await runSupportCommand(path, ["--version"], signal);
   return `${result.stdout ?? ""}\n${result.stderr ?? ""}`.match(/\b(\d+\.\d+\.\d+)\b/)?.[1] ?? null;
-}
-
-async function verifyProtocolCompatibility(path: string, version: string, probeHome: string): Promise<void> {
-  const client = startCodexAppServer(
-    { path, kind: "app-server", source: "managed", version },
-    {},
-    { codexHome: probeHome },
-  );
-  try { await client.initialize(20_000); }
-  catch (error) { throw new Error(`Codex App Server protocol check failed: ${error instanceof Error ? error.message : error}`); }
-  finally { await client.closeAndWait(); }
 }
 
 async function removeTemporaryTree(path: string): Promise<void> {

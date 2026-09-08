@@ -3,12 +3,78 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NekoConfig } from "../src/adapters/config.ts";
-import { createFeedbackDraft, feedbackSessionLog, FEEDBACK_MAX_LOG_BYTES, FEEDBACK_RECIPIENT, saveFeedbackDraft, saveFeedbackEmail, scrubFeedbackText } from "../src/adapters/feedback.ts";
+import { createFeedbackDraft, feedbackRuntimeDiagnostics, feedbackSessionLog, FEEDBACK_MAX_LOG_BYTES, FEEDBACK_RECIPIENT, saveFeedbackDraft, saveFeedbackEmail, scrubFeedbackText } from "../src/adapters/feedback.ts";
+import { writeCodexPackageFixture } from "./fixtures/codex-package.ts";
+import type { FeedbackReport } from "../src/shared/feedback-wire.ts";
 import { flattenLines } from "../src/ui/scroll.tsx";
 import { runSlashCommand } from "../src/ui/commands.ts";
 import type { Overlay } from "../src/ui/select-list.tsx";
 
 interface FeedbackUIState { overlay: Overlay | null; preview: string; finishPreview?: () => void }
+
+test("support diagnostics identify a missing code-mode host without reading credentials or exposing paths", () => {
+  const taskHome = mkdtempSync(join(tmpdir(), "neko-feedback-diagnostic-"));
+  const originalPath = process.env.PATH;
+  const originalCodexPath = process.env.NEKO_CODEX_PATH;
+  process.env.PATH = "";
+  delete process.env.NEKO_CODEX_PATH;
+  try {
+    const root = join(taskHome, ".neko-core", "codex-support");
+    writeCodexPackageFixture(root, "0.153.4");
+    rmSync(join(root, "bin", `codex-code-mode-host${process.platform === "win32" ? ".exe" : ""}`));
+    const cfg = new NekoConfig({ provider: "chatgpt", model: "gpt-6-astra" }, "private-profile", {}, "", null, [], undefined, taskHome);
+    Object.defineProperty(cfg, "apiKey", { get: () => { throw new Error("must not access credentials"); } });
+    const diagnostics = feedbackRuntimeDiagnostics(cfg);
+    expect(JSON.parse(diagnostics[0].text)).toMatchObject({ state: "invalid", code: "CODEX_SUPPORT_INCOMPLETE", component: "codex-code-mode-host", version: "0.153.4" });
+    expect(JSON.stringify(diagnostics)).not.toMatch(/neko-feedback-diagnostic-|private-profile|\.exe|[A-Z]:/);
+    expect(feedbackRuntimeDiagnostics(new NekoConfig({ provider: "anthropic", model: "glm-5.3" }, null, {}, ""))).toEqual([]);
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH; else process.env.PATH = originalPath;
+    if (originalCodexPath === undefined) delete process.env.NEKO_CODEX_PATH; else process.env.NEKO_CODEX_PATH = originalCodexPath;
+    rmSync(taskHome, { recursive: true, force: true });
+  }
+});
+
+test("feedback opt-in can be revoked, edits refresh the exact snapshot, and duplicate send clicks are ignored", async () => {
+  const taskHome = mkdtempSync(join(tmpdir(), "neko-feedback-consent-"));
+  try {
+    const state: FeedbackUIState = { overlay: null, preview: "" };
+    let logReads = 0;
+    const submitted: FeedbackReport[] = [];
+    const ctx: any = {
+      cfg: new NekoConfig({ provider: "anthropic", model: "glm-5.3" }, null, {}, "", null, [], undefined, taskHome),
+      setOverlay: (value: Overlay | null) => { state.overlay = value; },
+      feedbackLog: () => { logReads++; return [{ kind: "user", text: "private conversation" }]; },
+      feedbackDiagnostics: () => [{ kind: "error", text: "CODEX_SUPPORT_INCOMPLETE" }],
+      previewFeedback: (text: string, onClose: () => void) => { state.preview = text; state.finishPreview = onClose; },
+      submitFeedback: async (report: FeedbackReport) => { submitted.push(report); },
+      addLine: () => {},
+    };
+    const overlay = () => { if (!state.overlay) throw new Error("Missing feedback screen"); return state.overlay; };
+    const choose = (id: string) => overlay().onSelect({ id, label: id });
+    await runSlashCommand("/feedback", ctx);
+    overlay().textInput!.onSubmit("original description");
+    expect(logReads).toBe(0);
+    choose("logs"); choose("preview");
+    expect(JSON.parse(state.preview).sessionLog).toContainEqual({ kind: "user", text: "private conversation" });
+    state.finishPreview!(); choose("logs");
+    expect(logReads).toBe(1);
+    choose("edit");
+    expect(overlay().textInput!.initialValue).toBe("original description");
+    overlay().textInput!.onSubmit("updated description");
+    choose("preview");
+    const report = JSON.parse(state.preview);
+    expect(report.notes).toBe("updated description");
+    expect(report.sessionLog).toEqual([{ kind: "error", text: "CODEX_SUPPORT_INCOMPLETE" }]);
+    state.finishPreview!();
+    const send = overlay().onSelect;
+    send({ id: "send", label: "Send" }); send({ id: "send", label: "Send" });
+    expect(submitted).toEqual([report]);
+    const dir = join(taskHome, ".neko-core", "feedback");
+    expect(readdirSync(dir)).toEqual([`${report.reportId}.json`]);
+    expect(JSON.parse(readFileSync(join(dir, `${report.reportId}.json`), "utf8"))).toEqual(report);
+  } finally { rmSync(taskHome, { recursive: true, force: true }); }
+});
 
 test("feedback is an allowlisted projection, not a redacted dump of config or sessions", () => {
   const cfg = new NekoConfig({ provider: "anthropic", model: "glm-5.3", base_url: "https://secret.example/?token=SECRET", cookie: "SECRET" }, "private-company-account", {}, "SECRET");
@@ -21,7 +87,7 @@ test("feedback is an allowlisted projection, not a redacted dump of config or se
   expect(custom.diagnostics).toMatchObject({ provider: "custom", model: "custom" });
 });
 
-test("feedback notes stay outside the conversation, logs are optional, and export requires exact preview", async () => {
+test("feedback defaults to no conversation, preserves the preview snapshot, and exports through more options", async () => {
   const taskHome = mkdtempSync(join(tmpdir(), "neko-feedback-"));
   try {
     const state: FeedbackUIState = { overlay: null, preview: "" };
@@ -40,22 +106,19 @@ test("feedback notes stay outside the conversation, logs are optional, and expor
       return state.overlay;
     };
     await runSlashCommand("/feedback", ctx);
-    selected()!.onSelect({ id: "login", label: "login" });
     selected().textInput!.onSubmit("Login stops at an error");
-    selected().onSelect({ id: "no", label: "No logs" });
     expect(selected().items.some((item) => item.id === "save")).toBe(false);
     selected()!.onSelect({ id: "cancel", label: "Cancel" });
     expect(existsSync(join(taskHome, ".neko-core", "feedback"))).toBe(false);
     await runSlashCommand("/feedback", ctx);
-    selected()!.onSelect({ id: "provider", label: "provider" });
     selected().textInput!.onSubmit("API returned 404");
-    selected().onSelect({ id: "no", label: "No logs" });
     selected().onSelect({ id: "preview", label: "Review" });
     const preview = JSON.parse(state.preview);
     expect(preview.notes).toBe("API returned 404");
     expect(preview.sessionLog).toBeUndefined();
     expect(preview.recipient).toBe(FEEDBACK_RECIPIENT);
     state.finishPreview!();
+    selected().onSelect({ id: "more", label: "More options" });
     selected()!.onSelect({ id: "save", label: "Save" });
     const dir = join(taskHome, ".neko-core", "feedback");
     expect(readdirSync(dir)).toEqual([`${preview.reportId}.json`]);

@@ -11,16 +11,22 @@ The Cloudflare receiver is verified and the dedicated email Worker is deployed a
 returned the existing receipt. This verifies service acceptance, not Gmail Inbox
 placement. The CLI workflow is included from **v1.6.0**; it is not present in v1.5.1.
 
-`/feedback` opens this local workflow:
+The v1.6.1 CLI simplifies `/feedback` to two screens (v1.6.0 uses the earlier
+category/editor/log-choice/JSON-review/send sequence):
 
-1. Choose a category.
-2. Enter optional notes in a dedicated editor, up to 4,000 characters. Notes do not
-   enter the model conversation or normal prompt history.
-3. Choose whether to include the current session's text and tool log.
-4. Review the exact scrubbed JSON in an unabridged, scrollable viewer.
-5. Choose **Send reviewed feedback** to submit that snapshot through Cloudflare to
-   the private inbox. Alternatively save an email draft (`.eml`, report attached)
-   or the report (`.json`) for manual attachment.
+1. Enter optional private notes, up to 4,000 characters. Notes do not enter the
+   model conversation or normal prompt history.
+2. Review the recipient, notes summary, basic diagnostics and log-sharing choice,
+   then choose **Send feedback**. Conversation/tool logs are **off by default**.
+   **View data to be sent** opens the exact scrubbed JSON in an unabridged viewer;
+   it is optional, not a forced approval screen. **Edit description** preserves the
+   note for correction. **More options** contains category selection, an email
+   draft (`.eml`, report attached) and JSON export.
+
+Changing the note or log choice rebuilds the report; viewing it does not. Sending
+uploads exactly that snapshot. Switching logs off removes previously included
+conversation content. The email text does not claim that the entire JSON was read;
+the Worker uses the same submitted-report wording.
 
 Files are saved under `~/.neko-core/feedback/` with exclusive creation; existing
 reports are never overwritten. Cancelling the form saves and sends nothing. Sending
@@ -36,7 +42,15 @@ upload with an unknown outcome. Queued CLI input resumes when the operation sett
 
 Basic diagnostics are allowlisted: random report ID (not the session ID), timestamp,
 category, Neko version, OS family, architecture, and known provider/model identifiers.
-Custom provider/model names become `custom`. Optional session content consists of
+Custom provider/model names become `custom`. For ChatGPT, the working tree also adds
+a structured local support diagnostic: availability state, installation source,
+validated version, fixed error code and affected component. It uses package
+inspection rather than the assistant's account of a failure. These technical entries
+can exist in `sessionLog` even with conversation sharing off; the wire schema remains
+`neko-feedback.v1`. They contain no executable path, process stderr, credentials or
+environment dump. This is not a collector for every possible runtime error.
+
+Optional session content consists of
 user/assistant text, tool calls/results, and displayed errors/information. Tool logs
 do not inherit the normal transcript UI's folding or 400-line truncation.
 
@@ -53,7 +67,7 @@ Scrubbing removes common key/token/password/cookie patterns, private-key blocks,
 URL credentials/query/fragment, common local/home paths, email addresses, data URLs,
 and executable terminal control bytes. **Scrubbing is not proof of anonymity.**
 Source code, business content, unrecognized credentials and other personal details
-may remain. The user must review before sharing and can omit the session log.
+may remain. Review sensitive content before sharing; conversation logs can be omitted.
 Automatic delivery uses Neko's sender, not the user's email identity. Manual email
 also exposes the user's chosen sender address to the receiver. Neither route is
 anonymous: the reviewed content and transport metadata can still identify someone.

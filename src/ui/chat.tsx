@@ -15,7 +15,7 @@ import { hitIndexAt } from "./hit-targets.ts";
 import { isInteractiveBrowserRequest, runSlashCommand, SLASH } from "./commands.ts";
 import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { loadPrefs, savePrefs } from "../adapters/prefs.ts";
-import { feedbackSessionLog } from "../adapters/feedback.ts";
+import { feedbackRuntimeDiagnostics, feedbackSessionLog } from "../adapters/feedback.ts";
 import { sendFeedback } from "../adapters/feedback-delivery.ts";
 import { clampFps, detectRefreshRate, resolveUiFps } from "../adapters/display.ts";
 import { Markdown } from "./markdown.tsx";
@@ -54,6 +54,7 @@ import { clearClineCredentials, hasClineCredentials, loginCline } from "../adapt
 import { installGeminiSupportPack } from "../adapters/gemini-support-pack.ts";
 import { compareCodexVersions, discoverCodexSupport } from "../adapters/codex-app-server.ts";
 import { installCodexSupportPack } from "../adapters/codex-support-pack.ts";
+import { prepareChatGptRequest } from "../adapters/codex-support-repair.ts";
 import { discoverOfficeCli, installOfficeSupportPack, type OfficeSupportPackInfo, type OfficeSupportStatus } from "../adapters/office-support-pack.ts";
 import { ChatGptVoiceSession, CODEX_VOICE_MIN_VERSION, type ChatGptVoiceControl, type ChatGptVoiceOptions, type VoiceSnapshot } from "../adapters/chatgpt-voice.ts";
 import { discoverNativeVoiceAudio } from "../adapters/native-voice-audio.ts";
@@ -139,6 +140,7 @@ interface ChatProps {
   setupBrowser?: () => Promise<string>;
   officeSupportStatus?: () => OfficeSupportStatus;
   installOfficeSupport?: (options: { force?: boolean; notify: (message: string) => void }) => Promise<OfficeSupportPackInfo | void>;
+  prepareChatGptSupport?: typeof prepareChatGptRequest;
   /** Tests inject an observer; production uses the prepared native sound and returns false to request BEL fallback. */
   completionAlert?: () => boolean | void;
   /** Mutable bridge holder so the side panel can mirror Neko's transcript and drive turns. */
@@ -165,7 +167,7 @@ export const STREAM_PUMP_SCROLLED_MS = 300;
 export const shouldStreamPump = (now: number, lastPump: number, scrolledAway: boolean): boolean =>
   now - lastPump >= (scrolledAway ? STREAM_PUMP_SCROLLED_MS : STREAM_PUMP_MS);
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, completionAlert, bridgeHolder }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, prepareChatGptSupport = provider ? undefined : prepareChatGptRequest, completionAlert, bridgeHolder }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -1492,7 +1494,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       setOverlay({
         title: `GPT-Live needs Codex Support Pack >= ${CODEX_VOICE_MIN_VERSION}.`,
         items: [
-          { id: "install", label: "Install and continue", detail: "official OpenAI App Server; about 95 MiB download / 270 MiB disk" },
+          { id: "install", label: "Install and continue", detail: "official OpenAI package; approximately 110 MiB download / 315 MiB disk" },
           { id: "dictation", label: "Use OS Dictation", detail: process.platform === "win32" ? "press Win+H; no Neko download and no live voice reply" : "use the operating system dictation shortcut" },
           { id: "cancel", label: "Not now", detail: "download nothing" },
         ],
@@ -2274,6 +2276,19 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         },
         nextId: () => idRef.current++,
         setOverlay,
+        installChatGptSupport: async (options) => {
+          const controller = new AbortController();
+          controllerRef.current = controller;
+          busyRef.current = true;
+          setBusy(true);
+          try { return await installCodexSupportPack({ ...options, signal: controller.signal }); }
+          finally {
+            if (controllerRef.current === controller) controllerRef.current = null;
+            busyRef.current = false;
+            setBusy(false);
+          }
+        },
+        feedbackDiagnostics: () => feedbackRuntimeDiagnostics(cfg),
         feedbackLog: () => [
           ...feedbackSessionLog(agentRef.current!.messages),
           ...lines.filter((line) => line.kind === "error" || line.kind === "info"),
@@ -2379,6 +2394,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     });
     const turnStart = Date.now();
     let turnCompleted = false;
+    let preparingChatGpt = false;
     try {
       // Lock synchronously before the first asynchronous @file/vision preparation. Input arriving from
       // the terminal, phone, or side panel now joins the FIFO and is classified only after cleanup.
@@ -2399,6 +2415,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       verbRef.current = VERBS[Math.floor(Math.random() * VERBS.length)];
       setStarted(true);
       registryRef.current!.clearCheckpoint();
+      preparingChatGpt = true;
+      await prepareChatGptSupport?.(cfg, controller.signal, (message) => addLine("info", message));
+      preparingChatGpt = false;
 
       // @file mentions expand only after the host has fixed the turn policy from the raw envelope.
       let toSend = skillInstruction;
@@ -2486,6 +2505,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       turnCompleted = result !== "[interrupted]";
     } catch (error) {
       flushStream();
+      if (preparingChatGpt) setInput(text);
       const msg = error instanceof Error ? error.message : String(error);
       // The user's own Esc (an AbortError that threw from compact()/a provider call instead of the loop
       // returning "[interrupted]") isn't an error to alarm them with — show it like a normal interrupt.

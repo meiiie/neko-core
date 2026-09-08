@@ -4,6 +4,7 @@ import { TextInput } from "./text-input.tsx";
 
 export interface TextPromptOptions {
   placeholder?: string;
+  initialValue?: string;
   maxChars: number;
   onSubmit: (text: string) => void;
 }
@@ -11,7 +12,7 @@ export interface TextPromptOptions {
 export function TextPrompt({ title, description, options, cols, onCancel }: {
   title: string; description?: string; options: TextPromptOptions; cols: number; onCancel: () => void;
 }) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(options.initialValue ?? "");
   const pastes = useRef(new Map<number, string>());
   const nextPasteId = useRef(1);
   useInput((input, key) => { if (key.escape || (key.ctrl && input === "c")) onCancel(); });

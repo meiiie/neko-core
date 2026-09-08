@@ -45,7 +45,8 @@ import { deleteMeeting, formatMeetingTime, latestMeeting, listMeetings, readMeet
 import { transcribeMeeting } from "../adapters/meeting-transcription.ts";
 import { normalizeSandboxDomains } from "../core/sandbox.ts";
 import { messageOf } from "../shared/debug.ts";
-import { createFeedbackDraft, FEEDBACK_CATEGORIES, FEEDBACK_RECIPIENT, saveFeedbackDraft, saveFeedbackEmail, type FeedbackLogLine } from "../adapters/feedback.ts";
+import type { FeedbackLogLine } from "../adapters/feedback.ts";
+import { openFeedback } from "./feedback-flow.ts";
 import type { FeedbackReport } from "../shared/feedback-wire.ts";
 
 import { isBool, isText } from "../shared/wire.ts";
@@ -141,9 +142,11 @@ export interface CommandCtx {
   nextId: () => number;
   setOverlay: (o: Overlay | null) => void;
   feedbackLog?: () => FeedbackLogLine[];
+  feedbackDiagnostics?: () => FeedbackLogLine[];
   previewFeedback?: (text: string, onClose: () => void) => void;
   submitFeedback?: (report: FeedbackReport, savedPath: string) => Promise<void>;
   setBusy: (b: boolean) => void;
+  installChatGptSupport?: typeof installCodexSupportPack;
   setQueued: (n: number) => void;
   resumeInto: (s: Session) => void;
   currentSessionId: string;
@@ -341,17 +344,22 @@ function applyModelSelection(ctx: CommandCtx, selected: ModelOption): void {
 }
 
 function openCodexInstallPrompt(ctx: CommandCtx, selected: ModelOption): void {
+  if (readCodexSupportPack(ctx.cfg.resolvedHome)) {
+    applyModelSelection(ctx, { ...selected, available: true });
+    ctx.addLine("info", "Neko will prepare ChatGPT automatically when you send your next message.");
+    return;
+  }
   ctx.setOverlay({
-    title: `${selected.id} needs an up-to-date Codex Support Pack. Other providers are unchanged.`,
+    title: `Set up ChatGPT for ${selected.id}? Your sign-in is kept.`,
     items: [
-      { id: "install", label: "Install support pack", detail: "official OpenAI App Server; about 95 MiB download / 270 MiB disk" },
+      { id: "install", label: "Set up ChatGPT", detail: "one-time official OpenAI download; approximately 110 MiB / 315 MiB disk" },
       { id: "cancel", label: "Not now", detail: "keep the current model; download nothing" },
     ],
     onSelect: (choice) => {
       ctx.setOverlay(null);
       if (choice.id !== "install") return ctx.addLine("info", "Support Pack installation cancelled; current model unchanged.");
       ctx.setBusy(true);
-      void installCodexSupportPack({ force: true, notify: (message) => ctx.addLine("info", message) })
+      void (ctx.installChatGptSupport ?? installCodexSupportPack)({ force: true, notify: (message) => ctx.addLine("info", message) })
         .then(() => {
           applyModelSelection(ctx, { ...selected, available: true });
           ctx.addLine("info", "Manage, update, or remove this optional component anytime with /support.");
@@ -613,7 +621,7 @@ function openSupportManager(ctx: CommandCtx, kind: SupportKind): void {
   ] : status.state === "ready" ? [
     { id: "back", label: "Back", detail: kind === "office" ? `Using an existing OfficeCLI. ${backDetail}` : `Using an existing ${kind === "chatgpt" ? "Codex" : "Gemini"}. Neko did not install it and will not remove it.` },
   ] : [
-    { id: "install", label: "Install support pack", detail: kind === "chatgpt" ? "about 95 MiB download / 270 MiB disk" : kind === "gemini" ? "about 55 MiB download / 200 MiB disk; no administrator access" : "about 35 MiB; verified official checksum; no Microsoft Office required" },
+    { id: "install", label: "Install support pack", detail: kind === "chatgpt" ? "approximately 110 MiB download / 315 MiB disk" : kind === "gemini" ? "about 55 MiB download / 200 MiB disk; no administrator access" : "about 35 MiB; verified official checksum; no Microsoft Office required" },
     { id: "back", label: "Back", detail: kind === "office" ? `Download nothing. ${backDetail}` : "Download nothing" },
   ];
   if (kind === "office" && officeVerifier?.state !== "ready") {
@@ -639,7 +647,7 @@ function openSupportManager(ctx: CommandCtx, kind: SupportKind): void {
       ctx.setOverlay(null);
       ctx.setBusy(true);
       void (kind === "chatgpt"
-        ? installCodexSupportPack({ force: item.id === "update", notify: (message) => ctx.addLine("info", message) })
+        ? (ctx.installChatGptSupport ?? installCodexSupportPack)({ force: item.id === "update", notify: (message) => ctx.addLine("info", message) })
         : kind === "gemini"
           ? installGeminiSupportPack({ force: item.id === "update", notify: (message) => ctx.addLine("info", message) })
           : installOfficeSupportPack({ force: item.id === "update", notify: (message) => ctx.addLine("info", message) }))
@@ -776,69 +784,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return addLine("info", HELP);
     case "/feedback": {
       if (input.trim() !== "/feedback") return addLine("info", "Use /feedback to enter private notes in the dedicated form, outside the model conversation.");
-      ctx.setOverlay({
-        title: "Feedback - choose a category",
-        description: `Private recipient: ${FEEDBACK_RECIPIENT}. Nothing is sent without confirmation.`,
-        items: FEEDBACK_CATEGORIES.map((category) => ({ id: category, label: category })),
-        onSelect: (choice) => {
-          const category = FEEDBACK_CATEGORIES.find((value) => value === choice.id);
-          if (!category) return;
-          ctx.setOverlay({
-            title: "Feedback - additional notes",
-            description: "Describe the problem and what you expected. Do not paste credentials. Notes never go to the model.",
-            items: [], onSelect: () => {},
-            textInput: {
-              placeholder: "What went wrong? (optional)", maxChars: 4000,
-              onSubmit: (notes) => {
-                ctx.setOverlay({
-                  title: "Feedback - include current session logs?",
-                  description: "Chat text, tool calls/results, and displayed errors may contain source code or personal data. Known secret patterns are scrubbed, but review is still necessary. No images, hidden reasoning, auth stores, or other sessions.",
-                  items: [{ id: "yes", label: "Include current session logs" }, { id: "no", label: "Notes and basic diagnostics only" }],
-                  onSelect: (logs) => {
-                    if (logs.id !== "yes" && logs.id !== "no") return;
-                    const report = createFeedbackDraft(cfg, category, notes, logs.id === "yes" ? ctx.feedbackLog?.() ?? [] : undefined);
-                    const preview = JSON.stringify(report, null, 2);
-                    let reviewed = false;
-                    const review = () => ctx.setOverlay({
-                      title: "Feedback - review before sharing",
-                      description: `To: ${FEEDBACK_RECIPIENT}\n${Buffer.byteLength(preview)} bytes; ${report.sessionLog?.length ?? 0} log entries; ${report.omittedLines ?? 0} entries omitted by the size limit.\nSending shares this attachment with Cloudflare and the private Gmail inbox. Scrubbing can miss sensitive content. Raw reports should be deleted after triage, within 30 days.`,
-                      items: [
-                        { id: "preview", label: "Review complete attachment", detail: "Scroll and search the exact scrubbed JSON" },
-                        ...(reviewed ? [
-                          ...(ctx.submitFeedback ? [{ id: "send", label: "Send reviewed feedback", detail: `Send to ${FEEDBACK_RECIPIENT}; keep a local copy` }] : []),
-                          { id: "email", label: "Save email draft (.eml)", detail: "Open in your mail app, choose a sender and click Send" },
-                          { id: "save", label: "Save report (.json)", detail: "Attach manually in Gmail or another mail app" },
-                        ] : []),
-                        { id: "cancel", label: "Cancel", detail: "Save and send nothing" },
-                      ],
-                      onSelect: async (action) => {
-                        if (action.id === "preview") {
-                          if (!ctx.previewFeedback) return addLine("error", "This client cannot show the complete feedback preview. Nothing was sent.");
-                          ctx.setOverlay(null);
-                          ctx.previewFeedback(preview, () => { reviewed = true; review(); });
-                          return;
-                        }
-                        ctx.setOverlay(null);
-                        if (!reviewed || !["save", "email", "send"].includes(action.id)) return;
-                        if (action.id === "send" && !ctx.submitFeedback) return;
-                        let path: string;
-                        try {
-                          path = action.id === "email" ? saveFeedbackEmail(cfg.resolvedHome, report) : saveFeedbackDraft(cfg.resolvedHome, report);
-                        } catch { addLine("error", "Could not save the feedback draft. Nothing was sent."); return; }
-                        if (action.id === "send") {
-                          try { await ctx.submitFeedback!(report, path); }
-                          catch { addLine("error", `Feedback delivery is unconfirmed. Do not resend automatically. Local copy: ${path}`); }
-                        } else addLine("info", `Feedback saved: ${path}\nNOT sent. Recipient: ${FEEDBACK_RECIPIENT}. Review the attachment in your mail app before sending.`);
-                      },
-                    });
-                    review();
-                  },
-                });
-              },
-            },
-          });
-        },
-      });
+      openFeedback(ctx);
       return;
     }
     case "/cost":
@@ -1070,7 +1016,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       }
       if (codexAction !== "install" && codexAction !== "update") return addLine("info", "usage: /support [status|chatgpt|gemini|office|meeting] [status|install|update|remove]");
       ctx.setBusy(true);
-      try { await installCodexSupportPack({ force: codexAction === "update", notify: (message) => addLine("info", message) }); }
+      try { await (ctx.installChatGptSupport ?? installCodexSupportPack)({ force: codexAction === "update", notify: (message) => addLine("info", message) }); }
       catch (error) { addLine("error", `Codex Support Pack failed: ${error instanceof Error ? error.message : error}. Check the connection and retry.`); }
       finally { ctx.setBusy(false); }
       return;

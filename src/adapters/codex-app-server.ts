@@ -17,6 +17,7 @@ import { homeDir } from "../shared/home.ts";
 import { scrubChildEnv } from "../shared/child-env.ts";
 import { isJsonNumber, type JsonValue } from "../shared/wire.ts";
 import { VERSION } from "../shared/version.ts";
+import { codexPackageProblem } from "./codex-package.ts";
 
 export const CODEX_APP_SERVER_MIN_VERSION = "0.144.0";
 const RPC_TIMEOUT_MS = 20_000;
@@ -35,6 +36,7 @@ export interface CodexSupportStatus {
   state: "ready" | "missing" | "outdated" | "invalid";
   executable?: CodexExecutable;
   detail: string;
+  problem?: "incomplete_package";
 }
 
 export interface CodexDynamicTools {
@@ -219,7 +221,7 @@ function managedExecutable(
     // SAFETY: manifest written by this module's own installer; digest-checked before read.
     const manifest = JSON.parse(readText(manifestPath)) as ManagedManifest;
     const file = manifest.executable || (platform === "win32" ? "codex-app-server.exe" : "codex-app-server");
-    if (paths.isAbsolute(file) || paths.basename(file) !== file) return null;
+    if (!/^(?:bin\/)?codex-app-server(?:\.exe)?$/.test(file)) return null;
     const path = paths.join(root, file);
     if (!pathExists(path)) return null;
     return { path, kind: "app-server", source: "managed", version: manifest.protocolVersion };
@@ -446,15 +448,26 @@ function discoverCodexSupportUncached(options: DiscoveryOptions): CodexSupportSt
   }
 
   let oldest: CodexExecutable | undefined;
+  let incomplete: CodexSupportStatus | undefined;
   for (const candidate of candidates) {
     const version = candidate.version ?? runVersion(candidate) ?? undefined;
     const executable = { ...candidate, version };
     if (!version) continue;
+    if (candidate.source === "managed") {
+      const root = (platform === "win32" ? win32 : posix).join(home, ".neko-core", "codex-support");
+      const problem = codexPackageProblem(root, platform, version, { readText, realpath: checks.realpath, isRegularFile: checks.isRegularFile });
+      if (problem) {
+        incomplete = { state: "invalid", executable, problem: "incomplete_package",
+          detail: `CODEX_SUPPORT_INCOMPLETE: ${problem}. Run /support chatgpt install to repair; login is kept.` };
+        continue;
+      }
+    }
     if (compareCodexVersions(version, CODEX_APP_SERVER_MIN_VERSION) >= 0) {
       return { state: "ready", executable, detail: `${candidate.source} ${version}` };
     }
     oldest ??= executable;
   }
+  if (incomplete) return incomplete;
   if (oldest) {
     return {
       state: "outdated",
@@ -702,6 +715,13 @@ export function startCodexAppServer(
   const path = canonicalExecutable(executable.path, executable.source !== "path", checks);
   if (!path) throw new Error("Codex executable is not a trusted absolute regular file");
   const verifiedExecutable = { ...executable, path };
+  if (executable.source === "managed") {
+    const paths = process.platform === "win32" ? win32 : posix;
+    const directory = paths.dirname(path);
+    const root = paths.basename(directory) === "bin" ? paths.dirname(directory) : directory;
+    const problem = codexPackageProblem(root, process.platform, executable.version ?? "");
+    if (problem) throw new Error(`CODEX_SUPPORT_INCOMPLETE: ${problem}. Run /support chatgpt install to repair; login is kept.`);
+  }
   const appArgs = codexAppServerArguments(verifiedExecutable, options);
   const launch = commandFor(verifiedExecutable, appArgs, process.platform, process.env, process.cwd(), checks);
   if (!launch) throw new Error("Codex executable needs a trusted absolute Windows runtime");

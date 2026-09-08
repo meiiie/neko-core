@@ -6,6 +6,31 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-09-09
+
+### Fixed
+
+- ChatGPT Code Mode tools: install the complete official Codex package, including
+  its host and runtime resources. Verify checksums, package layout, applicable
+  signatures and a real local tool round trip before activation; retain the old
+  package if verification fails.
+- Automatically repair incomplete or outdated Neko-managed ChatGPT support before
+  a request starts. Esc/Ctrl+C cancels preparation; the terminal keeps the prompt
+  for retry. Concurrent repairs share one installation. First-time setup remains
+  opt-in, separate Codex installations and sign-in data are kept, and completed
+  tools are never replayed by the repair mechanism.
+- `/feedback` now has two screens: optional private notes, then a sharing summary
+  and Send. Conversation/tool logs are off by default; exact JSON preview, editing
+  and local export remain available. Basic ChatGPT support diagnostics use fixed
+  codes without credentials or raw paths. Reports still go to the private owner inbox.
+
+### Compatibility
+
+- No changes to tool permissions, ACP contracts, session format or completion logic.
+  Codex remains an optional downloaded component, not bundled into the Neko binary.
+- This patch uses owner-requested focused regressions plus types, lint and artifact
+  lifecycle gates; it does not claim a new full-suite or benchmark campaign.
+
 ## [1.6.0] - 2026-09-08
 
 ### Added

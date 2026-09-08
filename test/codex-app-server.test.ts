@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { codexPackageFiles } from "../src/adapters/codex-package.ts";
 import { PassThrough } from "node:stream";
 
 import {
@@ -128,7 +129,7 @@ test("App Server disables native surfaces and only enables realtime when request
   expect(imageArgs).toEqual(expect.arrayContaining(noProjectInstructions));
 });
 
-test("support discovery prefers a compatible managed pack without requiring Codex Desktop", () => {
+test("support discovery rejects the legacy single-binary pack instead of reporting it ready", () => {
   const home = "C:\\Users\\Neko";
   const manifest = `${home}\\.neko-core\\codex-support\\support-pack.json`;
   const executable = `${home}\\.neko-core\\codex-support\\codex-app-server.exe`;
@@ -142,7 +143,9 @@ test("support discovery prefers a compatible managed pack without requiring Code
     isRegularFile: (path) => path === executable,
     readText: () => JSON.stringify({ protocolVersion: "0.144.1", executable: "codex-app-server.exe" }),
   });
-  expect(status.state).toBe("ready");
+  expect(status.state).toBe("invalid");
+  expect(status.problem).toBe("incomplete_package");
+  expect(status.detail).toContain("/support chatgpt install");
   expect(status.executable?.kind).toBe("app-server");
   expect(status.executable?.source).toBe("managed");
 });
@@ -160,6 +163,23 @@ test("support discovery reports an installed but outdated CLI honestly", () => {
   });
   expect(status.state).toBe("outdated");
   expect(status.detail).toContain("0.144.0");
+});
+
+test("support discovery accepts a complete package and rejects a redirected code-mode host", () => {
+  const root = "/home/neko/.neko-core/codex-support";
+  const files = new Set(codexPackageFiles("linux").map((file) => `${root}/${file}`));
+  files.add(`${root}/support-pack.json`);
+  const options = {
+    home: "/home/neko", cwd: "/work", platform: "linux" as const, env: {},
+    pathExists: (path: string) => files.has(path), isRegularFile: (path: string) => files.has(path),
+    realpath: (path: string) => path,
+    readText: (path: string) => JSON.stringify(path.endsWith("/support-pack.json")
+      ? { protocolVersion: "0.153.4", executable: "bin/codex-app-server" }
+      : { layoutVersion: 1, version: "0.153.4", variant: "codex-app-server", entrypoint: "bin/codex-app-server", resourcesDir: "codex-resources", pathDir: "codex-path" }),
+  };
+  expect(discoverCodexSupport(options)).toMatchObject({ state: "ready", executable: { source: "managed", version: "0.153.4" } });
+  expect(discoverCodexSupport({ ...options, realpath: (path) => path.endsWith("/codex-code-mode-host") ? "/work/untrusted-host" : path }))
+    .toMatchObject({ state: "invalid", problem: "incomplete_package" });
 });
 
 test("Codex PATH discovery rejects canonical workspace targets and non-files", () => {

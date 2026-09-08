@@ -14,6 +14,7 @@ import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "..
 import type { BrowserVoiceOptions } from "../src/adapters/browser-voice.ts";
 import { ensureBrowserCapability } from "../src/adapters/browser-bridge.ts";
 import { isInteractiveBrowserRequest } from "../src/ui/commands.ts";
+import { writeCodexPackageFixture } from "./fixtures/codex-package.ts";
 
 test("multimodal tool observations render as metadata + [image], never object coercion", () => {
   const content = [{ type: "text", text: "captured screen\n" }, { type: "image_url", image_url: { url: "data:image/gif;base64,AA" } }];
@@ -290,6 +291,37 @@ class SerialProbeProvider implements Provider {
     return { content: "done", tool_calls: [] };
   }
 }
+
+test.each(["failure", "escape", "ctrl-c"])("ChatGPT preparation %s keeps the draft and never sends it until retry", async (outcome) => {
+  const provider = new MockProvider([{ content: "Hello!", tool_calls: [] }]);
+  let attempts = 0;
+  let started = false;
+  const { stdin, frames, lastFrame, unmount } = render(<ChatApp fullscreen={false} yolo provider={provider}
+    prepareChatGptSupport={async (_cfg, signal, notify) => {
+      attempts++;
+      if (attempts > 1) return;
+      started = true;
+      notify("Repairing ChatGPT automatically");
+      if (outcome === "failure") throw new Error("Could not prepare ChatGPT yet");
+      await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("Aborted by user", "AbortError")), { once: true });
+      });
+    }} />);
+  try {
+    stdin.write("hello preserved request");
+    await tick(20);
+    stdin.write("\r");
+    expect(await until(() => started)).toBe(true);
+    expect(provider.index).toBe(0);
+    if (outcome !== "failure") stdin.write(outcome === "escape" ? "\u001b" : "\u0003");
+    expect(await until(() => frames.join("\n").includes(outcome === "failure" ? "Could not prepare" : "interrupted"))).toBe(true);
+    expect(lastFrame()).toContain("hello preserved request");
+    stdin.write("\r");
+    expect(await until(() => provider.index > 0)).toBe(true);
+    expect(provider.messages.filter((message) => message.role === "user")).toEqual([{ role: "user", content: "hello preserved request" }]);
+    expect(attempts).toBe(2);
+  } finally { unmount(); }
+}, 20_000);
 
 test("resume re-renders the prior conversation", () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
@@ -1071,11 +1103,7 @@ test("/voice prefers native GPT-Live when available and keeps browser/official f
   const home = mkdtempSync(join(tmpdir(), "neko-voice-ui-"));
   process.env.HOME = home; process.env.USERPROFILE = home; process.env.PATH = "";
   const codexRoot = join(home, ".neko-core", "codex-support");
-  mkdirSync(codexRoot, { recursive: true });
-  writeFileSync(join(codexRoot, "codex-app-server.exe"), "codex");
-  writeFileSync(join(codexRoot, "support-pack.json"), JSON.stringify({
-    protocolVersion: "0.145.0", executable: "codex-app-server.exe", installedBytes: 283_537_712,
-  }));
+  writeCodexPackageFixture(codexRoot, "0.145.0");
   saveChatGptCredentials({
     accessToken: "header.payload.signature", refreshToken: "refresh", expiresAt: Date.now() + 3_600_000, accountId: "acct-ui",
   });

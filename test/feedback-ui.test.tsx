@@ -6,10 +6,16 @@ import { join } from "node:path";
 import { ChatApp } from "../src/ui/chat.tsx";
 import { FEEDBACK_ENDPOINT } from "../src/adapters/feedback-delivery.ts";
 
-test("feedback opens a real notes editor, previews unabridged content, and never calls the model", async () => {
+test("feedback takes two screens, keeps notes editable, and previews data without calling the model", async () => {
   const taskHome = mkdtempSync(join(tmpdir(), "neko-feedback-ui-"));
   const originalHome = process.env.HOME;
   const originalProfile = process.env.USERPROFILE;
+  const originalFetch = globalThis.fetch;
+  let uploads = 0;
+  globalThis.fetch = Object.assign(async (url: string | URL | Request) => {
+    if (String(url) === FEEDBACK_ENDPOINT) uploads++;
+    throw new Error("Network disabled in feedback UI test");
+  }, { preconnect: originalFetch.preconnect });
   process.env.HOME = taskHome;
   process.env.USERPROFILE = taskHome;
   let calls = 0;
@@ -24,25 +30,31 @@ test("feedback opens a real notes editor, previews unabridged content, and never
     await waitFor("/help");
     app.stdin.write("/feedback");
     await enter();
-    await waitFor("choose a category");
-    await enter();
-    await waitFor("additional notes");
+    await waitFor("Feedback 1/2");
     app.stdin.write("Lỗi kết nối riêng tư");
     await enter();
-    await waitFor("include current session logs?");
-    app.stdin.write("\x1b[B");
+    await waitFor("Feedback 2/2");
+    expect(app.lastFrame()).toContain("conversation OFF");
+    expect(app.lastFrame()).toContain("Send feedback");
+    for (let i = 0; i < 3; i++) { app.stdin.write("\x1b[B"); await Bun.sleep(20); }
+    await waitFor("> Edit description");
     await enter();
-    await waitFor("review before sharing");
-    await enter();
+    await waitFor("Feedback 1/2");
+    expect(app.lastFrame()).toContain("Lỗi kết nối riêng tư");
+    await enter(); await waitFor("Feedback 2/2");
+    for (let i = 0; i < 2; i++) { app.stdin.write("\x1b[B"); await Bun.sleep(20); }
+    await waitFor("> View data"); await enter();
     await waitFor("Feedback attachment");
     expect(app.lastFrame()).toContain("Lỗi kết nối riêng tư");
     app.stdin.write("\x1b");
-    await waitFor("Save email draft");
+    await waitFor("Feedback 2/2");
     app.stdin.write("\x1b");
     await waitFor("/help");
     expect(calls).toBe(0);
+    expect(uploads).toBe(0);
   } finally {
     app.unmount();
+    globalThis.fetch = originalFetch;
     if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
     if (originalProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = originalProfile;
     rmSync(taskHome, { recursive: true, force: true });
@@ -50,7 +62,7 @@ test("feedback opens a real notes editor, previews unabridged content, and never
 });
 
 for (const cancel of ["escape", "ctrl-c", "unmount"] as const) {
-  test(`feedback send requires preview and ${cancel} cancels waiting without resending or calling the model`, async () => {
+  test(`feedback confirmation sends once and ${cancel} cancels waiting without resending or calling the model`, async () => {
     const taskHome = mkdtempSync(join(tmpdir(), "neko-feedback-cancel-"));
     const originalHome = process.env.HOME;
     const originalProfile = process.env.USERPROFILE;
@@ -80,17 +92,12 @@ for (const cancel of ["escape", "ctrl-c", "unmount"] as const) {
     try {
       await waitFor("/help");
       app.stdin.write("/feedback"); await enter();
-      await waitFor("choose a category"); await enter();
-      await waitFor("additional notes");
+      await waitFor("Feedback 1/2");
       app.stdin.write("Synthetic cancellation report"); await enter();
-      await waitFor("include current session logs?");
-      app.stdin.write("\x1b[B"); await waitFor("> Notes and basic diagnostics only"); await enter();
-      await waitFor("review before sharing");
-      expect(app.lastFrame()).not.toContain("Send reviewed feedback");
+      await waitFor("Feedback 2/2");
+      expect(app.lastFrame()).toContain("conversation OFF");
       expect(uploads).toBe(0);
-      await enter(); await waitFor("Feedback attachment");
-      app.stdin.write("\x1b"); await waitFor("Send reviewed feedback");
-      app.stdin.write("\x1b[B"); await waitFor("> Send reviewed feedback"); await enter();
+      await enter();
       await waitFor("Sending reviewed feedback");
       expect(uploads).toBe(1);
       const files = readdirSync(join(taskHome, ".neko-core", "feedback"));
