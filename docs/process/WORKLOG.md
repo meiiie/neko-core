@@ -32,6 +32,9 @@ patch; automatic CI and the default dispatch scope still run the full suite.
 Release dispatch is allowed only on version tags. The candidate uses `[skip ci]`
 to avoid a duplicate automatic full run, then explicitly dispatches focused CI
 before tagging and dispatching release. Publication/deploy results follow when verified.
+The first cross-platform gate caught Windows-package validation interpreting a
+POSIX staging directory as a Windows path. Package contents follow the target OS;
+filesystem paths now follow the actual root syntax. No assertions were dropped.
 
 ## 2026-09-09 - Code Mode support repair and shorter feedback flow (initial checks)
 

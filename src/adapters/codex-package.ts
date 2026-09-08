@@ -26,7 +26,7 @@ export const codexPackageIO: CodexPackageIO = {
 
 export function codexPackageProblem(root: string, platform: NodeJS.Platform, version: string,
   io: CodexPackageIO = codexPackageIO, target?: string): string | null {
-  const paths = platform === "win32" ? win32 : posix;
+  const paths = win32.isAbsolute(root) && !posix.isAbsolute(root) ? win32 : posix;
   try {
     const canonicalRoot = io.realpath(root);
     const files = codexPackageFiles(platform);
