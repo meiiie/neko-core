@@ -811,6 +811,34 @@ test("the Harbor controller cutoff prevents a new closed-loop review pass and st
   }
 });
 
+test("unverified outcome maps to legacy validation_missing without a protocol failure or action replay", async () => {
+  const hostRoot = mkdtempSync(join(tmpdir(), "neko-harbor-unverified-"));
+  let calls = 0;
+  let mutations = 0;
+  const provider: Provider = { complete: async () => ++calls === 1
+    ? { content: null, tool_calls: [{ id: "write-once", name: "write_file", arguments: { path: "note.txt", content: "note" } }] }
+    : { content: "Everything is verified.", tool_calls: [] } };
+  const f = await fixture(hello("public"), (frame, input) => {
+    if (frame.type !== "request") return;
+    mutations++;
+    result(input, frame.id, "Wrote note.txt");
+  });
+  try {
+    const session = await runHarborHostSession({
+      protocol: f.protocol, hello: f.hello, provider, hostRoot,
+      maxSteps: 8, maxContextTokens: 100_000, adaptiveEffort: false, loop: false,
+    });
+    expect(session.output).toStartWith("Verification incomplete:");
+    expect(session.completionStatus).toEqual({ ok: false, reason: "outcome_unverified" });
+    expect(session.metrics.completionStatus).toBe("validation_missing");
+    expect(calls).toBe(4);
+    expect(mutations).toBe(1);
+  } finally {
+    rmSync(hostRoot, { recursive: true, force: true });
+    await f.protocol.quiesce();
+  }
+});
+
 test("final metrics reduce secret-bearing completion evidence to one fixed status", async () => {
   const hostRoot = mkdtempSync(join(tmpdir(), "neko-harbor-sanitized-final-"));
   const argumentSecret = `argument-${crypto.randomUUID()}`;
@@ -865,7 +893,7 @@ test("final metrics reduce secret-bearing completion evidence to one fixed statu
       adaptiveEffort: false,
       loop: false,
     });
-    expect(session.output).toBe(outputSecret);
+    expect(session.output).toStartWith("Verification incomplete:");
     expect(session.completionStatus).toMatchObject({
       ok: false,
       reason: "validation_failed",

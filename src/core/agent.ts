@@ -10,7 +10,7 @@
  * Tool observations (errors + denials) are fed back so the model adapts rather than crash.
  */
 import { CostTracker, type Usage } from "./cost.ts";
-import { ProviderAttemptError, type DeltaHook, type Provider, type ToolCall } from "./ports.ts";
+import { ProviderAttemptError, type CompleteOptions, type DeltaHook, type Provider, type ToolCall } from "./ports.ts";
 import { todosContextBlock, type ToolRegistry } from "./tool-runtime.ts";
 import { taskDelegatesReadOnly } from "./tools.ts";
 import { hasAuthoritativeValidatorExit, isValidationBashCommand } from "./validation-command.ts";
@@ -34,6 +34,7 @@ import {
   isFreshFactWebTool,
   requiresFreshFactVerification,
   SESSION_CONTEXT_MARK,
+  splitSystemContext,
   type EventHook,
   type AgentOptions,
 } from "./agent-constants.ts";
@@ -138,7 +139,7 @@ export type ImageAttachment = string | NumberedImageAttachment;
 
 export interface AgentCompletionStatus {
   ok: boolean;
-  reason?: "validation_failed" | "validation_missing" | "contract_failed" | "contract_unverified";
+  reason?: "validation_failed" | "validation_missing" | "contract_failed" | "contract_unverified" | "outcome_unverified";
   command?: string;
   detail?: string;
 }
@@ -173,11 +174,7 @@ function completionImplementationInstruction(goal: string, contract: CompletionC
     "",
     "FIXED COMPLETION CONTRACT",
     "The independent criteria below are the observable definition of done. Do not weaken or omit them.",
-    "Delivery order:",
-    "1. Bound discovery to facts needed for the next implementation decision.",
-    "2. Create the smallest buildable or runnable end-to-end artifact early, before exhaustive probing.",
-    "3. Expand behavior by highest-impact criterion and compare against independent observations.",
-    "4. Reserve the final work window for a clean build, behavioral checks, and the required deliverable state.",
+    "Bound discovery to the next implementation decision. Establish the smallest buildable or runnable end-to-end artifact early, then address missing criteria. Reuse valid evidence and reserve enough budget for the required final state and its checks; no fixed sequence of tool calls is required.",
     "A partial runnable artifact with explicit remaining gaps is better than exhaustive research with no artifact.",
     ...criteria,
   ].join("\n");
@@ -282,6 +279,7 @@ export class Agent {
    * successful mutation. Ordinary later user turns reset it. */
   private mutationEpoch = 0;
   private validationExpected = false;
+  private unverifiedState = false;
   private validationResult?: { epoch: number; command: string; ok: boolean; authoritative: boolean; detail?: string };
 
   constructor(opts: AgentOptions) {
@@ -323,6 +321,7 @@ export class Agent {
         };
       }
     }
+    if (this.unverifiedState) return { ok: false, reason: "outcome_unverified" };
     if (this.completionContractFinal && this.completionContractState?.lastReview?.verdict !== "pass") {
       const review = this.completionContractState?.lastReview;
       return {
@@ -399,10 +398,10 @@ export class Agent {
     // Compaction must still free context when the summarizer fails.
     let summary: string;
     try {
-      const res = await this.provider.complete(cleanProviderMessages([
+      const res = await this.completeMeasured(cleanProviderMessages([
         { role: "system", content: COMPACTION_PROMPT },
         { role: "user", content: text, _neko_internal: true },
-      ]));
+      ]), undefined, undefined, undefined, undefined, "compact");
       this.cost.add(res.usage);
       summary = res.content ?? "";
     } catch {
@@ -704,9 +703,14 @@ export class Agent {
             this.emit("completion_recheck", { revision: contract.revision, reason: "inconclusive_measurement" });
           }
           if (!review) throw new Error("completion validator produced no review");
+          const independentlyVerified = this.unverifiedState && review.verdict === "pass";
+          if (independentlyVerified) this.unverifiedState = false;
           const validation = this.completionStatus;
           if (review.verdict === "pass" && validation.ok) {
             this.emit("completion_phase", { phase: "finalization" });
+            if (independentlyVerified) {
+              return this.recordFinal("Independent verification passed for the current artifact revision; all completion criteria are satisfied.");
+            }
             return out;
           }
           if (review.verdict === "blocked" || i === maxIters - 1
@@ -1007,6 +1011,7 @@ export class Agent {
       this.mutationEpoch = 0;
       this.validationExpected = false;
       this.validationResult = undefined;
+      this.unverifiedState = false;
       if (!this.runUntilDoneActive) {
         this.completionContractState = undefined;
         this.completionContractFinal = false;
@@ -1024,6 +1029,7 @@ export class Agent {
       ? imageContent(instruction, images)
       : instruction;
     this.messages.push({ role: "user", content, _neko_internal: internal });
+    this.cost.efficiency.resetObservations();
 
     let lastSig = ""; // loop guard: detect the model repeating the same tool call (a stuck loop)
     let repeats = 0;
@@ -1031,8 +1037,9 @@ export class Agent {
     let verifiedExit = false; // the pre-completion verify gate fires at most once per run
     let planExitChecked = false; // an unfinished todo plan gets one persistence nudge before exit
     let validationExitChecked = false; // unresolved validator debt gets one targeted recovery round
-    let changedRealState = false;
+    let changedRealState = this.unverifiedState;
     let stateVerificationRequested = false;
+    let stateVerificationReminderSent = false;
     let stateVerificationEvidence = false;
     let completionVerificationEvidence = false;
     const freshFactVerificationRequired = !internal && requiresFreshFactVerification(instruction);
@@ -1054,6 +1061,8 @@ export class Agent {
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
       const failed = observation == null || Agent.isUnproductiveResult(observation);
+      this.cost.efficiency.observeTool(JSON.stringify([call.name, call.arguments]), isText(observation) ? observation : null,
+        changesState, failed, !this.isMechanicalReadCall(call) || this.isRepeatableWaitCall(call));
       if (!failed && isFreshFactWebTool(call.name)) freshFactVerificationEvidence = true;
       const validationCommand = call.name.toLowerCase() === "bash"
         && (isValidationBashCommand(String(call.arguments?.command ?? ""))
@@ -1086,7 +1095,11 @@ export class Agent {
         changedRealState = true;
         // Validators may create caches/build output, but they observe the current source epoch rather
         // than defining a new source state that would immediately invalidate their own result.
-        if (!validationCommand) this.mutationEpoch++;
+        if (!validationCommand) {
+          this.mutationEpoch++;
+          stateVerificationRequested = false;
+          stateVerificationReminderSent = false;
+        }
         if (EDIT_TOOLS.has(call.name.toLowerCase())) {
           successfulEditThisStep = true;
           deliveryEditRequired = false;
@@ -1096,6 +1109,7 @@ export class Agent {
         completionVerificationEvidence = true;
         if (changedRealState) stateVerificationEvidence = true;
       }
+      this.unverifiedState = this.verifyStateChangesBeforeExit && changedRealState && !stateVerificationEvidence;
       if (this.runUntilDoneActive && ((changesState && !failed) || validationCommand)) {
         const currentValidation = this.validationResult?.epoch === this.mutationEpoch
           ? this.validationResult
@@ -1256,7 +1270,7 @@ export class Agent {
         } satisfies Usage);
       };
       try {
-        response = await this.provider.complete(
+        response = await this.completeMeasured(
           this.providerHistory(),
           toolSchemas,
           streamedDelta,
@@ -1309,6 +1323,7 @@ export class Agent {
           ? this.tools.todos.filter((t) => t.status !== "completed")
           : [];
         if (openTodos.length && !planExitChecked && step < runStepLimit - 1) {
+          this.cost.efficiency.verificationNudge();
           planExitChecked = true;
           verifiedExit = true; // this nudge already asks for real-state verification; do not stack gates
           this.messages.push({
@@ -1340,20 +1355,22 @@ export class Agent {
         }
         if (freshFactVerificationRequired && hasFreshFactWebTool && !freshFactVerificationEvidence
           && !freshFactVerificationRequested && step < runStepLimit - 1) {
+          this.cost.efficiency.verificationNudge();
           freshFactVerificationRequested = true;
           verifiedExit = true; // this evidence gate subsumes the generic inspection-only gate
           this.messages.push({
             role: "user",
             _neko_internal: true,
             content: "CURRENT-FACT VERIFICATION REQUIRED: this question concerns public facts that can change. " +
-              "Do not answer from training memory. Use web_search and web_fetch now, prefer authoritative primary " +
-              "sources, cross-check the key fact, and distinguish the legal effective date from an operational date " +
+              "Do not answer from training memory. Read a current authoritative primary source with web_fetch, " +
+              "using web_search if needed to locate it. Cross-check ambiguous, conflicting, or consequential facts, and distinguish the legal effective date from an operational date " +
               "when relevant. If current evidence is unavailable or conflicts, say so plainly instead of guessing.",
           });
           continue;
         }
         const validation = this.completionStatus;
-        if (!validation.ok && !validationExitChecked && step < runStepLimit - 1) {
+        if (!validation.ok && validation.reason !== "outcome_unverified" && !validationExitChecked && step < runStepLimit - 1) {
+          this.cost.efficiency.verificationNudge();
           validationExitChecked = true;
           verifiedExit = true; // this is stronger than the generic inspection-only gate
           const command = validation.command ? ` The validator was: ${JSON.stringify(validation.command)}.` : "";
@@ -1373,6 +1390,7 @@ export class Agent {
         // A state-changing action requires fresh inspection evidence of its user-visible outcome.
         if (this.verifyStateChangesBeforeExit && changedRealState && step < runStepLimit - 1) {
           if (!stateVerificationEvidence && !stateVerificationRequested) {
+            this.cost.efficiency.verificationNudge();
             stateVerificationRequested = true;
             verifiedExit = true; // stronger than the generic opt-in gate; do not stack both
             this.messages.push({
@@ -1388,6 +1406,9 @@ export class Agent {
             continue;
           }
           if (!stateVerificationEvidence) {
+            if (stateVerificationReminderSent) return this.stopUnverified();
+            stateVerificationReminderSent = true;
+            this.cost.efficiency.verificationNudge();
             this.messages.push({
               role: "user",
               _neko_internal: true,
@@ -1399,6 +1420,7 @@ export class Agent {
         }
         // Intercept at most one unsupported final so the model can gather fresh verification evidence.
         if (this.verifyBeforeExit && !verifiedExit && !completionVerificationEvidence && step < runStepLimit - 1) {
+          this.cost.efficiency.verificationNudge();
           verifiedExit = true;
           this.messages.push({
             role: "user",
@@ -1410,6 +1432,7 @@ export class Agent {
           });
           continue;
         }
+        if (this.unverifiedState) return this.stopUnverified();
         await this.durableCheckpoint();
         this.emit("final", final);
         return final;
@@ -1580,16 +1603,20 @@ export class Agent {
       return `[controller checkpoint after ${runStepLimit} steps]`;
     }
 
+    if (this.unverifiedState) return this.stopUnverified();
+
     // Request one tool-less wrap-up after the step limit.
     if (this.runUntilDoneActive) this.emit("completion_phase", { phase: "finalization" });
     this.emit("max_steps", runStepLimit);
     let final: string;
     try {
-      const wrap = await this.provider.complete(
+      const wrap = await this.completeMeasured(
         cleanProviderMessages([...this.providerHistory(), { role: "user", content: `Step limit (${runStepLimit}) reached. Stop calling tools and concisely summarize what you did and what's left.`, _neko_internal: true }]),
         undefined,
         this.onDelta,
         signal,
+        undefined,
+        "wrapup",
       );
       this.cost.add(wrap.usage); // the wrap-up call costs tokens too — count it
       final = wrap.content?.trim() || `[stopped: reached max_steps=${runStepLimit}]`;
@@ -1600,6 +1627,55 @@ export class Agent {
     await this.durableCheckpoint();
     this.emit("final", final);
     return final;
+  }
+
+  private async stopUnverified(): Promise<string> {
+    const final = "Verification incomplete: the action ran, but its final outcome has not been independently observed. " +
+      "Stopped without claiming success. Inspect the current state before continuing; do not repeat an action whose outcome is unknown.";
+    this.cost.efficiency.unverifiedStop();
+    this.emit("verification_incomplete", { reason: "outcome_unverified" });
+    return this.recordFinal(final);
+  }
+
+  private async recordFinal(final: string): Promise<string> {
+    const last = this.messages.at(-1);
+    if (last?.role === "assistant" && !last.tool_calls?.length) last.content = final;
+    else this.messages.push({ role: "assistant", content: final });
+    await this.durableCheckpoint();
+    this.emit("final", final);
+    return final;
+  }
+
+  private async completeMeasured(
+    messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal,
+    opts?: CompleteOptions, purpose: "work" | "compact" | "wrapup" = "work",
+  ) {
+    const system = messages.filter((message) => message.role === "system")
+      .map((message) => isText(message.content) ? message.content : JSON.stringify(message.content)).join("\n");
+    const [base = "", session = "", turn = ""] = splitSystemContext(system);
+    const measurement = this.cost.efficiency.start(this.provider, {
+      base, session, turn, tools: JSON.stringify(tools ?? []), effort: opts?.reasoningEffort ?? "configured",
+    }, purpose);
+    const firstEvent = () => measurement.firstEvent();
+    const measuredOptions: CompleteOptions = {
+      ...opts,
+      onAttempt: async (event) => {
+        if (event.type === "retry_scheduled") this.cost.efficiency.retry();
+        await opts?.onAttempt?.(event);
+      },
+    };
+    if (opts?.onToolCallReady) measuredOptions.onToolCallReady = (call) => { firstEvent(); opts.onToolCallReady!(call); };
+    try {
+      const result = await this.provider.complete(messages, tools, onDelta ? (text, kind) => {
+        if (text) firstEvent();
+        onDelta(text, kind);
+      } : undefined, signal, measuredOptions);
+      this.emit("request_metrics", measurement.finish("success"));
+      return result;
+    } catch (error) {
+      this.emit("request_metrics", measurement.finish(signal?.aborted ? "aborted" : "error"));
+      throw error;
+    }
   }
 
   private emit(kind: string, data: any): void {

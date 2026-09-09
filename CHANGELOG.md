@@ -6,6 +6,35 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-09-09
+
+### Improved
+
+- Keep stable base/project context ahead of changing tool, workstation and todo state.
+  Anthropic-compatible requests use up to four cache breakpoints; an explicit
+  cache rejection is remembered for the current endpoint/model instead of retried
+  on every request. Authentication and rate-limit errors do not disable caching.
+- Reuse still-valid verification evidence and skip unnecessary learning writes or
+  repeated research lookups. No default model or reasoning-effort reduction.
+- `/cost` adds local request latency, retries, context-prefix changes and repeated-read
+  diagnostics. The tracker is bounded in memory; no prompt content or telemetry is sent.
+
+### Fixed
+
+- Stop after two unsupported-final verification nudges for unchanged action state,
+  retaining an explicit unverified outcome instead of looping or claiming success.
+  Valid observations or a passing independent contract review can resolve it;
+  unknown actions are not replayed. The terminal displays the warning and does not
+  play a success alert, while headless runs report failure.
+
+### Compatibility
+
+- No new runtime dependency, translate.js integration, permission change, ACP wire
+  change or session-format migration. Host Bash and explicit sandbox behavior are unchanged.
+- Owner-requested affected-subsystem tests and artifact gates are used for this patch.
+  ProgramBench remains paused; no general speedup, cost saving or quality lift is claimed.
+  See the [efficiency contract](docs/process/EFFICIENCY.md) for measurement limits.
+
 ## [1.6.1] - 2026-09-09
 
 ### Fixed

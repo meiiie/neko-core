@@ -59,6 +59,12 @@ silently narrow them.
 
 ### Current work and resume point
 
+- v1.6.2 candidate (2026-09-09; not yet published): portable cost/performance improvements from Anthropic's guidance:
+  stable/session/turn cache boundaries, remembered explicit-cache rejection, evidence-driven
+  prompt cleanup, bounded unverified completion and private local `/cost` diagnostics. No
+  effort downgrade, paid prewarming, new dependency or ProgramBench execution. Deterministic
+  tests establish behavior; live model-quality/cost lift is not yet measured. See
+  [efficiency contract](EFFICIENCY.md) and [work log](WORKLOG.md).
 - Shipped in v1.6.1 (2026-09-09): install the complete official Codex App Server
   package, including Code Mode host/resources; reject incomplete legacy packs and
   verify a local dynamic-tool round trip before activation. Simplify `/feedback`

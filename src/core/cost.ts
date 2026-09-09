@@ -3,6 +3,8 @@
  * model-agnostic metric). Dollar cost needs a per-model price table — left as a future
  * config (any OpenAI-compatible endpoint can price differently), so we don't fake it.
  */
+import { EfficiencyTracker } from "./efficiency.ts";
+
 export interface Usage {
   prompt_tokens?: number;
   completion_tokens?: number;
@@ -29,6 +31,7 @@ export interface Usage {
 }
 
 export class CostTracker {
+  readonly efficiency = new EfficiencyTracker();
   promptTokens = 0;
   completionTokens = 0;
   totalTokens = 0;
@@ -68,6 +71,7 @@ export class CostTracker {
   }
 
   summary(): string {
+    const efficiency = this.efficiency.summary();
     const cache = this.cachedTokens > 0 ? `, ${this.cachedTokens} cached (${Math.round((100 * this.cachedTokens) / Math.max(1, this.promptTokens))}% of in)` : "";
     const writes = this.cacheWriteTokens > 0 ? `, ${this.cacheWriteTokens} cache-written` : "";
     const additional = Math.max(0, this.totalTokens - this.promptTokens - this.completionTokens);
@@ -78,7 +82,8 @@ export class CostTracker {
       `last request: ${this.lastPrompt} input / ${this.lastCompletion} output` +
       (this.lastCached > 0 ? ` (${this.lastCached} input cached)` : "") +
       (this.lastCacheWrite > 0 ? ` (${this.lastCacheWrite} input written to cache)` : "") +
-      (this.calls > 1 ? "\ninput is re-sent as context on each model call; session cumulative is not one prompt" : "")
+      (this.calls > 1 ? "\ninput is re-sent as context on each model call; session cumulative is not one prompt" : "") +
+      (efficiency ? `\n\n${efficiency}` : "")
     );
   }
 }

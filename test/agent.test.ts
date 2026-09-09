@@ -99,8 +99,8 @@ test("system prompt requires observable acceptance criteria before implementatio
   expect(DEFAULT_SYSTEM_PROMPT).toContain("Never resurrect an unrelated older task");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("foreground sleep/poll loop");
   expect(DEFAULT_SYSTEM_PROMPT).toContain("Verify from a CLEAN state");
-  expect(DEFAULT_SYSTEM_PROMPT).toContain("not disposable validation artifacts");
-  expect(DEFAULT_SYSTEM_PROMPT).toContain("a clean run recreates an output");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("preserve user files and intended deliverables");
+  expect(DEFAULT_SYSTEM_PROMPT).toContain("Reuse evidence while its relevant state and assumptions remain unchanged");
 });
 
 test("mutable public facts include administrative status even when 'current' is omitted", () => {

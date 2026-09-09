@@ -23,6 +23,8 @@ export function headlessRunOutcome(
       ? "the recognized validator failed after the latest mutation"
       : status.reason === "validation_missing"
         ? "the latest mutation was not followed by a successful recognized validator"
+        : status.reason === "outcome_unverified"
+          ? "the final outcome of a state-changing action was not independently observed"
         : status.reason === "contract_failed"
           ? "the independent completion contract still has failed criteria"
           : "the independent completion contract was not fully verified";

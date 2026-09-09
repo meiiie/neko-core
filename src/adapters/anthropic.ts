@@ -5,7 +5,7 @@
  * not a core change. Converts Neko's internal OpenAI-shaped messages/tools to Anthropic blocks and back.
  */
 import type { Usage } from "../core/cost.ts";
-import { SESSION_CONTEXT_MARK } from "../core/agent-constants.ts";
+import { splitSystemContext } from "../core/agent-constants.ts";
 import { ProviderAttemptError, type CompleteOptions, type DeltaHook, type Provider, type ProviderResponse, type ToolCall } from "../core/ports.ts";
 import { NekoConfig } from "./config.ts";
 import { providerScope } from "./provider-scope.ts";
@@ -23,6 +23,7 @@ const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthr
 export const ANTHROPIC_DEFAULT_MAX_TOKENS = 32_768;
 
 export class AnthropicProvider implements Provider {
+  private rejectedCacheScope?: string;
   constructor(
     private readonly cfg: NekoConfig,
     private readonly resolveApiKey: () => string | Promise<string> = () => cfg.apiKey,
@@ -93,7 +94,7 @@ export class AnthropicProvider implements Provider {
     // Prompt caching (Anthropic-style explicit breakpoints). Z.ai's compatible endpoint accepts
     // them (Claude Code clients send them on every request); an endpoint that rejects them is
     // healed below by stripping + one retry, so this is safe-by-default (`prompt_cache: false` opts out).
-    let cacheOn = this.cfg.promptCache;
+    let cacheOn = this.cfg.promptCache && this.rejectedCacheScope !== continuationScope;
     if (cacheOn) addCacheBreakpoints(payload);
 
     const headers: any = {
@@ -166,8 +167,9 @@ export class AnthropicProvider implements Provider {
       const body = await res.text().catch(() => "");
       // Self-heal: a compat endpoint that rejects cache_control gets one retry without it
       // (mirrors the reasoning_effort self-heal in providers.ts).
-      if (cacheOn && res.status >= 400 && res.status < 500 && /cache_control/i.test(body)) {
+      if (cacheOn && (res.status === 400 || res.status === 422) && /cache_control/i.test(body)) {
         cacheOn = false;
+        this.rejectedCacheScope = continuationScope;
         stripCacheBreakpoints(payload);
         continue;
       }
@@ -307,18 +309,11 @@ export function toAnthropicTools(tools: any[]): any[] {
   return tools.map((t) => ({ name: t.function?.name, description: t.function?.description ?? "", input_schema: t.function?.parameters ?? { type: "object", properties: {} } }));
 }
 
-/** Prompt-caching breakpoints (Anthropic explicit caching; docs order the cache tools -> system ->
- * messages). Two breakpoints: (1) end of the system prompt — one entry covers tools + system, which
- * after the stable-prefix work stay byte-identical across turns; (2) rolling, on the last block of the
- * last message — each request re-reads the previous request's conversation prefix via the API's
- * 20-block lookback, so a 40-step agent turn pays for each step's tail only, not the whole history.
- * A last message that is a plain string is lifted to block form (cache_control is block-only). */
+/** Up to three system-prefix boundaries plus one rolling conversation boundary fit Anthropic's
+ * four-breakpoint limit. Cache hits still depend on provider support, minimum length and lookback. */
 export function addCacheBreakpoints(payload: any): void {
   if (isText(payload.system) && payload.system) {
-    const boundary = payload.system.indexOf(SESSION_CONTEXT_MARK);
-    const blocks = boundary > 0
-      ? [payload.system.slice(0, boundary), payload.system.slice(boundary)]
-      : [payload.system];
+    const blocks = splitSystemContext(payload.system);
     payload.system = blocks
       .filter(Boolean)
       .map((text) => ({ type: "text", text, cache_control: { type: "ephemeral" } }));

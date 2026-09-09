@@ -8,6 +8,7 @@ the documents listed here.
 
 - [README](../README.md) - install, providers, daily use, and project overview.
 - [Harness architecture](HARNESS-ARCHITECTURE.md) - how model, loop, context, tools, persistence, and UI fit.
+- [Harness efficiency](process/EFFICIENCY.md) - stable caching, bounded verification, local cost diagnostics and quality gates.
 - [Ports and adapters](process/ARCHITECTURE.md) - dependency and trust boundaries.
 - [Extending Neko](EXTENDING.md) - providers, tools, skills, recipes, and MCP.
 - [Working rules](process/RULES.md) - repository invariants and verify loop.

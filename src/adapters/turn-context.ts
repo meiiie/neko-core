@@ -1,6 +1,7 @@
 /** Turn-scoped model context. Catalog text is coupled to the exact executable tool surface so a
  * narrowed turn never advertises an action the registry will reject. */
 import { agentsContextBlock } from "./agents.ts";
+import { TURN_CONTEXT_MARK } from "../core/agent-constants.ts";
 import { environmentBlock, projectContextBlock } from "./context.ts";
 import { matchSkills, skillsContextBlock } from "./skills.ts";
 import { dynamicToolRuntimeBlock } from "./tool-registry.ts";
@@ -29,8 +30,6 @@ function hasAvailableExternalTool(registry: ToolRegistry): boolean {
  * only when its corresponding tool is callable under configured, role, and active-turn policy. */
 export function productionTurnContext(registry: ToolRegistry, options: ProductionTurnContextOptions): string {
   const blocks = [
-    dynamicToolRuntimeBlock(registry),
-    registry.isToolAvailable("computer") ? registry.computerPort?.contextBlock?.() ?? "" : "",
     environmentBlock({ model: options.model, provider: options.provider }, registry.root),
     projectContextBlock(registry.root, options.home),
     coreMemoryBlock(options.home),
@@ -39,10 +38,14 @@ export function productionTurnContext(registry: ToolRegistry, options: Productio
     registry.isToolAvailable("memory") ? memoryIndexBlock() : "",
     registry.isToolAvailable("workflow") ? workflowsContextBlock() : "",
     registry.isToolAvailable("playbook") ? playbookContextBlock() : "",
-    options.includeTodos && registry.isToolAvailable("todo_write") ? todosContextBlock(registry.todos) : "",
     hasAvailableExternalTool(registry) ? registry.mcp?.indexBlock?.() ?? "" : "",
   ];
-  return blocks.filter(Boolean).join("\n\n");
+  const turn = [
+    dynamicToolRuntimeBlock(registry),
+    registry.isToolAvailable("computer") ? registry.computerPort?.contextBlock?.() ?? "" : "",
+    options.includeTodos && registry.isToolAvailable("todo_write") ? todosContextBlock(registry.todos) : "",
+  ].filter(Boolean).join("\n\n");
+  return blocks.filter(Boolean).join("\n\n") + (turn ? TURN_CONTEXT_MARK + turn : "");
 }
 
 /** Depth-one workers intentionally get only their small runtime plus a callable skill catalog. */

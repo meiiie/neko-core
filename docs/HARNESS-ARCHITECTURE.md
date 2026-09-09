@@ -55,12 +55,16 @@ rule. The public package root exposes the embeddable core without starting the C
 
 Neko builds one bounded, cache-stable model request from:
 
-1. the base system prompt and current runtime policy;
-2. the exact trusted project snapshot (`AGENTS.md`, `NEKO.md`, and supported imports);
-3. global identity plus bounded memory/workflow/playbook indexes;
-4. the durable canonical message trajectory;
-5. turn-local capability and environment context;
+1. the stable base system prompt;
+2. session environment and the exact trusted project snapshot (`AGENTS.md`, `NEKO.md`, and supported imports);
+3. global identity plus bounded, callable agent/skill/memory/workflow/playbook/MCP indexes;
+4. turn-local runtime policy, Computer state and todos, after the stable system-prefix boundaries;
+5. the durable canonical message trajectory;
 6. only the tool schemas available to this turn.
+
+The system remains one canonical message. Prefix boundaries let compatible transports cache stable
+instructions without freezing changing capability or project state. See [harness efficiency](process/EFFICIENCY.md)
+for cache fallback, local `/cost` diagnostics, measurement limits and the evidence required for optimization claims.
 
 Large observations are paged or clipped, old tool images are masked, and compaction preserves the original
 task, recent turns, open todos, and a structured summary. Controller messages persist locally but are removed
@@ -89,6 +93,11 @@ The loop includes:
 
 A provider error is not success, an interrupted mutation is not automatically replayable, and a confident
 final sentence cannot clear missing verification evidence.
+
+Repeated unsupported finals after a mutation receive at most two state-verification nudges before an explicit
+`outcome_unverified` stop. This preserves the action/result checkpoint, never replays the action, and does not
+count as success. New mutations invalidate evidence; a valid observation or independent passing contract review
+can resolve the missing-state gate. This bound does not replace required validators or limit useful reasoning.
 
 ## Tool and authority contract
 

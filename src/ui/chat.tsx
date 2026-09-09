@@ -2476,11 +2476,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             images: imgs.length ? imgs : undefined,
             internal,
           });
-      const streamed = streamRef.current.trim().length > 0;
+      const streamed = streamRef.current.trim();
       flushStream();
       if (result === "[interrupted]") addLine("info", "(interrupted)");
       else {
-        if (!streamed && result.trim()) addLine("assistant", result); // non-streaming provider
+        if (agentRef.current!.completionStatus.reason === "outcome_unverified" && result.trim()) addLine("error", result);
+        else if (result.trim() && !streamed.endsWith(result.trim())) addLine("assistant", result);
         const secs = Math.round((Date.now() - turnStart) / 1000);
         // Whole-turn tokens split by direction (input up / output down), matching the live spinner.
         const inTok = Math.max(0, agentRef.current!.cost.promptTokens - turnInStartRef.current);
@@ -2502,7 +2503,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (result !== "[interrupted]" && agentRef.current!.cost.lastPrompt > COMPACT_AT * cfg.contextWindow) {
         await runCompaction("auto");
       }
-      turnCompleted = result !== "[interrupted]";
+      turnCompleted = result !== "[interrupted]" && agentRef.current!.completionStatus.ok;
     } catch (error) {
       flushStream();
       if (preparingChatGpt) setInput(text);

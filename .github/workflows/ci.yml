@@ -10,10 +10,11 @@ on:
         description: "Owner-authorized test scope (automatic runs always use full)"
         type: choice
         default: full
-        options: [full, codex-feedback]
+        options: [full, codex-feedback, efficiency]
 
 jobs:
   feedback:
+    if: inputs.suite != 'efficiency'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -48,7 +49,7 @@ jobs:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - name: prepare the Linux sandbox primitive
-        if: runner.os == 'Linux' && inputs.suite != 'codex-feedback'
+        if: runner.os == 'Linux' && (inputs.suite == '' || inputs.suite == 'full')
         shell: bash
         run: |
           sudo apt-get update -qq
@@ -62,7 +63,7 @@ jobs:
       - name: anti-slop lint
         run: bun run lint
       - name: full test suite
-        if: inputs.suite != 'codex-feedback'
+        if: inputs.suite == '' || inputs.suite == 'full'
         shell: pwsh
         run: |
           if ($env:RUNNER_OS -eq 'Windows') {
@@ -89,20 +90,23 @@ jobs:
       - name: focused support fixture digest regression
         if: inputs.suite == 'codex-feedback'
         run: bun test test/harbor-host-runner.test.ts --test-name-pattern "digest gate"
+      - name: focused context, caching, completion and diagnostics regressions
+        if: inputs.suite == 'efficiency'
+        run: bun test test/efficiency.test.ts test/anthropic.test.ts test/turn-context.test.ts test/agent.test.ts test/cost.test.ts test/completion-contract.test.ts test/completion-supervisor.test.ts test/completion-lift.test.ts test/run-outcome.test.ts test/chat-ui.test.tsx test/harbor-host-runner.test.ts test/vietnam-sovereignty.test.ts test/completion-sound.test.ts
       - name: require colored soft-wrap selection rendering
-        if: inputs.suite != 'codex-feedback'
+        if: inputs.suite == '' || inputs.suite == 'full'
         shell: pwsh
         env:
           FORCE_COLOR: "3"
         run: bun test test/fullscreen-sim.test.ts --test-name-pattern "fullscreen prompt drag-select copies every soft-wrapped row in both directions"
       - name: require a live benchmark-oracle sandbox
-        if: runner.os != 'Windows' && inputs.suite != 'codex-feedback'
+        if: runner.os != 'Windows' && (inputs.suite == '' || inputs.suite == 'full')
         shell: bash
         env:
           NEKO_REQUIRE_SANDBOX_TESTS: "1"
         run: bun test test/bench-eval-e2e.test.ts test/frontier-bench.test.ts
       - name: require live Windows ACL and MCP launcher boundaries
-        if: runner.os == 'Windows' && inputs.suite != 'codex-feedback'
+        if: runner.os == 'Windows' && (inputs.suite == '' || inputs.suite == 'full')
         shell: pwsh
         env:
           NEKO_REQUIRE_WINDOWS_ACL_TEST: "1"

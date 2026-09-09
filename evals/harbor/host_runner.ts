@@ -505,6 +505,7 @@ function validatePartialMetrics(raw: unknown): HarborPartialMetrics {
 
 function sanitizeCompletionStatus(status: AgentCompletionStatus): HarborSanitizedCompletionStatus {
   if (status.ok) return "ok";
+  if (status.reason === "outcome_unverified") return "validation_missing";
   if (status.reason === "validation_failed" || status.reason === "validation_missing") return status.reason;
   throw new HostProtocolError("invalid_completion_status");
 }

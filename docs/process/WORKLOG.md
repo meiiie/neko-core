@@ -5,6 +5,87 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-09-09 - v1.6.2 candidate and separate translate.js rollback
+
+The owner requested only the preceding Neko efficiency improvements, focused tests,
+and a v1.6.2 release. The independent translate.js PoC was moved to a recoverable
+local archive outside this repository. It added no production files, dependencies,
+account configuration or deployment; none of it is included in this release.
+
+CI gains an explicit `efficiency` dispatch scope covering the affected context/cache,
+agent/completion, diagnostics, terminal warning/sound and Harbor protocol contracts.
+Automatic CI and the default dispatch still run the full suite. This candidate uses
+`[skip ci]` and must pass that cross-platform dispatch before tagging; all artifact
+smokes remain required. Publication and exact verification results will be recorded
+after they are observed, not inferred from the version bump.
+
+Local candidate gate on Bun `1.4.0+34cbb9a40`: **293 passed, zero failed** in
+`efficiency`, `anthropic`, `turn-context`, `agent`, `cost`, `completion-contract`,
+`completion-supervisor`, `completion-lift`, `run-outcome`, `chat-ui`,
+`harbor-host-runner`, `vietnam-sovereignty` and `completion-sound` test files.
+Six bootstrap/prebuilt tests also passed; the first packaging invocation omitted
+the exact prebuilt variable, then the two skipped cases were run against the
+built executable. No packaging check remains skipped. This is a focused release
+gate, not a new full-suite or paid/live-model benchmark.
+
+Typecheck, lint, production build (952 modules), PTY input, ACP and startup/exit
+smokes passed, including fallback rendering. Three sequential real ConPTY
+ghost/typing trials passed with one footer, typed echo at 179 ms and exactly
+three synthetic localhost requests. Doctor/policy completed with the existing
+explicit unconfined-auto, untrusted-project, disconnected-bridge and non-TTY
+warnings. The binary is 93,909,504 bytes, 9,216 bytes above the published v1.6.1
+Windows artifact. Redacted history scanning covered 866 commits without leaks;
+the release diff and 64 relative documentation links passed validation.
+
+## 2026-09-09 - harness efficiency implementation (pre-release checks)
+
+Applied the portable parts of Anthropic's cost/performance guidance; the current
+implementation initially retained version 1.6.1 before release preparation above.
+See [EFFICIENCY.md](EFFICIENCY.md) for the canonical behavior and measurement limits.
+
+- Stable project/identity/callable catalogs now precede dynamic runtime, Wiii and
+  todo context. Anthropic uses up to three system-prefix boundaries plus one
+  rolling conversation boundary; unsupported explicit caching is remembered for
+  the adapter's current endpoint/model scope instead of provoking a 400 every call.
+- Removed compulsory workflow/playbook writes and fixed source-count rituals;
+  verification reuses valid evidence and does not invent toolchain requirements.
+- Bounded unsupported-final verification to two nudges per unchanged mutation state.
+  `outcome_unverified` remains failure, with durable call/result history and no
+  action replay. Independent passing contract reviews can resolve it. The TUI
+  displays the corrective final after streamed text and does not ring success for
+  an incomplete turn. Harbor maps the new reason to existing `validation_missing`
+  without changing its wire schema or frozen records.
+- `/cost` adds bounded, private in-memory request timing, prefix-change, retry,
+  repeated-read and verification counters. No raw text/digests are exported; no
+  dependency, telemetry, paid prewarming or default model/effort change was added.
+
+Verification on Bun 1.4.0 / Windows: **1,634 distinct tests passed, 12 environment-
+dependent tests skipped, zero unresolved failures**, across four sequential shards,
+261 final affected-subsystem regressions and six prebuilt/bootstrap checks. The
+initial full run caught the old Harbor test expecting the provider's raw final
+despite missing evidence; its expectation now requires the truthful unverified
+final while retaining all secret-redaction, failed-validator and usage assertions.
+The additional Harbor regression covers unknown-outcome protocol compatibility.
+Skipped checks require hidden-oracle containment or live SRT; they are not claimed
+as verified. ProgramBench and paid campaigns were not run.
+
+Typecheck, lint and production build passed (952 modules). Build smokes passed
+real PTY input, ACP v1, first-frame/header synchronization and ordered terminal
+exit. A real ConPTY ghost/typing run used a localhost deterministic SSE server:
+one fixture request, typed echo in 182 ms, no duplicate footer; no provider quota.
+Doctor/policy passed with visible warnings for untrusted project configuration,
+unconfined auto mode, offline Browser Bridge and non-TTY execution. These are not
+claims of OS confinement. Relative documentation links and `git diff --check` passed.
+A generated 6 KB PowerShell module-analysis cache remains untracked under
+`Microsoft/Windows/PowerShell/`; execution policy rejected its cleanup.
+
+The compiled Windows artifact is 93,909,504 bytes (9,216 bytes above the recorded
+v1.6.1 artifact); this is not a cross-platform size claim. A synthetic diagnostic
+smoke of 1,000 requests with a 109 KB prefix took 294 ms and retained 64 latency
+samples. This measures instrumentation only, not task speed or model quality.
+Live cost savings, effort calibration and quality non-inferiority remain unmeasured;
+they require an authorized fixed-task paired evaluation, not transferred article scores.
+
 ## 2026-09-09 - v1.6.1 released
 
 Published [v1.6.1](https://github.com/meiiie/neko-core/releases/tag/v1.6.1) at

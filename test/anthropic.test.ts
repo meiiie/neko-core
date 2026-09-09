@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { addCacheBreakpoints, ANTHROPIC_DEFAULT_MAX_TOKENS, ANTHROPIC_STREAM_LIMITS, anthropicMaxTokensLimit, anthropicThinkingPolicy, AnthropicProvider, extractJsonLoose, isRetryableStreamStall, parseMessage, stripCacheBreakpoints, thinkingBudget, toAnthropicMessages, toAnthropicTools } from "../src/adapters/anthropic.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
-import { SESSION_CONTEXT_MARK } from "../src/core/agent-constants.ts";
+import { SESSION_CONTEXT_MARK, TURN_CONTEXT_MARK } from "../src/core/agent-constants.ts";
 import { ProviderAttemptError } from "../src/core/ports.ts";
 
 test.each(["paas", "coding"])("Z.AI %s/v4 cannot send a Messages request or resolve credentials", async (route) => {
@@ -188,6 +188,24 @@ test("cache breakpoints preserve a stable base when session context changes", ()
   expect(payload.system).toBe(original);
 });
 
+test("turn-state changes preserve the base and project cache blocks within four breakpoints", () => {
+  const make = (turn: string) => ({
+    system: `BASE${SESSION_CONTEXT_MARK}PROJECT${TURN_CONTEXT_MARK}${turn}`,
+    messages: [{ role: "user", content: "hello" }],
+  });
+  const a: any = make("browser ready");
+  const b: any = make("browser opened");
+  addCacheBreakpoints(a);
+  addCacheBreakpoints(b);
+  expect(a.system.slice(0, 2)).toEqual(b.system.slice(0, 2));
+  expect(a.system[2]).not.toEqual(b.system[2]);
+  expect(JSON.stringify(b).match(/"cache_control"/g)).toHaveLength(4);
+  stripCacheBreakpoints(a);
+  stripCacheBreakpoints(b);
+  expect(a.system).toBe(make("browser ready").system);
+  expect(b.system).toBe(make("browser opened").system);
+});
+
 test("HTTP 529 (Anthropic overloaded_error) is retried, not fatal - found live on Z.ai", async () => {
   const orig = globalThis.fetch;
   let calls = 0;
@@ -228,9 +246,29 @@ test("self-heals when an endpoint rejects cache_control: strips the breakpoints,
     const res = await provider.complete([{ role: "system", content: "S" }, { role: "user", content: "hi" }]);
     expect(res.content).toBe("ok");
     expect(sawCache).toEqual([true, false]); // first try with breakpoints, healed retry without
+    await provider.complete([{ role: "system", content: "S" }, { role: "user", content: "next" }]);
+    expect(sawCache).toEqual([true, false, false]);
+    cfg.data.model = "another-model";
+    await provider.complete([{ role: "system", content: "S" }, { role: "user", content: "next" }]);
+    expect(sawCache).toEqual([true, false, false, true, false]);
   } finally {
     globalThis.fetch = orig;
   }
+});
+
+test("authentication errors mentioning cache_control never downgrade cache or retry", async () => {
+  const original = globalThis.fetch;
+  let attempts = 0;
+  globalThis.fetch = Object.assign(async () => {
+    attempts++;
+    return new Response('{"error":{"message":"Unauthorized cache_control request"}}', { status: 401 });
+  }, { preconnect: original.preconnect });
+  try {
+    const cfg = new NekoConfig({ provider: "anthropic", base_url: "http://x", model: "m", reasoning_effort: "off" }, null, {}, "k");
+    const provider = new AnthropicProvider(cfg);
+    await expect(provider.complete([{ role: "system", content: "S" }, { role: "user", content: "hi" }])).rejects.toThrow("401");
+    expect(attempts).toBe(1);
+  } finally { globalThis.fetch = original; }
 });
 
 test("Claude effort self-heals to an arbitrary advertised tier without losing adaptive thinking", async () => {

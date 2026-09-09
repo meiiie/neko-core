@@ -7,6 +7,7 @@ import { trustProject } from "../src/adapters/project-trust.ts";
 import { productionTurnContext } from "../src/adapters/turn-context.ts";
 import { EXACT_FILE_TURN_TOOLS } from "../src/adapters/turn-capabilities.ts";
 import { Agent } from "../src/core/agent.ts";
+import { TURN_CONTEXT_MARK } from "../src/core/agent-constants.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
 test("production turn context follows registry root/home and restores full catalogs after an exact lease", () => {
@@ -48,6 +49,11 @@ test("production turn context follows registry root/home and restores full catal
     expect(fullBefore).toContain("# NEKO SKILL CATALOG");
     expect(fullBefore).toContain("TODO_CONTEXT_SENTINEL");
     expect(fullBefore).toContain("MCP_INDEX_SENTINEL");
+    registry.todos = [{ content: "TODO_CONTEXT_SENTINEL", status: "completed" }];
+    const updated = render();
+    expect(fullBefore.split(TURN_CONTEXT_MARK)[0]).toBe(updated.split(TURN_CONTEXT_MARK)[0]);
+    expect(fullBefore.split(TURN_CONTEXT_MARK)[1]).not.toBe(updated.split(TURN_CONTEXT_MARK)[1]);
+    expect(updated.split(TURN_CONTEXT_MARK)[1]).toContain("TODO_CONTEXT_SENTINEL");
 
     const lease = registry.enterTurn({
       name: "exact-file-edit",

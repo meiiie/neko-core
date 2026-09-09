@@ -618,6 +618,31 @@ test("auto mode: a safe tool call + markdown answer render end-to-end", async ()
   unmount();
 });
 
+test("an unverified streamed completion remains visible and does not ring success", async () => {
+  const dir = mkdtempSync(join(process.cwd(), ".neko-ui-verification-"));
+  const path = join(dir, "note.txt");
+  const provider = new MockProvider([
+    { content: null, tool_calls: [{ id: "write-once", name: "write_file", arguments: { path, content: "note" } }] },
+    { content: "Everything is verified.", tool_calls: [] },
+  ]);
+  let alerts = 0;
+  const { stdin, frames, unmount } = render(
+    <ChatApp fullscreen={false} yolo provider={provider} completionAlert={() => { alerts++; }} />,
+  );
+  try {
+    stdin.write("write a note"); await tick(20); stdin.write("\r");
+    expect(await until(() => frames.join("\n").includes("Verification incomplete:"))).toBe(true);
+    await tick(80);
+    expect(readFileSync(path, "utf8")).toBe("note");
+    expect(provider.index).toBe(4);
+    expect(frames.at(-1)).toContain("Stopped without claiming success.");
+    expect(alerts).toBe(0);
+  } finally {
+    unmount();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a failed turn stays silent", async () => {
   let alerts = 0;
   const provider: Provider = { complete: async () => { throw new Error("provider unavailable"); } };

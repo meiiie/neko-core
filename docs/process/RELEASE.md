@@ -39,6 +39,7 @@ Run on the exact commit that will be tagged, with the runtime that will ship (se
 An explicit owner request may narrow the test suite for a focused patch. Record
 the exact scope and results in WORKLOG; do not call it a full-suite pass. CI supports
 manual dispatch with `suite=codex-feedback` for support-pack/feedback-only patches
+or `suite=efficiency` for context/cache, completion and local diagnostics patches
 (default and automatic CI remain `full`). An owner-authorized `[skip ci]` candidate
 must still pass that dispatched cross-platform gate before tagging; then dispatch
 `release.yml` on the version tag. Release artifact checks are not skipped.
