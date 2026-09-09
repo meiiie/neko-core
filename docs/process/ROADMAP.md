@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-09-09) - v1.6.1 released
+## Current status (2026-09-09) - v1.6.2 released
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The current 1.x platform includes:
@@ -25,11 +25,11 @@ The current 1.x platform includes:
 - resumable, disk-streamed release downloads plus compressed transfer artifacts, with final binary digest and
   embedded-version verification before atomic activation.
 
-**Branch:** `main`. **Current release:** [v1.6.1](https://github.com/meiiie/neko-core/releases/tag/v1.6.1)
-is public, published 2026-09-08 18:17 UTC (2026-09-09 in Vietnam), commit
-`083c19ccddf5155587b87e700d63b83d6e0c8a74`. Focused cross-platform CI and the release workflow
-passed; all 17 assets, latest-release routing, the downloaded Windows binary's SHA-256
-and version, and the public website were verified. See the [release record](WORKLOG.md).
+**Branch:** `main`. **Current release:** [v1.6.2](https://github.com/meiiie/neko-core/releases/tag/v1.6.2)
+is public, published 2026-09-09 10:32 UTC, commit
+`eb8a204b745d78386deffeb42bb5029c55c8a54d`. Focused cross-platform CI and the release workflow
+passed; all 17 assets, latest-release routing and the public website were verified.
+See the [release record](WORKLOG.md) for artifact integrity checks.
 The 1.0 compatibility contract remains the long-term stable baseline. v1.5.0 makes host Bash the normal
 no-flag shell route while preserving explicit fail-closed sandboxing. v1.5.1 changes only release transport:
 resumable checkpoints and compressed assets;
@@ -59,7 +59,7 @@ silently narrow them.
 
 ### Current work and resume point
 
-- v1.6.2 candidate (2026-09-09; not yet published): portable cost/performance improvements from Anthropic's guidance:
+- Shipped in v1.6.2 (2026-09-09): portable cost/performance improvements from Anthropic's guidance:
   stable/session/turn cache boundaries, remembered explicit-cache rejection, evidence-driven
   prompt cleanup, bounded unverified completion and private local `/cost` diagnostics. No
   effort downgrade, paid prewarming, new dependency or ProgramBench execution. Deterministic

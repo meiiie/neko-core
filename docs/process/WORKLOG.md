@@ -5,6 +5,35 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-09-09 - v1.6.2 released
+
+Published [v1.6.2](https://github.com/meiiie/neko-core/releases/tag/v1.6.2) at
+2026-09-09 10:32:58 UTC from `eb8a204b745d78386deffeb42bb5029c55c8a54d`.
+[Focused CI](https://github.com/meiiie/neko-core/actions/runs/34340401375) passed:
+293 affected-subsystem tests and six bootstrap/prebuilt tests on each of Windows,
+macOS and Linux, zero failures. Types, lint, policy and binary lifecycle gates
+passed. [Release](https://github.com/meiiie/neko-core/actions/runs/34340657696)
+passed all five builds, native artifact smokes, publication and the site-version
+check. All 17 expected assets are public; latest resolves to v1.6.2. The owner
+requested focused tests; no new full-suite or ProgramBench campaign was run.
+
+Site Worker `4009600a-808d-4f6d-ab12-482db7f68203` deploys the updated baked
+fallback. One local edge initially retained v1.6.1 within the existing ten-minute
+cache window, then self-refreshed to v1.6.2. Custom-domain HTML, Worker-origin
+HTML and `/__release` now agree, and both installer paths reach the correct
+main-branch scripts. No cache-policy, DNS, feedback-service or translation
+deployment was changed.
+
+Verified the exact 17-asset set and all five SHA-256 sidecars against GitHub asset
+digests. The downloaded Windows gzip is 41,152,700 bytes; its own digest and the
+decompressed 93,909,504-byte executable match published metadata. The executable
+reports `neko-core 1.6.2`, SHA-256
+`4831ef17f6236a8853d155b16952206719a595306d20cfe5f3dfcf656fd56a55`.
+GitHub CLI's large-asset transfer stalled before receiving data; direct HTTPS
+completed, preserving the partial file and resuming the final 3,846,332 bytes
+with HTTP 206. The artifact was downloaded separately, not installed over the
+owner's running Neko. No other platform's binary was executed locally.
+
 ## 2026-09-09 - v1.6.2 candidate and separate translate.js rollback
 
 The owner requested only the preceding Neko efficiency improvements, focused tests,
