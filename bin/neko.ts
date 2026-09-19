@@ -273,7 +273,7 @@ Options:
   --profile <name>   named runtime profile (see 'neko profiles')
   --host-profile <id> (acp) exclusive embedding-host tool profile; currently: nekocut
   --yolo             disable approval prompts; hard credential/system/catastrophic seatbelts remain
-  --loop             run "run" as a closed loop: work + self-review until done
+  --loop             closed loop until done; exits like --once when idle/verified/no pending tools
   --once             force a single-shot run (overrides config "auto_loop": true)
   --trials <n>       (bench) repeated independent trials per fixed task
   --call-budget <n>  (bench contract) equal provider-call cap per task trial in both variants
@@ -1271,9 +1271,11 @@ async function cmdRun(args: Args): Promise<number> {
     agent.setTurnSystemContext(matchedTurnContext(originalInstruction, registry, cfg.resolvedHome).text);
     // Persist toward the goal when --loop OR config auto_loop is set; --once forces a single shot.
     // Images go single-shot (Agent.run carries them; runUntilDone doesn't).
+    // exitWhenIdle: once the implementer is done with no pending tools/todos and verification is ok,
+    // stop like --once so headless evals cannot hang in another closed-loop/supervisor review call.
     const useLoop = !args.once && (args.loop || cfg.autoLoop) && images.length === 0;
     const answer = useLoop
-      ? await agent.runUntilDone(instruction)
+      ? await agent.runUntilDone(instruction, { exitWhenIdle: true })
       : await agent.runResilient(instruction, { images: images.length ? images : undefined });
     process.stdout.write("\n");
     if (streamed === 0 && answer.trim()) console.log(terminalSafeText(answer, { preserveLineBreaks: true })); // synthetic/non-streamed result

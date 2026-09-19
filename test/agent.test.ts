@@ -800,6 +800,146 @@ test("rewind drops the last user turn from context", () => {
   expect(agent.rewind()).toBe(false); // nothing left to rewind
 });
 
+
+test("run continues after provider truncated=true instead of treating empty/partial as final", async () => {
+  let calls = 0;
+  const agent = new Agent({
+    provider: {
+      async complete() {
+        calls++;
+        if (calls === 1) return { content: "partial draft...", tool_calls: [], truncated: true };
+        return { content: "DONE", tool_calls: [] };
+      },
+    } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    maxSteps: 5,
+  });
+  expect(await agent.run("finish the file")).toBe("DONE");
+  expect(calls).toBe(2);
+  const joined = JSON.stringify(agent.messages);
+  expect(joined).toContain("[truncated]");
+});
+
+test("runUntilDone exitWhenIdle stops like --once when idle, verified, and no pending tools", async () => {
+  let calls = 0;
+  const agent = new Agent({
+    provider: {
+      async complete() {
+        calls++;
+        return { content: "DONE", tool_calls: [] };
+      },
+    } as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+    // Supervisor would hang headless evals if create/review ran after DONE; exitWhenIdle must skip it.
+    completionSupervisor: {
+      async create() {
+        throw new Error("create must not run when exitWhenIdle");
+      },
+      async review() {
+        throw new Error("review must not run when exitWhenIdle after a verified idle DONE");
+      },
+    },
+  });
+  expect(await agent.runUntilDone("reply DONE", { maxIters: 6, exitWhenIdle: true })).toBe("DONE");
+  expect(calls).toBe(1);
+  expect(agent.completionStatus.ok).toBe(true);
+});
+
+
+test("runUntilDone exitWhenIdle keeps reviewing while required artifacts are missing", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-exit-idle-artifacts-"));
+  try {
+    let calls = 0;
+    const registry = new ToolRegistry(root, "auto", () => true);
+    const agent = new Agent({
+      provider: {
+        async complete() {
+          calls++;
+          // Claim DONE without creating the instructed deliverable → artifact debt keeps the loop alive.
+          return { content: "DONE", tool_calls: [] };
+        },
+      } as any,
+      tools: registry,
+    });
+    await agent.runUntilDone("Write re.json with a JSON array and reply DONE when finished.", {
+      maxIters: 3,
+      exitWhenIdle: true,
+    });
+    expect(calls).toBeGreaterThan(1);
+    expect(agent.completionStatus.ok).toBe(false);
+    expect(agent.completionStatus.reason).toBe("artifacts_missing");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("runUntilDone exitWhenIdle keeps reviewing after failed bash until checks clear", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-exit-idle-failbash-"));
+  try {
+    let calls = 0;
+    const registry = new ToolRegistry(root, "auto", () => true);
+    const original = registry.execute.bind(registry);
+    registry.execute = async (name: string, args: any, signal?: AbortSignal) => {
+      if (name === "bash") return "(exit 1 -- command FAILED)\n1 failed";
+      return original(name, args, signal);
+    };
+    const agent = new Agent({
+      provider: {
+        async complete() {
+          calls++;
+          if (calls === 1) {
+            return {
+              content: null,
+              tool_calls: [{ id: "bash-fail", name: "bash", arguments: { command: "pytest -q" } }],
+            };
+          }
+          return { content: "DONE", tool_calls: [] };
+        },
+      } as any,
+      tools: registry,
+    });
+    await agent.runUntilDone("Implement the feature and run pytest -q before DONE.", {
+      maxIters: 3,
+      exitWhenIdle: true,
+    });
+    expect(calls).toBeGreaterThan(1);
+    expect(agent.completionStatus.ok).toBe(false);
+    expect(agent.completionStatus.reason).toBe("failed_checks_unresolved");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("runUntilDone exitWhenIdle keeps reviewing while verification debt remains", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-exit-idle-debt-"));
+  try {
+    let calls = 0;
+    const registry = new ToolRegistry(root, "auto", () => true);
+    const agent = new Agent({
+      provider: {
+        async complete() {
+          calls++;
+          if (calls === 1) {
+            return {
+              content: null,
+              tool_calls: [{ id: "edit-once", name: "write_file", arguments: { path: "a.txt", content: "new" } }],
+            };
+          }
+          // Claim DONE without re-inspecting → outcome_unverified debt keeps the closed loop alive.
+          return { content: calls < 3 ? "DONE" : "DONE", tool_calls: [] };
+        },
+      } as any,
+      tools: registry,
+      verifyStateChangesBeforeExit: true,
+      verifyBeforeExit: true,
+    });
+    await agent.runUntilDone("write a.txt", { maxIters: 4, exitWhenIdle: true });
+    expect(calls).toBeGreaterThan(1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("runUntilDone iterates until the model replies DONE, and caps", async () => {
   const done = new Agent({
     // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.

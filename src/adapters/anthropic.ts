@@ -418,12 +418,19 @@ export function parseMessage(data: any, scope = ""): ProviderResponse {
     else if (block.type === "thinking") reasoning += block.thinking ?? "";
     else if (block.type === "tool_use") toolCalls.push({ id: block.id ?? "", name: block.name ?? "", arguments: block.input ?? {} });
   }
+  const stopReason = data?.stop_reason;
+  const truncated = stopReason === "max_tokens";
+  if (stopReason != null && stopReason !== ""
+    && !["end_turn", "stop_sequence", "tool_use", "max_tokens"].includes(String(stopReason))) {
+    throw new Error(`anthropic returned non-success stop reason: ${String(stopReason).slice(0, 100)}`);
+  }
   return {
     content: content || null,
     tool_calls: toolCalls,
     usage: usageOf(data?.usage),
     reasoning: reasoning || undefined,
     continuation: wrappedAnthropicContinuation(scope, nativeBlocks),
+    ...(truncated ? { truncated: true } : undefined),
   };
 }
 
@@ -464,6 +471,7 @@ async function parseStream(
   const toolCalls: ToolCall[] = [];
   const usage: Usage = {};
   let sawMessageStart = false, completed = false;
+  let truncatedByMaxTokens = false;
   const semanticActivity = () => contentBytes > 0 || reasoningBytes > 0 || blocks.size > 0;
   const interrupted = (message: string, cause?: unknown, code: "stream_interrupted" | "stream_overloaded" = "stream_interrupted") =>
     new ProviderAttemptError(message, code, {
@@ -613,8 +621,17 @@ async function parseStream(
           usage.prompt_tokens = u.input_tokens + (usage.cached_tokens ?? 0) + (usage.cache_write_tokens ?? 0);
         }
         const stopReason = ev.delta?.stop_reason;
-        if (stopReason != null && (!isText(stopReason) || !["end_turn", "stop_sequence", "tool_use"].includes(stopReason))) {
-          throw new Error(`anthropic stream returned non-success stop reason: ${String(stopReason).slice(0, 100)}`);
+        if (stopReason != null) {
+          if (!isText(stopReason)) {
+            throw new Error(`anthropic stream returned non-success stop reason: ${String(stopReason).slice(0, 100)}`);
+          }
+          // max_tokens = output cap hit. Return partial content/tools and let the Agent continue
+          // (fatal abort was wiping hard TB/agent runs after one long reasoning/write turn).
+          if (stopReason === "max_tokens") {
+            truncatedByMaxTokens = true;
+          } else if (!["end_turn", "stop_sequence", "tool_use"].includes(stopReason)) {
+            throw new Error(`anthropic stream returned non-success stop reason: ${String(stopReason).slice(0, 100)}`);
+          }
         }
         break;
       }
@@ -627,8 +644,32 @@ async function parseStream(
       }
       case "message_stop": {
         requireMessageStart(sawMessageStart);
-        if ([...blocks.keys()].some((index) => !completedBlocks.has(index))) {
-          throw new Error("anthropic stream ended with an incomplete content block");
+        const incomplete = [...blocks.keys()].filter((index) => !completedBlocks.has(index));
+        if (incomplete.length) {
+          if (!truncatedByMaxTokens) {
+            throw new Error("anthropic stream ended with an incomplete content block");
+          }
+          // Output-cap truncation mid-block: salvage completed tool_use JSON when possible;
+          // drop half-written tool calls (do not execute garbage args). Text/thinking already
+          // accumulated via deltas is kept as-is.
+          for (const index of incomplete) {
+            const b = blocks.get(index);
+            if (!b) continue;
+            if (b.type === "tool_use" && b.id && b.name) {
+              let input: any = {};
+              try {
+                input = b.json ? JSON.parse(b.json) : (b.raw.input ?? {});
+                if (!isJsonObject(input)) throw new Error("arguments must be an object");
+                b.raw.input = input;
+                const call = { id: b.id, name: b.name, arguments: input };
+                toolCalls.push(call);
+                try { onToolCallReady?.(call); } catch { /* ignore */ }
+              } catch {
+                // Incomplete JSON — skip this tool call; Agent continues with a truncation nudge.
+              }
+            }
+            completedBlocks.set(index, structuredClone(b.raw));
+          }
         }
         completed = true;
         break stream;
@@ -649,6 +690,7 @@ async function parseStream(
     usage,
     reasoning: reasoning || undefined,
     continuation: wrappedAnthropicContinuation(scope, nativeBlocks),
+    ...(truncatedByMaxTokens ? { truncated: true } : undefined),
   };
 }
 

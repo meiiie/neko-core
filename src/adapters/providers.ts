@@ -735,7 +735,9 @@ export function parseOpenAIMessage(data: any, origin = ""): ProviderResponse {
   }
   const choice = choices[0];
   const finishReason = choice?.finish_reason;
-  if (finishReason !== undefined && finishReason !== null && !["stop", "tool_calls", "function_call"].includes(finishReason)) {
+  const truncated = finishReason === "length";
+  if (finishReason !== undefined && finishReason !== null
+    && !["stop", "tool_calls", "function_call", "length"].includes(finishReason)) {
     throw new Error(`API returned non-success finish_reason: ${String(finishReason).slice(0, 100)}`);
   }
   if (!isJsonObject(choice?.message)) {
@@ -764,7 +766,14 @@ export function parseOpenAIMessage(data: any, origin = ""): ProviderResponse {
     messageMetadata(message, toolCalls.length > 0),
     (message.tool_calls ?? []).map((call: any, index: number) => ({ id: String(call?.id ?? ""), index, fields: toolCallMetadata(call) })),
   );
-  return { content: split.content, tool_calls: toolCalls, usage: data.usage, reasoning, continuation };
+  return {
+    content: split.content,
+    tool_calls: toolCalls,
+    usage: data.usage,
+    reasoning,
+    continuation,
+    ...(truncated ? { truncated: true } : undefined),
+  };
 }
 
 const THINK_OPEN = "<think>";
@@ -837,6 +846,7 @@ async function parseStream(
   let sawDone = false;
   let sawValidChoice = false;
   let sawFinish = false;
+  let truncatedByLength = false;
   let contentBytes = 0;
   let reasoningBytes = 0;
   const semanticActivity = (extra = false) => contentBytes > 0 || reasoningBytes > 0 || acc.length > 0 || extra;
@@ -946,7 +956,8 @@ async function parseStream(
     }
     sawValidChoice = true;
     const finishReason = choice.finish_reason;
-    if (finishReason !== undefined && finishReason !== null && !["stop", "tool_calls", "function_call"].includes(String(finishReason))) {
+    if (finishReason !== undefined && finishReason !== null
+      && !["stop", "tool_calls", "function_call", "length"].includes(String(finishReason))) {
       if (finishReason === "network_error") {
         const delta = isJsonObject(choice.delta) ? choice.delta : undefined;
         const sameChunkActivity = Boolean(delta && (
@@ -963,6 +974,7 @@ async function parseStream(
       }
       throw new Error(`streaming API returned non-success finish_reason: ${String(finishReason).slice(0, 100)}`);
     }
+    if (finishReason === "length") truncatedByLength = true;
     if (finishReason !== undefined && finishReason !== null) sawFinish = true;
     const delta = choice.delta;
     if (delta === undefined || delta === null) {
@@ -1051,7 +1063,7 @@ async function parseStream(
     streamedMessageMetadata,
     acc.map((call, index) => ({ id: call.id, index, fields: call.metadata })),
   );
-  return { content: content || null, tool_calls: toolCalls, usage, reasoning: reasoning || undefined, continuation };
+  return { content: content || null, tool_calls: toolCalls, usage, reasoning: reasoning || undefined, continuation, ...(truncatedByLength ? { truncated: true } : undefined) };
 }
 
 /** Yield non-empty lines from an SSE response body. */
