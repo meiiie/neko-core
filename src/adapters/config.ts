@@ -163,6 +163,9 @@ export const DEFAULTS: any = {
       models: ["glm-5.3", "glm-5.2", "glm-5.1", "glm-5"],
       model_context: { "glm-5.3": 1_000_000, "glm-5.2": 1_000_000 },
       context_window: 1_000_000,
+      // Generous output budget for hard long-horizon coding; Anthropic self-heal clamps if the
+      // model advertises a lower cap. Avoids early max_tokens aborts on large write turns.
+      max_tokens: 65_536,
       effort_ceiling: "max",
       key_env: "ZAI_API_KEY",
     },

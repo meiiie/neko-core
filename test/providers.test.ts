@@ -662,9 +662,12 @@ test("parse error object throws with message", () => {
   expect(() => parseOpenAIMessage({ error: { message: "boom" } })).toThrow(/boom/);
 });
 
-test("non-stream responses reject truncation and missing assistant messages", () => {
+test("non-stream responses soft-handle length truncation and reject other bad finish reasons", () => {
   expect(() => parseOpenAIMessage({ choices: [{}] })).toThrow("missing assistant message");
-  for (const finish_reason of ["length", "content_filter", "unknown_vendor_reason"]) {
+  const truncated = parseOpenAIMessage({ choices: [{ message: { content: "partial" }, finish_reason: "length" }] });
+  expect(truncated.content).toBe("partial");
+  expect(truncated.truncated).toBe(true);
+  for (const finish_reason of ["content_filter", "unknown_vendor_reason"]) {
     expect(() => parseOpenAIMessage({ choices: [{ message: { content: "partial" }, finish_reason }] }))
       .toThrow(`non-success finish_reason: ${finish_reason}`);
   }
@@ -763,8 +766,12 @@ test("openai stream accepts EOF after an explicit successful finish", async () =
   expect((await completeOpenAIStream(body)).content).toBe("complete");
 });
 
-test("openai stream rejects non-success finish reasons", async () => {
-  for (const finish_reason of ["length", "content_filter", "unknown_vendor_reason"]) {
+test("openai stream soft-handles length truncation and rejects other bad finish reasons", async () => {
+  const lengthBody = `data: ${JSON.stringify({ choices: [{ delta: { content: "partial" }, finish_reason: "length" }] })}\n\ndata: [DONE]\n\n`;
+  const truncated = await completeOpenAIStream(lengthBody);
+  expect(truncated.content).toBe("partial");
+  expect(truncated.truncated).toBe(true);
+  for (const finish_reason of ["content_filter", "unknown_vendor_reason"]) {
     const body = `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason }] })}\n\ndata: [DONE]\n\n`;
     await expect(completeOpenAIStream(body)).rejects.toThrow(`non-success finish_reason: ${finish_reason}`);
   }

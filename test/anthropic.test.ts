@@ -615,7 +615,7 @@ test("anthropic stream fails closed on malformed non-keepalive data and invalid 
   ]))).rejects.toThrow("incomplete content block");
 });
 
-test("anthropic stream accepts bounded keepalives, preserves cached usage, and rejects truncation", async () => {
+test("anthropic stream accepts bounded keepalives, preserves cached usage, and soft-handles max_tokens truncation", async () => {
   const result = await completeAnthropicStream(anthropicSseResponse([
     "data: ping\n",
     'data: {"type":"ping"}\n',
@@ -628,9 +628,20 @@ test("anthropic stream accepts bounded keepalives, preserves cached usage, and r
   expect(result.content).toBe("ok");
   expect(result.usage).toEqual({ prompt_tokens: 15, completion_tokens: 2, total_tokens: 17, cached_tokens: 7, cache_write_tokens: 3 });
 
+  const truncated = await completeAnthropicStream(anthropicSseResponse([
+    'data: {"type":"message_start","message":{"usage":{}}}\n',
+    'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"partial"}}\n',
+    'data: {"type":"content_block_stop","index":0}\n',
+    'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":9}}\n',
+    'data: {"type":"message_stop"}\n',
+  ]));
+  expect(truncated.content).toBe("partial");
+  expect(truncated.truncated).toBe(true);
+
+  // Still reject genuinely unknown stop reasons.
   await expect(completeAnthropicStream(anthropicSseResponse([
     'data: {"type":"message_start","message":{"usage":{}}}\n',
-    'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{}}\n',
+    'data: {"type":"message_delta","delta":{"stop_reason":"safety"},"usage":{}}\n',
     'data: {"type":"message_stop"}\n',
   ]))).rejects.toThrow("non-success stop reason");
 });

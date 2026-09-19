@@ -52,6 +52,12 @@ import {
   isVietnamSovereigntyDeferral,
   isVietnamSovereigntyTopic,
 } from "./vietnam-sovereignty.ts";
+import {
+  failedVerificationReviewNudge,
+  missingArtifactReviewNudge,
+  missingRequiredArtifacts,
+  type MissingArtifact,
+} from "./required-artifacts.ts";
 
 export {
   DEFAULT_SYSTEM_PROMPT,
@@ -139,7 +145,7 @@ export type ImageAttachment = string | NumberedImageAttachment;
 
 export interface AgentCompletionStatus {
   ok: boolean;
-  reason?: "validation_failed" | "validation_missing" | "contract_failed" | "contract_unverified" | "outcome_unverified";
+  reason?: "validation_failed" | "validation_missing" | "contract_failed" | "contract_unverified" | "outcome_unverified" | "artifacts_missing" | "failed_checks_unresolved";
   command?: string;
   detail?: string;
 }
@@ -281,6 +287,10 @@ export class Agent {
   private validationExpected = false;
   private unverifiedState = false;
   private validationResult?: { epoch: number; command: string; ok: boolean; authoritative: boolean; detail?: string };
+  /** Goal text for the active runUntilDone closed loop (artifact gate + review nudges). */
+  private closedLoopGoal = "";
+  /** Recent non-zero bash/test command summaries; cleared on an authoritative passing validator. */
+  private recentFailedChecks: string[] = [];
 
   constructor(opts: AgentOptions) {
     this.provider = opts.provider;
@@ -328,6 +338,25 @@ export class Agent {
         ok: false,
         reason: review?.verdict === "fail" ? "contract_failed" : "contract_unverified",
         ...(review?.findings[0] ? { detail: review.findings[0] } : undefined),
+      };
+    }
+    
+    const artifactDebt = this.missingClosedLoopArtifacts();
+    if (artifactDebt.length) {
+      return {
+        ok: false,
+        reason: "artifacts_missing",
+        detail: artifactDebt.slice(0, 6).map((row) => `${row.path} (${row.reason})`).join("; "),
+      };
+    }
+    // Only enforce unresolved failed-check debt inside runUntilDone (closed-loop / headless).
+    // Interactive single-shot turns still see the nudge via review text, but must not inherit a
+    // sticky failure bit from exploratory bash (keeps ordinary Agent.run tests well-behaved).
+    if (this.closedLoopGoal.trim() && this.recentFailedChecks.length) {
+      return {
+        ok: false,
+        reason: "failed_checks_unresolved",
+        detail: this.recentFailedChecks.slice(-3).join(" | "),
       };
     }
     return { ok: true };
@@ -581,10 +610,74 @@ export class Agent {
     }
   }
 
+  /** Background bash or open todos mean the closed loop still has unfinished work. */
+  private hasPendingClosedLoopWork(): boolean {
+    if (this.tools.backgrounds.some((job) => !job.done)) return true;
+    if (this.tools.todos.some((todo) => todo.status !== "completed")) return true;
+    return false;
+  }
+
+  /** Headless `--loop` should match `--once` once the turn is idle, verified, and free of pending tools. */
+  private shouldExitClosedLoopWhenIdle(out: string): boolean {
+    if (!out.trim()) return false;
+    if (!this.completionStatus.ok) return false;
+    if (this.hasPendingClosedLoopWork()) return false;
+    // Artifact gate + unresolved failed checks are folded into completionStatus.ok above
+    // (StateM-style anti-premature-stop / required-artifact before DONE).
+    return true;
+  }
+
+  private missingClosedLoopArtifacts(): MissingArtifact[] {
+    const goal = this.closedLoopGoal.trim();
+    if (!goal) return [];
+    const root = this.tools.root;
+    if (!root) return [];
+    return missingRequiredArtifacts(root, goal, { requireNonEmpty: true });
+  }
+
+  private closedLoopReviewNudge(): string {
+    const parts = [
+      missingArtifactReviewNudge(this.missingClosedLoopArtifacts()),
+      failedVerificationReviewNudge(this.recentFailedChecks),
+    ].filter(Boolean);
+    if (!parts.length) return "";
+    return "\n\n" + parts.join("\n\n");
+  }
+
+  private noteFailedOrPassedCheck(call: { name: string; arguments?: any }, observation: any): void {
+    // Failure-trace debt is a closed-loop concern (runUntilDone / --loop). Do not pollute
+    // ordinary Agent.run sessions with sticky unresolved-check state.
+    if (!this.closedLoopGoal.trim()) return;
+    const name = String(call.name ?? "").toLowerCase();
+    if (name !== "bash") return;
+    const command = String(call.arguments?.command ?? "").trim().replace(/\s+/g, " ");
+    if (!command) return;
+    const textObs = typeof observation === "string" ? observation : "";
+    const failed = /^\(exit [1-9]\d* -- command FAILED\)/m.test(textObs)
+      || /\(exit [1-9]\d* -- command FAILED\)/.test(textObs)
+      || Agent.isFailedRunResult(observation);
+    const passed = /^\(exit 0\)(?:\r?\n|$)/m.test(textObs) || /^\(exit 0\)/.test(textObs);
+    if (failed) {
+      const detail = textObs.replace(/\s+/g, " ").trim().slice(0, 160);
+      this.recentFailedChecks.push(detail ? `${command.slice(0, 120)} :: ${detail}` : command.slice(0, 160));
+      if (this.recentFailedChecks.length > 8) this.recentFailedChecks = this.recentFailedChecks.slice(-8);
+      return;
+    }
+    if (passed) {
+      // Any successful bash clears unresolved failure debt (execution evidence adapted the run).
+      this.recentFailedChecks = [];
+    }
+  }
+
+
   /** Closed-loop runner (agent-looping, "closed" variant): do the goal, then self-review against
    * a high bar and fix gaps, repeating until the model replies DONE or maxIters is hit. A provider
    * inactivity timeout resumes from the durable trajectory with bounded retries; this is not a total
-   * wall-clock deadline, and an explicit user abort is never retried. */
+   * wall-clock deadline, and an explicit user abort is never retried.
+   *
+   * `exitWhenIdle` (CLI `neko run --loop`): when the implementer finishes with no pending tools/todos
+   * and completion is already ok, stop like `--once` instead of starting another review that can hang
+   * headless evals. Interactive `/auto` keeps the full supervisor path by omitting this flag. */
   async runUntilDone(
     goal: string,
     opts: {
@@ -592,6 +685,8 @@ export class Agent {
       signal?: AbortSignal;
       maxStallRecoveries?: number;
       implementationRoundSteps?: number;
+      /** When true, skip further closed-loop reviews once idle + verified + no pending tools. */
+      exitWhenIdle?: boolean;
     } = {},
   ): Promise<string> {
     const maxIters = Math.max(1, Math.min(opts.maxIters ?? 6, 20));
@@ -610,6 +705,9 @@ export class Agent {
       stepLimit,
       stepLimit !== undefined,
     );
+    const exitWhenIdle = Boolean(opts.exitWhenIdle);
+    this.closedLoopGoal = goal;
+    this.recentFailedChecks = [];
     const outerTurnSystemContext = this.turnSystemContext;
     const projectContract = (contract: CompletionContract) => {
       this.turnSystemContext = [
@@ -623,7 +721,9 @@ export class Agent {
       phase: this.completionSupervisor ? "contract" : "implementation",
     });
     try {
-      if (this.completionSupervisor) {
+      // exitWhenIdle (CLI --loop): skip independent contract create/repair — those structured calls
+      // are a common headless hang after the model already finished. Interactive /auto keeps them.
+      if (this.completionSupervisor && !exitWhenIdle) {
         try {
           if (!this.completionContractState || this.completionContractState.goal !== goal) {
             const remainingMs = this.workDeadlineAt === undefined
@@ -662,6 +762,38 @@ export class Agent {
       }
 
       this.emit("completion_phase", { phase: "implementation" });
+
+      // Headless `--loop` / exitWhenIdle: implement once, then keep reviewing ONLY while verification
+      // debt or pending tools remain. Skips the independent supervisor (create/repair/review can hang
+      // on stalled structured calls after a trivial DONE). Interactive `/auto` omits exitWhenIdle.
+      if (exitWhenIdle) {
+        let out = await runResumable(goal);
+        for (let i = 1; i < maxIters; i++) {
+          if (opts.signal?.aborted || out === "[interrupted]") return out;
+          if (this.shouldExitClosedLoopWhenIdle(out)) {
+            this.emit("completion_phase", { phase: "finalization" });
+            return out;
+          }
+          out = await runResumable(
+            `CLOSED-LOOP REVIEW (pass ${i + 1}/${maxIters}). Goal: "${goal}".\n` +
+              `First RE-INSPECT the ACTUAL current state (re-run the check / re-read the file / re-screenshot ` +
+              `or re-read the UI) — judge what IS, not your memory of what you intended. Then compare against ` +
+              `the supplied source/docs and observable runtime output or side effects; use independent evidence, ` +
+              `not only the same happy-path check you authored. Run available repository tests from a clean state, ` +
+              `then remove disposable validation artifacts while preserving intended deliverables. If the deliverable ` +
+              `is a program, an output recreated by a clean run is disposable even when the goal names its path. Compare against ` +
+              `the goal and a high quality bar. If it is FULLY met, reply with exactly "DONE" and nothing else. ` +
+              `Otherwise, keep working: do the next concrete step now (don't stop until the goal is achieved).` + this.closedLoopReviewNudge(),
+            true,
+          );
+          if (/^\s*done[.!]?\s*$/i.test(out) && this.shouldExitClosedLoopWhenIdle(out)) {
+            this.emit("completion_phase", { phase: "finalization" });
+            return out;
+          }
+        }
+        this.emit("completion_phase", { phase: "finalization" });
+        return out;
+      }
 
       if (this.completionSupervisor && this.completionContractState) {
         let instruction = goal;
@@ -752,6 +884,8 @@ export class Agent {
       let out = await runResumable(goal);
       for (let i = 1; i < maxIters; i++) {
         if (opts.signal?.aborted || out === "[interrupted]") return out;
+        // Explicit DONE (or exitWhenIdle) with no pending tools: stop like `--once`.
+        if (/^\s*done[.!]?\s*$/i.test(out) && this.shouldExitClosedLoopWhenIdle(out)) break;
         out = await runResumable(
           `CLOSED-LOOP REVIEW (pass ${i + 1}/${maxIters}). Goal: "${goal}".\n` +
             `First RE-INSPECT the ACTUAL current state (re-run the check / re-read the file / re-screenshot ` +
@@ -761,15 +895,17 @@ export class Agent {
             `then remove disposable validation artifacts while preserving intended deliverables. If the deliverable ` +
             `is a program, an output recreated by a clean run is disposable even when the goal names its path. Compare against ` +
             `the goal and a high quality bar. If it is FULLY met, reply with exactly "DONE" and nothing else. ` +
-            `Otherwise, keep working: do the next concrete step now (don't stop until the goal is achieved).`,
+            `Otherwise, keep working: do the next concrete step now (don't stop until the goal is achieved).` + this.closedLoopReviewNudge(),
           true,
         );
-        if (/^\s*done[.!]?\s*$/i.test(out) && this.completionStatus.ok) break;
+        if (/^\s*done[.!]?\s*$/i.test(out) && this.shouldExitClosedLoopWhenIdle(out)) break;
       }
       return out;
     } finally {
       this.turnSystemContext = outerTurnSystemContext;
       this.runUntilDoneActive = false;
+      // Keep closedLoopGoal / recentFailedChecks so completionStatus still reflects
+      // artifact and failed-check debt after the closed loop returns (harness gates).
       this.completionContractFinal = Boolean(this.completionContractState);
     }
   }
@@ -988,6 +1124,10 @@ export class Agent {
    * `images` (data: URLs) attach as OpenAI vision content — used by paste-image (needs a vision model). */
   // `internal` is local provenance for controller-generated turns; providerHistory() removes it.
   async run(instruction: string, signal?: AbortSignal, images?: ImageAttachment[], internal = false): Promise<string> {
+    // Ordinary turns are not closed-loop; drop leftover harness gate state.
+    this.closedLoopGoal = "";
+    this.recentFailedChecks = [];
+
     return this.runLoop(instruction, signal, images, internal);
   }
 
@@ -1061,6 +1201,7 @@ export class Agent {
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
       const failed = observation == null || Agent.isUnproductiveResult(observation);
+      this.noteFailedOrPassedCheck(call, observation);
       this.cost.efficiency.observeTool(JSON.stringify([call.name, call.arguments]), isText(observation) ? observation : null,
         changesState, failed, !this.isMechanicalReadCall(call) || this.isRepeatableWaitCall(call));
       if (!failed && isFreshFactWebTool(call.name)) freshFactVerificationEvidence = true;
@@ -1307,6 +1448,19 @@ export class Agent {
           || (final && this.messages.at(-1)?.role === "tool")) {
           finalizeInflight(final, [], response.continuation);
         }
+        // Output-token cap (max_tokens / finish_reason=length): never treat as terminal success.
+        // Keep working with smaller edits so a single long write cannot abort the whole run.
+        if (response.truncated && step < runStepLimit - 1) {
+          this.messages.push({
+            role: "user",
+            _neko_internal: true,
+            content: "[truncated] The previous model turn hit the output token limit before finishing. "
+              + "Do not stop. Continue from the current workspace state: prefer smaller file edits, "
+              + "finish any required deliverable paths, and re-verify named checks or numerical "
+              + "outputs against the instruction before claiming done.",
+          });
+          continue;
+        }
         if (deliveryGateActive && step < runStepLimit - 1) {
           this.messages.push({
             role: "user",
@@ -1443,6 +1597,7 @@ export class Agent {
       await this.durableCheckpoint(); // the call itself is durable before a slow or state-changing tool starts
       if (signal?.aborted) return "[interrupted]";
       let stepHadUnproductiveResult = false;
+      const turnWasTruncated = Boolean(response.truncated);
 
       // Fleet fan-out: static read tools and capability-restricted reviewer/explorer tasks may run
       // in parallel. Generic/custom workers can mutate, so one such call serializes the whole batch.
@@ -1548,6 +1703,17 @@ export class Agent {
             });
           }
         }
+      }
+
+      // After a truncated tool-bearing turn, remind the model to finish in smaller chunks.
+      if (turnWasTruncated && step < runStepLimit - 1) {
+        this.messages.push({
+          role: "user",
+          _neko_internal: true,
+          content: "[truncated] The previous model turn hit the output token limit while emitting tool calls. "
+            + "Continue from the tool results above with smaller edits; land required deliverables and "
+            + "re-verify numerical/named checks from the instruction before finishing.",
+        });
       }
 
       // Issue one completion nudge near each configured step-budget threshold.

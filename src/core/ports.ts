@@ -18,6 +18,10 @@ export interface ProviderResponse {
   /** Opaque provider continuation items that must be replayed with the assistant turn (for example,
    * encrypted Responses reasoning items between tool rounds). The core stores but never interprets it. */
   continuation?: any[];
+  /** True when the provider hit an output-token cap (Anthropic stop_reason=max_tokens, OpenAI
+   * finish_reason=length). Partial content/tool_calls are still returned; the Agent must continue
+   * rather than treat the turn as a successful terminal answer. */
+  truncated?: boolean;
 }
 
 /** onDelta streams chunks as they arrive (SSE). kind="reasoning" is the model's live thinking;

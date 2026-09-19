@@ -10,6 +10,7 @@ import { playbookContextBlock } from "../core/playbook.ts";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { todosContextBlock } from "../core/tool-runtime.ts";
 import { vietnamSovereigntyContext } from "../core/vietnam-sovereignty.ts";
+import { failureTracePracticeGuidance } from "../core/required-artifacts.ts";
 import { matchWorkflow, workflowsContextBlock } from "../core/workflows.ts";
 
 export interface ProductionTurnContextOptions {
@@ -64,6 +65,38 @@ export interface MatchedTurnContext {
 
 /** Auto-routing sees raw human/delegated text only. Expanded files, captions, project context, and
  * recalled data are deliberately excluded so untrusted content cannot widen or inject system policy. */
+
+/** Soft verification nudge when the user prompt is about async cancel / SIGINT cleanup.
+ * Does not prescribe a solution — only reminds the agent to cover the backlog-above-max_concurrent case. */
+export function asyncCancelVerificationGuidance(rawText: string): string {
+  const text = String(rawText ?? "");
+  if (!/(KeyboardInterrupt|\bSIGINT\b|CancelledError|max[_ -]?concurrent|cancel(?:led|lation)?\s+async|async(?:io)?[^\n]{0,80}cancel)/i.test(text)) {
+    return "";
+  }
+  return [
+    "# Async cancellation verification",
+    "When building an async runner with a concurrency limit, treat cancel/SIGINT/KeyboardInterrupt as a full drain:",
+    "cancel and await every task that already started — including work admitted while the queue still had more than max_concurrent items pending — so each started task's cleanup/finally runs before the process exits.",
+    "Verify with a real interrupt against a backlog above the concurrency cap, not only the case where in-flight count equals max_concurrent.",
+  ].join("\n");
+}
+
+/** Soft nudge when the prompt asks for numerical/circuit correctness against named checks.
+ * Generic — no task IDs or golden values. */
+export function numericalVerifyGuidance(rawText: string): string {
+  const text = String(rawText ?? "");
+  if (!/\b(?:fibonacci|sqrt|modulo|%\s*2\^|circuit|gates?\.(?:txt|json)|numerical|exact(?:ly)?\s+(?:match|equal)|correct(?:ness)?\s+of\s+(?:the\s+)?output)\b/i.test(text)) {
+    return "";
+  }
+  return [
+    "# Numerical / circuit verification",
+    "When the task requires exact numerical outputs (e.g. modular arithmetic, integer sqrt, Fibonacci,",
+    "or a circuit/gates deliverable consumed by a simulator), treat sample cases from the instruction",
+    "as executable acceptance checks: compute expected values independently, run the artifact, and",
+    "iterate until every named check matches — do not stop after a plausible-looking file write.",
+  ].join("\n");
+}
+
 export function matchedTurnContext(
   rawText: string,
   registry: ToolRegistry,
@@ -81,6 +114,12 @@ export function matchedTurnContext(
   }
   const workflow = registry.isToolAvailable("workflow") ? matchWorkflow(rawText) : null;
   if (workflow) blocks.push(`# Learned workflow: ${workflow.name}\n${workflow.body}`);
+  const asyncCancel = asyncCancelVerificationGuidance(rawText);
+  if (asyncCancel) blocks.push(asyncCancel);
+  const numerical = numericalVerifyGuidance(rawText);
+  if (numerical) blocks.push(numerical);
+  const failureTrace = failureTracePracticeGuidance(rawText);
+  if (failureTrace) blocks.push(failureTrace);
   const vietnam = vietnamSovereigntyContext(rawText);
   // Core identity knowledge is deliberately last so lower-authority skill/workflow text cannot
   // silently replace it. Routing still sees only the raw human/delegated envelope above.

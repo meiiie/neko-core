@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { trustProject } from "../src/adapters/project-trust.ts";
-import { productionTurnContext } from "../src/adapters/turn-context.ts";
+import { asyncCancelVerificationGuidance, matchedTurnContext, numericalVerifyGuidance, productionTurnContext } from "../src/adapters/turn-context.ts";
 import { EXACT_FILE_TURN_TOOLS } from "../src/adapters/turn-capabilities.ts";
 import { Agent } from "../src/core/agent.ts";
 import { TURN_CONTEXT_MARK } from "../src/core/agent-constants.ts";
@@ -114,3 +114,62 @@ test("a preparation throw closes the turn lease and removes provider-only contex
   expect(JSON.stringify(agent.providerHistory())).not.toContain("VOLATILE PREP CONTEXT");
   expect(JSON.stringify(agent.messages)).toContain("PERSISTENT SYSTEM CONTEXT");
 });
+
+test("async cancel guidance fires only for interrupt/concurrency prompts", () => {
+  expect(asyncCancelVerificationGuidance("add a hello world")).toBe("");
+  const tip = asyncCancelVerificationGuidance(
+    "Handle KeyboardInterrupt / SIGINT cleanup for an asyncio runner with max_concurrent",
+  );
+  expect(tip).toContain("Async cancellation verification");
+  expect(tip).toContain("max_concurrent");
+  expect(tip).toContain("backlog");
+  expect(tip).not.toContain("canary");
+  expect(tip).not.toContain("terminal-bench");
+});
+
+test("matchedTurnContext includes async cancel nudge from raw user text", () => {
+  const registry = new ToolRegistry(process.cwd(), "auto", () => true);
+  const matched = matchedTurnContext(
+    "Implement cancel-async-tasks with KeyboardInterrupt cleanup when n_tasks > max_concurrent",
+    registry,
+    process.cwd(),
+  );
+  expect(matched.text).toContain("Async cancellation verification");
+  expect(matched.text).toContain("await every task that already started");
+});
+
+
+test("numericalVerifyGuidance fires for circuit/fib-style prompts only", () => {
+  expect(numericalVerifyGuidance("add a hello world")).toBe("");
+  const tip = numericalVerifyGuidance(
+    "Build a circuit that computes fib(sqrt(n)) mod 2^32; write gates.txt and verify outputs",
+  );
+  expect(tip).toContain("Numerical / circuit verification");
+  expect(tip).toContain("sample cases");
+  expect(tip).not.toContain("canary");
+  expect(tip).not.toContain("terminal-bench");
+});
+
+test("matchedTurnContext includes numerical verify nudge from raw user text", () => {
+  const registry = new ToolRegistry(process.cwd(), "auto", () => true);
+  const matched = matchedTurnContext(
+    "Implement circuit gates for fibonacci of integer sqrt with modular output",
+    registry,
+    process.cwd(),
+  );
+  expect(matched.text).toContain("Numerical / circuit verification");
+});
+
+test("matchedTurnContext includes failure-trace practice guidance for deliverable prompts", () => {
+  const registry = new ToolRegistry(process.cwd(), "auto", () => true);
+  const matched = matchedTurnContext(
+    "Write /app/re.json then verify with check.py before you finish",
+    registry,
+    process.cwd(),
+  );
+  expect(matched.text).toContain("Completion verification practice");
+  expect(matched.text).toContain("/app/re.json");
+  const plain = matchedTurnContext("what is the weather", registry, process.cwd());
+  expect(plain.text).not.toContain("Completion verification practice");
+});
+
