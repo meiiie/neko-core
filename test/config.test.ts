@@ -179,11 +179,15 @@ test("a profile with no explicit max_tokens resolves to 0 (auto), not a hardcode
   // The old default (8192) silently capped EVERY provider that didn't set max_tokens, truncating large
   // single-shot file writes. 0 = auto: compat/responses omit the field (full model budget); anthropic
   // substitutes its own generous default. This is the systemic fix, not a per-profile patch.
+  // Built-in coding profiles may set an explicit budget (e.g. zai=65536); assert the omit path via
+  // profiles that leave max_tokens unset, plus a blank custom overlay.
+  const blank = loadConfig({ path: tmpConfig({ provider: "openai_compat", model: "test-model" }) });
+  expect(blank.maxTokens).toBe(0);
+  const grokBuild = loadConfig({ path: tmpConfig({}), profile: "grok-build" });
+  expect(grokBuild.maxTokens).toBe(0);
   const zai = loadConfig({ path: tmpConfig({}), profile: "zai" });
   expect(zai.provider).toBe("anthropic");
-  expect(zai.maxTokens).toBe(0);
-  const groq = loadConfig({ path: tmpConfig({}), profile: "groq" });
-  expect(groq.maxTokens).toBe(0);
+  expect(zai.maxTokens).toBe(65_536); // explicit profile budget, not the old silent 8192 cap
 });
 
 test("ChatGPT subscription defaults to a completion-usable vision model", () => {
@@ -493,9 +497,29 @@ test("Windows PowerShell UTF-8 BOM does not invalidate config JSON", () => {
 });
 
 test("mode derives from approval; NEKO_MODE overrides", () => {
-  expect(loadConfig({ path: tmpConfig({ approval: "auto" }) }).mode).toBe("auto");
-  process.env.NEKO_MODE = "plan";
-  expect(loadConfig({ path: tmpConfig({}) }).mode).toBe("plan");
+  const prev = process.env.NEKO_MODE;
+  try {
+    delete process.env.NEKO_MODE;
+    expect(loadConfig({ path: tmpConfig({ approval: "auto" }) }).mode).toBe("auto");
+    process.env.NEKO_MODE = "plan";
+    expect(loadConfig({ path: tmpConfig({}) }).mode).toBe("plan");
+  } finally {
+    if (prev === undefined) delete process.env.NEKO_MODE;
+    else process.env.NEKO_MODE = prev;
+  }
+});
+
+test("omitted mode resolves to auto (product default since 0.24.10)", () => {
+  const prev = process.env.NEKO_MODE;
+  try {
+    delete process.env.NEKO_MODE;
+    expect(loadConfig({ path: tmpConfig({}) }).mode).toBe("auto");
+    expect(loadConfig({ path: tmpConfig({ approval: "prompt" }) }).mode).toBe("default");
+    expect(loadConfig({ path: tmpConfig({ mode: "default" }) }).mode).toBe("default");
+  } finally {
+    if (prev === undefined) delete process.env.NEKO_MODE;
+    else process.env.NEKO_MODE = prev;
+  }
 });
 
 test("contextWindow is per-model (model_context wins over the global default)", () => {

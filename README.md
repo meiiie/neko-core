@@ -220,7 +220,7 @@ approval gate:
 import { Agent, ToolRegistry, type ApprovalGate, type Provider } from "neko-core";
 
 export function createAgent(provider: Provider, root: string, approve: ApprovalGate) {
-  const tools = new ToolRegistry(root, "default", approve);
+  const tools = new ToolRegistry(root, "auto", approve);
   return new Agent({ provider, tools });
 }
 ```

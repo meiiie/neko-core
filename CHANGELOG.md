@@ -6,6 +6,17 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **ToolRegistry / library hosts now default to permission mode `auto`.** Config and the TUI
+  already treated omitted `mode` as bounded auto (since 0.24.10); the constructor and README
+  host sample still said `default`. Aligning them makes SDK embeds and omitted-arg call sites
+  match Claude Code / Grok Build product default. Shift+Tab still cycles
+  `default | accept-edits | plan | auto`; set `"mode": "default"` for asks-first. Ordinary
+  `auto` still prompts for host computer control (not YOLO). ACP session-list metadata falls
+  back to `auto` when a record has no stored mode.
+
+
 ## [1.6.2] - 2026-09-09
 
 ### Improved
@@ -646,7 +657,8 @@ All notable changes to Neko Core are documented here. The format follows
 - **Enter no longer randomly does nothing.** When a terminal under load (or any input bridge)
   delivers the last typed character and the Enter key in one chunk, the input parser classified
   the burst as a paste and swallowed the submit - turns silently never started and `/exit` hung.
-  A chunk ending in a lone `` is now treated as text plus Enter: the text is inserted and the
+  A chunk ending in a lone `
+` is now treated as text plus Enter: the text is inserted and the
   submit fires. True multi-line pastes (containing `
 `) still insert without submitting.
 
