@@ -127,6 +127,40 @@ test("multi_edit refuses a missing new_string without deleting content", async (
   expect(readFileSync(path, "utf-8")).toBe(before);
 });
 
+test("edit matches when the file is CRLF and old_string is LF", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "crlf.ts"), "function f() {\r\n  const x = 1;\r\n}\r\n");
+  const out = await reg.execute("edit", {
+    path: "crlf.ts",
+    old_string: "  const x = 1;",
+    new_string: "  const x = 2;",
+  });
+  expect(out).toContain("Edited");
+  const after = readFileSync(join(root, "crlf.ts"), "utf-8");
+  expect(after).toContain("const x = 2;");
+  expect(after).toContain("\r\n"); // preserve CRLF
+});
+
+test("multi_edit uses the same whitespace-tolerant match as edit", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "ws.ts"), "function f() {\nconst x = 1;\n}\n");
+  const out = await reg.execute("multi_edit", {
+    path: "ws.ts",
+    edits: [{ old_string: "    const x = 1;", new_string: "    const x = 9;" }],
+  });
+  expect(out).toContain("Edited");
+  expect(await reg.execute("read_file", { path: "ws.ts" })).toContain("const x = 9;");
+});
+
+test("edit not-found error tells the model to re-read exact bytes", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "miss.ts"), "const ok = true;\n");
+  const out = await reg.execute("edit", { path: "miss.ts", old_string: "nope", new_string: "x" });
+  expect(out).toContain("old_string not found");
+  expect(out).toContain("Re-read the file");
+  expect(out.toLowerCase()).toContain("no change written");
+});
+
 test("edit reports an ambiguous whitespace match instead of guessing", async () => {
   const { root, reg } = makeReg();
   writeFileSync(join(root, "d.ts"), "a();\na();\n"); // two lines, no indent

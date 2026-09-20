@@ -437,3 +437,17 @@ test("web-reading supports large virtualized feeds without keeping every post in
   expect(collector).toContain("const target = 20");
   expect(collector).not.toContain("document.cookie");
 });
+
+test("sql skill does not false-positive on plain JS edit prompts", () => {
+  const plain = [
+    "edit src/app.js and fix the array join",
+    "update the index variable in the loop",
+    "refactor this plain JavaScript helper",
+  ];
+  for (const prompt of plain) {
+    expect(matchesSkill("sql", prompt)).toBe(false);
+  }
+  expect(matchesSkill("sql", "optimize this postgres query join")).toBe(true);
+  expect(matchesSkill("sql", "add a database migration for users")).toBe(true);
+  expect(matchesSkill("sql", "create index on users.email")).toBe(true);
+});

@@ -51,6 +51,17 @@ import type { FeedbackReport } from "../shared/feedback-wire.ts";
 
 import { isBool, isText } from "../shared/wire.ts";
 
+/** Tips shown in the /help overlay description (not dumped into the transcript). */
+export const HELP_TIPS = [
+  "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
+  "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line, Ctrl+G external editor.",
+  "Keys: Shift+Tab cycle mode · Up/Down history · Alt+C copy draft · Alt+V paste image · Ctrl+O expand · Ctrl+B bash to background · Ctrl+L clear.",
+  "Esc: clear input (idle) or interrupt a running turn. Ctrl+C: clear input, then again to quit.",
+  "Caret: set caret_glyph (bar/block/underline/thin-block) or NEKO_CARET if the cursor glyph looks offset.",
+].join(" · ");
+
+/** Compact help text kept for tests/benches that still assert the classic dump shape. Prefer the
+ * ephemeral /help overlay in the live REPL so the task trail is not permanently crowded. */
 export const HELP = [
   "Commands:",
   "  /help /cost /usage /voice /model /provider /support /browser /meeting /tools /skill(s) /init /clear /compact /transcript /reset /exit",
@@ -780,8 +791,23 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/exit":
     case "/quit":
       return ctx.exit();
-    case "/help":
-      return addLine("info", HELP);
+    case "/help": {
+      // Ephemeral overlay: do not dump the full command list into the permanent transcript.
+      ctx.setOverlay({
+        title: "Commands",
+        description: HELP_TIPS,
+        items: SLASH.map((c) => ({ id: c.name, label: c.name, detail: c.desc })),
+        search: true,
+        showCount: true,
+        onSelect: (it) => {
+          ctx.setOverlay(null);
+          // One short line — not the whole catalog — so the user can recall what they picked.
+          ctx.addLine("info", `${it.label} — ${it.detail ?? ""}`.trim());
+        },
+        onCancel: () => {}, // silent Esc; avoid a stray "(cancelled)" in the task trail
+      });
+      return;
+    }
     case "/feedback": {
       if (input.trim() !== "/feedback") return addLine("info", "Use /feedback to enter private notes in the dedicated form, outside the model conversation.");
       openFeedback(ctx);

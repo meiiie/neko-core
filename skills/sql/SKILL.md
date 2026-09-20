@@ -1,7 +1,7 @@
 ---
 name: sql
 description: Design schemas and write SQL that is correct, safe, and fast - modeling, queries, indexes, migrations, transactions.
-match: (\bsql\b|postgres|postgresql|mysql|sqlite|mariadb|database schema|\bmigration|\bindex(es|ing)?\b|query optimi[sz]|join|\borm\b|prisma|drizzle|sqlalchemy|N\+1|foreign key|primary key)
+match: (\bsql\b|postgres|postgresql|mysql|sqlite|mariadb|database schema|\b(?:db\s+)?migrations?\b|\b(?:create|drop|unique)\s+index\b|\bindexes\b|\bindexing\b|query optimi[sz]|\b(?:inner|left|right|full|cross|outer)\s+join\b|\bsql\s+join\b|\borm\b|prisma|drizzle|sqlalchemy|N\+1|foreign key|primary key)
 ---
 
 # SQL — model it right, query it safely, make it fast
