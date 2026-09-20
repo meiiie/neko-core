@@ -38,6 +38,20 @@ export function effectiveContextTokens(lastPrompt: number, estimate = 0): number
   return Math.max(Math.max(0, lastPrompt || 0), Math.max(0, estimate || 0));
 }
 
+/** Durable counters persisted on Session.usage (TUI + ACP). */
+export interface CostSnapshot {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cachedTokens: number;
+  cacheWriteTokens: number;
+  calls: number;
+  lastPrompt: number;
+  lastCompletion: number;
+  lastCached: number;
+  lastCacheWrite: number;
+}
+
 export class CostTracker {
   readonly efficiency = new EfficiencyTracker();
   promptTokens = 0;
@@ -50,6 +64,53 @@ export class CostTracker {
   lastCompletion = 0; // last call's output size (this turn's reply)
   lastCached = 0; // last call's cache-read size (how much of the context was a cache hit)
   lastCacheWrite = 0;
+
+  /** Plain counters for session persistence (no efficiency / ephemeral state). */
+  snapshot(): CostSnapshot {
+    return {
+      promptTokens: this.promptTokens,
+      completionTokens: this.completionTokens,
+      totalTokens: this.totalTokens,
+      cachedTokens: this.cachedTokens,
+      cacheWriteTokens: this.cacheWriteTokens,
+      calls: this.calls,
+      lastPrompt: this.lastPrompt,
+      lastCompletion: this.lastCompletion,
+      lastCached: this.lastCached,
+      lastCacheWrite: this.lastCacheWrite,
+    };
+  }
+
+  /** Restore counters after --continue / /resume (ACP + TUI). Rejects malformed snapshots. */
+  restore(snap: CostSnapshot | undefined | null): void {
+    if (!snap || typeof snap !== "object") return;
+    const n = (value: unknown): number | null => {
+      const v = Number(value);
+      return Number.isSafeInteger(v) && v >= 0 ? v : null;
+    };
+    const promptTokens = n(snap.promptTokens);
+    const completionTokens = n(snap.completionTokens);
+    const totalTokens = n(snap.totalTokens);
+    const cachedTokens = n(snap.cachedTokens);
+    const cacheWriteTokens = n(snap.cacheWriteTokens);
+    const calls = n(snap.calls);
+    const lastPrompt = n(snap.lastPrompt);
+    const lastCompletion = n(snap.lastCompletion);
+    const lastCached = n(snap.lastCached);
+    const lastCacheWrite = n(snap.lastCacheWrite);
+    if ([promptTokens, completionTokens, totalTokens, cachedTokens, cacheWriteTokens,
+      calls, lastPrompt, lastCompletion, lastCached, lastCacheWrite].some((v) => v === null)) return;
+    this.promptTokens = promptTokens!;
+    this.completionTokens = completionTokens!;
+    this.totalTokens = totalTokens!;
+    this.cachedTokens = cachedTokens!;
+    this.cacheWriteTokens = cacheWriteTokens!;
+    this.calls = calls!;
+    this.lastPrompt = lastPrompt!;
+    this.lastCompletion = lastCompletion!;
+    this.lastCached = lastCached!;
+    this.lastCacheWrite = lastCacheWrite!;
+  }
 
   add(usage?: Usage): void {
     if (!usage) return;

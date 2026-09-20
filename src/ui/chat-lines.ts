@@ -97,7 +97,16 @@ export function resultSummary(
     }
     case "ls": return target ? `Listed ${target} (${n} item${n === 1 ? "" : "s"})` : `Listed ${n} item${n === 1 ? "" : "s"}`;
     case "bash":
-    case "shell_command": return target ? `Ran shell command: ${target}` : "Ran shell command";
+    case "shell_command": {
+      // Exclude the leading "(exit N)" tag so a long stdout's collapse matches what Ctrl+O shows
+      // (lived raise-bar-9: "Ran shell command: bash src/long.sh" hid that 80 lines were waiting).
+      const outLines = obs.split("\n").filter((line) => {
+        const t = line.trim();
+        return Boolean(t) && !/^\(exit \d+/.test(t);
+      }).length;
+      const base = target ? `Ran shell command: ${target}` : "Ran shell command";
+      return `${base} (${outLines} line${outLines === 1 ? "" : "s"})`;
+    }
     case "write_file": return target ? `Wrote ${target}` : "Wrote file";
     case "edit":
     case "multi_edit":
