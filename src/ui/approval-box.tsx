@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import { destructiveInWorkspace } from "../core/sandbox.ts";
 import { HIT_SENTINEL } from "./frame-diff.ts";
-import { elideCommonEnds, expandTabs, splitDiffLines, trunc } from "./format.ts";
+import { alignLineDiff, elideCommonEnds, expandTabs, splitDiffLines, trunc } from "./format.ts";
 import { highlightLine } from "./highlight.tsx";
 import { Markdown } from "./markdown.tsx";
 
@@ -56,38 +56,6 @@ const flashText = (flash: ApprovalFlash) => {
  * multi_edit cannot blow past the terminal. */
 export const APPROVAL_DIFF_MAX_LINES = 48;
 
-/** Render -/+ lines without collapsing whitespace or mid-line `…` truncation. Long lines wrap
- * naturally (Ink default); only excess LINE count is elided with a clear remainder marker.
- * Hard tabs are expanded to spaces so TTY tab-stops cannot punch holes through the paint. */
-function pushDiffSide(
-  preview: any[],
-  keyPrefix: string,
-  sign: "-" | "+",
-  color: "red" | "green",
-  text: string,
-  budget: { left: number },
-): void {
-  // Empty mid must paint nothing — splitDiffLines("") is [] (raise-bar-4/5/6 phantom +/- guard).
-  const lines = splitDiffLines(text);
-  for (let i = 0; i < lines.length; i++) {
-    if (budget.left <= 0) {
-      const rest = lines.length - i;
-      preview.push(<Text key={`${keyPrefix}-more`} dimColor>{`  … +${rest} more ${sign === "-" ? "removed" : "added"} lines`}</Text>);
-      budget.left = 0;
-      return;
-    }
-    const line = expandTabs(lines[i]);
-    preview.push(
-      <Text key={`${keyPrefix}-${i}`}>
-        <Text color={color}>{`${sign} `}</Text>
-        {sign === "+" ? highlightLine(line) : line}
-      </Text>,
-    );
-    budget.left--;
-  }
-}
-
-
 /** Dim, sign-less context kept by elideCommonEnds — shown once, never as red/green. */
 function pushContextLines(
   preview: any[],
@@ -120,7 +88,27 @@ function readWorkspaceFile(relPath: string): string | null {
   }
 }
 
-/** Paint elided old/new middles with dim head/tail context (shared by edit + overwrite write_file). */
+/** Paint one LCS-aligned row into the approval preview (reorder keeps shared lines as context). */
+function pushAlignedRow(
+  preview: any[],
+  key: string,
+  row: { type: "ctx" | "del" | "add"; line: string },
+  budget: { left: number },
+): void {
+  if (budget.left <= 0) return;
+  const line = expandTabs(row.line);
+  if (row.type === "ctx") {
+    preview.push(<Text key={key} dimColor>{`  ${line}`}</Text>);
+  } else if (row.type === "del") {
+    preview.push(<Text key={key}><Text color="red">{"- "}</Text>{line}</Text>);
+  } else {
+    preview.push(<Text key={key}><Text color="green">{"+ "}</Text>{highlightLine(line)}</Text>);
+  }
+  budget.left--;
+}
+
+/** Paint elided old/new middles with dim head/tail context (shared by edit + overwrite write_file).
+ * Divergent middle uses line LCS so a reorder does not paint unchanged anchors as delete+re-add. */
 function pushElidedDiff(
   preview: any[],
   oldText: string,
@@ -137,8 +125,16 @@ function pushElidedDiff(
     budget.left--;
   }
   pushContextLines(preview, `${keyPrefix}-hc`, headContext, budget);
-  pushDiffSide(preview, `${keyPrefix}-o`, "-", "red", o, budget);
-  pushDiffSide(preview, `${keyPrefix}-n`, "+", "green", n, budget);
+  const aligned = alignLineDiff(o, n);
+  for (let i = 0; i < aligned.length; i++) {
+    if (budget.left <= 0) {
+      const rest = aligned.length - i;
+      preview.push(<Text key={`${keyPrefix}-more`} dimColor>{`  … +${rest} more diff lines`}</Text>);
+      budget.left = 0;
+      break;
+    }
+    pushAlignedRow(preview, `${keyPrefix}-a${i}`, aligned[i], budget);
+  }
   pushContextLines(preview, `${keyPrefix}-tc`, tailContext, budget);
   if (elidedTail > 0 && budget.left > 0) {
     preview.push(<Text key={`${keyPrefix}-tail`} dimColor>{`  … ${elidedTail} unchanged line${elidedTail === 1 ? "" : "s"} below`}</Text>);
@@ -214,19 +210,7 @@ export function ApprovalBox({ approval, flash, width, hover, hint }: { approval:
       const edit = edits[k] ?? {};
       preview.push(<Text key={`e${k}-h`} dimColor>{`#${k + 1}`}</Text>);
       budget.left--;
-      const trimmed = elideCommonEnds(String(edit.old_string ?? ""), String(edit.new_string ?? ""));
-      if (trimmed.elidedHead > 0 && budget.left > 0) {
-        preview.push(<Text key={`e${k}-head`} dimColor>{`  … ${trimmed.elidedHead} unchanged line${trimmed.elidedHead === 1 ? "" : "s"} above`}</Text>);
-        budget.left--;
-      }
-      pushContextLines(preview, `e${k}-hc`, trimmed.headContext, budget);
-      pushDiffSide(preview, `e${k}-o`, "-", "red", trimmed.oldText, budget);
-      pushDiffSide(preview, `e${k}-n`, "+", "green", trimmed.newText, budget);
-      pushContextLines(preview, `e${k}-tc`, trimmed.tailContext, budget);
-      if (trimmed.elidedTail > 0 && budget.left > 0) {
-        preview.push(<Text key={`e${k}-tail`} dimColor>{`  … ${trimmed.elidedTail} unchanged line${trimmed.elidedTail === 1 ? "" : "s"} below`}</Text>);
-        budget.left--;
-      }
+      pushElidedDiff(preview, String(edit.old_string ?? ""), String(edit.new_string ?? ""), `e${k}`, budget);
     }
   } else {
     preview.push(<Text key="a" color="gray">{trunc(JSON.stringify(args), 200)}</Text>);

@@ -120,3 +120,32 @@ test("write_file overwrite preview shows red removal vs existing workspace file"
     process.chdir(prev);
   }
 });
+
+test("edit reorder preview keeps shared middle as context (not delete+re-add)", () => {
+  const old_string = ["line1 anchor-AAA", "line2 middle", "line3 anchor-BBB"].join("\n");
+  const new_string = ["line3 anchor-BBB", "line2 middle", "line1 anchor-AAA"].join("\n");
+  const approval = {
+    toolName: "edit",
+    args: { path: "notes/order.txt", old_string, new_string },
+    resolve: () => {},
+  } as Approval;
+  const c = render(
+    <Box width={80}>
+      <ApprovalBox approval={approval} flash={null} width={80} />
+    </Box>,
+  );
+  const frame = c.lastFrame() ?? "";
+  const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").replace(/[│╭╰╮╯]/g, "");
+  const plain = strip(frame);
+  expect(plain).toContain("Approve edit?");
+  expect(plain).toContain("line2 middle");
+  // Shared middle must appear as dim context (two leading spaces), not as "- line2" / "+ line2".
+  const middleRows = plain.split("\n").filter((l) => l.includes("line2 middle"));
+  expect(middleRows.length).toBeGreaterThan(0);
+  expect(middleRows.every((l) => !/^\s*-\s*line2 middle/.test(l) && !/^\s*\+\s*line2 middle/.test(l))).toBe(true);
+  expect(plain).toMatch(/-\s*line1 anchor-AAA/);
+  expect(plain).toMatch(/-\s*line3 anchor-BBB/);
+  expect(plain).toMatch(/\+\s*line1 anchor-AAA/);
+  expect(plain).toMatch(/\+\s*line3 anchor-BBB/);
+  c.unmount();
+});

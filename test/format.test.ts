@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { elideCommonEnds, expandTabs, isTrivialContextLine, splitDiffLines } from "../src/ui/format.ts";
+import { alignLineDiff, elideCommonEnds, expandTabs, isTrivialContextLine, splitDiffLines } from "../src/ui/format.ts";
 
 test("isTrivialContextLine marks braces and blanks only", () => {
   expect(isTrivialContextLine("}")).toBe(true);
@@ -88,4 +88,26 @@ test("splitDiffLines drops trailing empty fragment from terminal newline", () =>
   expect(splitDiffLines("")).toEqual([]);
   expect(splitDiffLines("no-nl")).toEqual(["no-nl"]);
   expect(splitDiffLines("a\n\nb\n")).toEqual(["a", "", "b"]); // interior blank kept
+});
+
+
+test("alignLineDiff keeps shared lines as context on a pure reorder", () => {
+  const oldText = ["line1 anchor-AAA", "line2 middle", "line3 anchor-BBB"].join("\n");
+  const newText = ["line3 anchor-BBB", "line2 middle", "line1 anchor-AAA"].join("\n");
+  const rows = alignLineDiff(oldText, newText);
+  const ctx = rows.filter((r) => r.type === "ctx").map((r) => r.line);
+  expect(ctx).toContain("line2 middle");
+  // Unchanged middle must not appear as both del and add.
+  expect(rows.filter((r) => r.type === "del" && r.line === "line2 middle")).toHaveLength(0);
+  expect(rows.filter((r) => r.type === "add" && r.line === "line2 middle")).toHaveLength(0);
+  expect(rows.some((r) => r.type === "del" && r.line.includes("AAA"))).toBe(true);
+  expect(rows.some((r) => r.type === "add" && r.line.includes("AAA"))).toBe(true);
+});
+
+test("alignLineDiff paints a plain replace as del then add", () => {
+  const rows = alignLineDiff("alpha", "beta");
+  expect(rows).toEqual([
+    { type: "del", line: "alpha" },
+    { type: "add", line: "beta" },
+  ]);
 });
