@@ -3,9 +3,12 @@ import type { ReactNode } from "react";
 
 import { destructiveInWorkspace } from "../core/sandbox.ts";
 import { HIT_SENTINEL } from "./frame-diff.ts";
-import { elideCommonEnds, expandTabs, trunc } from "./format.ts";
+import { elideCommonEnds, expandTabs, splitDiffLines, trunc } from "./format.ts";
 import { highlightLine } from "./highlight.tsx";
 import { Markdown } from "./markdown.tsx";
+
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 
 /** The clickable option row: each option is a hit zone (HIT_SENTINEL anchor) with a REAL hover
  * state, same contract as the jump pill - what lights up is exactly what a click settles. The
@@ -63,13 +66,8 @@ function pushDiffSide(
   text: string,
   budget: { left: number },
 ): void {
-  // Empty mid must paint nothing — String("").split("\n") is [""], which would draw a phantom
-  // `- ` / `+ ` trust-noise line next to dim context after elideCommonEnds.
-  if (text === "") return;
-  const lines = String(text ?? "").split("\n");
-  // A terminal newline on a non-empty mid yields a trailing "" fragment — skip it so append
-  // approvals do not grow a phantom blank +/- under the last real line (raise-bar-5).
-  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  // Empty mid must paint nothing — splitDiffLines("") is [] (raise-bar-4/5/6 phantom +/- guard).
+  const lines = splitDiffLines(text);
   for (let i = 0; i < lines.length; i++) {
     if (budget.left <= 0) {
       const rest = lines.length - i;
@@ -105,25 +103,51 @@ function pushContextLines(
   }
 }
 
-function pushEditDiff(preview: any[], args: { path?: string; old_string?: string; new_string?: string }, keyPrefix = "e"): void {
-  preview.push(<Text key={`${keyPrefix}-p`} color="gray">edit {args.path ?? "?"}</Text>);
-  const budget = { left: APPROVAL_DIFF_MAX_LINES };
-  const { oldText, newText, elidedHead, elidedTail, headContext, tailContext } = elideCommonEnds(
-    String(args.old_string ?? ""),
-    String(args.new_string ?? ""),
+
+/** Read a workspace-relative file for overwrite approval previews. Returns null when missing or
+ * outside cwd — never follows an escaping path. Best-effort only (UI preview; gate still applies). */
+function readWorkspaceFile(relPath: string): string | null {
+  try {
+    const root = resolve(process.cwd());
+    const abs = resolve(root, String(relPath ?? ""));
+    const rel = relative(root, abs);
+    if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
+    if (!existsSync(abs)) return null;
+    return readFileSync(abs, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/** Paint elided old/new middles with dim head/tail context (shared by edit + overwrite write_file). */
+function pushElidedDiff(
+  preview: any[],
+  oldText: string,
+  newText: string,
+  keyPrefix: string,
+  budget: { left: number },
+): void {
+  const { oldText: o, newText: n, elidedHead, elidedTail, headContext, tailContext } = elideCommonEnds(
+    oldText,
+    newText,
   );
   if (elidedHead > 0) {
     preview.push(<Text key={`${keyPrefix}-head`} dimColor>{`  … ${elidedHead} unchanged line${elidedHead === 1 ? "" : "s"} above`}</Text>);
     budget.left--;
   }
   pushContextLines(preview, `${keyPrefix}-hc`, headContext, budget);
-  pushDiffSide(preview, `${keyPrefix}-o`, "-", "red", oldText, budget);
-  pushDiffSide(preview, `${keyPrefix}-n`, "+", "green", newText, budget);
+  pushDiffSide(preview, `${keyPrefix}-o`, "-", "red", o, budget);
+  pushDiffSide(preview, `${keyPrefix}-n`, "+", "green", n, budget);
   pushContextLines(preview, `${keyPrefix}-tc`, tailContext, budget);
   if (elidedTail > 0 && budget.left > 0) {
     preview.push(<Text key={`${keyPrefix}-tail`} dimColor>{`  … ${elidedTail} unchanged line${elidedTail === 1 ? "" : "s"} below`}</Text>);
     budget.left--;
   }
+}
+
+function pushEditDiff(preview: any[], args: { path?: string; old_string?: string; new_string?: string }, keyPrefix = "e"): void {
+  preview.push(<Text key={`${keyPrefix}-p`} color="gray">edit {args.path ?? "?"}</Text>);
+  pushElidedDiff(preview, String(args.old_string ?? ""), String(args.new_string ?? ""), keyPrefix, { left: APPROVAL_DIFF_MAX_LINES });
 }
 
 /** Inline consent box for a gated tool, with a preview (command / write / diff / plan).
@@ -157,14 +181,24 @@ export function ApprovalBox({ approval, flash, width, hover, hint }: { approval:
     if (why) preview.push(<Text key="warn" color="red">{"⚠ "}{why} - confirm before it runs</Text>);
   } else if (toolName === "write_file") {
     const content = String(args.content ?? "");
-    const lines = content.split("\n");
-    preview.push(<Text key="p" color="gray">write {args.path} ({lines.length} lines, {content.length} chars)</Text>);
-    // Line number (dim) + green marker + syntax-highlighted code - same look as the committed diff.
-    const show = Math.min(lines.length, APPROVAL_DIFF_MAX_LINES);
-    lines.slice(0, show).forEach((l, i) => preview.push(
-      <Text key={`l${i}`}><Text dimColor>{String(i + 1).padStart(4)} </Text><Text color="green">{"+ "}</Text>{highlightLine(expandTabs(l))}</Text>,
-    ));
-    if (lines.length > show) preview.push(<Text key="more" dimColor>{`  … +${lines.length - show} more lines`}</Text>);
+    const path = String(args.path ?? "?");
+    const existing = readWorkspaceFile(path === "?" ? "" : path);
+    if (existing != null) {
+      // Overwrite must show what disappears — all-green create paint hid the prior file (raise-bar-6).
+      const beforeN = splitDiffLines(existing).length;
+      const afterN = splitDiffLines(content).length;
+      preview.push(<Text key="p" color="gray">overwrite {path} ({beforeN} → {afterN} line{afterN === 1 ? "" : "s"}, {content.length} chars)</Text>);
+      pushElidedDiff(preview, existing, content, "w", { left: APPROVAL_DIFF_MAX_LINES });
+    } else {
+      const lines = splitDiffLines(content);
+      preview.push(<Text key="p" color="gray">write {path} ({lines.length} line{lines.length === 1 ? "" : "s"}, {content.length} chars)</Text>);
+      // Line number (dim) + green marker + syntax-highlighted code - same look as the committed diff.
+      const show = Math.min(lines.length, APPROVAL_DIFF_MAX_LINES);
+      lines.slice(0, show).forEach((l, i) => preview.push(
+        <Text key={`l${i}`}><Text dimColor>{String(i + 1).padStart(4)} </Text><Text color="green">{"+ "}</Text>{highlightLine(expandTabs(l))}</Text>,
+      ));
+      if (lines.length > show) preview.push(<Text key="more" dimColor>{`  … +${lines.length - show} more lines`}</Text>);
+    }
   } else if (toolName === "edit") {
     pushEditDiff(preview, args);
   } else if (toolName === "multi_edit") {

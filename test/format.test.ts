@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { elideCommonEnds, expandTabs, isTrivialContextLine } from "../src/ui/format.ts";
+import { elideCommonEnds, expandTabs, isTrivialContextLine, splitDiffLines } from "../src/ui/format.ts";
 
 test("isTrivialContextLine marks braces and blanks only", () => {
   expect(isTrivialContextLine("}")).toBe(true);
@@ -80,4 +80,12 @@ test("elideCommonEnds leaves identical sides alone", () => {
   const r = elideCommonEnds(same, same, 1);
   expect(r.elidedHead).toBe(0);
   expect(r.oldText).toBe(same);
+});
+
+test("splitDiffLines drops trailing empty fragment from terminal newline", () => {
+  expect(splitDiffLines("a\nb\n")).toEqual(["a", "b"]);
+  expect(splitDiffLines("solo\n")).toEqual(["solo"]);
+  expect(splitDiffLines("")).toEqual([]);
+  expect(splitDiffLines("no-nl")).toEqual(["no-nl"]);
+  expect(splitDiffLines("a\n\nb\n")).toEqual(["a", "", "b"]); // interior blank kept
 });
