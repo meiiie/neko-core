@@ -8,6 +8,18 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **Architecture freer-auto residual (CONT-6).** Outside-workspace Architecture copy no longer claims
+  structured mutations are confirmation-gated for every mode. Product-default `auto` allows ordinary
+  outside writes + host computer; `default`/`accept-edits` keep the exact-path prompt; `--yolo` only
+  adds the remaining skips (destructive bash, policy-write, plan-exit). UNCONFINED AUTO disclosure
+  names destructive-ask.
+
+- **Policy UNCONFINED AUTO honesty (CONT-6).** `auto_without_live_sandbox` now states ordinary bash
+  runs without approval while workspace-destructive bash still asks once (parity with doctor/runtime).
+
+- **Help/cost honesty (CONT-6).** `/help` tips name freer `auto` (outside writes + computer; destructive
+  bash still asks). `/cost` slash desc and summary clarify tokens only — no USD estimate.
+
 - **Jump-to-bottom pill baseline (CONT-5).** Reading-mode "N new messages" baseline is captured on the
   rising edge of scroll-away during render, not in a post-paint `useEffect`. Stops a one-frame phantom
   count of the whole transcript (or sticky-bottom growth) when PgUp / wheel engages the jump pill.

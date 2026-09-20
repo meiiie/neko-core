@@ -65,6 +65,7 @@ export const HELP_TIPS = [
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
   "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line, Ctrl+G external editor.",
   "Keys: Shift+Tab cycle mode · Up/Down history · Alt+C copy draft · Alt+V paste image · Ctrl+O expand · Ctrl+B bash to background · Ctrl+L clear.",
+  "Modes: Shift+Tab cycles default|accept-edits|plan|auto — auto allows outside writes + computer; destructive bash still asks.",
   "Esc: clear input (idle) or interrupt a running turn. Ctrl+C: clear input, then again to quit.",
   "Caret: set caret_glyph (bar/block/underline/thin-block) or NEKO_CARET if the cursor glyph looks offset.",
 ].join(" · ");
@@ -79,6 +80,7 @@ export const HELP = [
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
     "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line, Ctrl+G external editor.",
     "Keys: Shift+Tab cycle mode · Up/Down history · Alt+C copy draft · Alt+V paste image · Ctrl+O expand · Ctrl+B bash to background · Ctrl+L clear.",
+    "Modes: Shift+Tab cycles default|accept-edits|plan|auto — auto allows outside writes + computer; destructive bash still asks.",
     "Esc: clear input (idle) or interrupt a running turn. Ctrl+C: clear input, then again to quit.",
     "Caret: set caret_glyph (bar/block/underline/thin-block) or NEKO_CARET if the cursor glyph looks offset.",
 ].join("\n");
@@ -86,7 +88,7 @@ export const HELP = [
 export const SLASH: { name: string; desc: string }[] = [
   { name: "/help", desc: "show help" },
   { name: "/feedback", desc: "add notes, review session logs, and send private email feedback" },
-  { name: "/cost", desc: "session cumulative tokens vs the last model request" },
+  { name: "/cost", desc: "session token totals (not USD) vs the last model request" },
   { name: "/usage", desc: "subscription/session quota and token usage for the active account" },
   { name: "/voice", desc: "terminal GPT-Live, browser compatibility, ChatGPT, or dictation" },
   { name: "/model", desc: "switch model or provider (/model list · /model <id>)" },

@@ -111,18 +111,21 @@ host daemon outside that OS sandbox; auto mode refuses those direct commands unl
 `allow_dangerous_bash` is explicitly enabled.
 
 Outside-workspace authority is split deliberately. Safe file readers may traverse ordinary host paths
-when `read_outside_root` is enabled. Structured mutations are automatic only in the project, canonical
-`additional_write_roots`, and the built-in `~/.neko-core/research` capability. An exact ordinary host
-target outside those roots can be admitted by one human confirmation; that transient authority is not
-reused or shared with Bash. The user policy file `~/.neko-core/config.json` keeps its stricter prompt plus
-post-write JSON validation. Explicit CLI/TUI `--yolo` is tracked separately from ordinary `mode=auto`: it
-pre-authorizes computer, exact host-write, policy-write, and plan-exit prompts only while the live mode
-remains auto. Shift+Tab revokes that authority immediately. Filesystem-wide grants, credential/agent-control targets,
-system locations, symlink/junction escapes, and hardlink aliases are refused at the structured boundary.
-When explicitly enabled, ordinary sandboxed Bash remains confined to the project and canonical additional
-roots. A timed-out SRT health probe may retry one real launch through the same exact SRT settings, but never
-authorizes an unconfined fallback. With the product default `sandbox:false`, Bash executes directly under
-the current Neko process identity and the runtime, doctor, and policy audit disclose `UNCONFINED AUTO`.
+when `read_outside_root` is enabled. Under product-default `auto` (Grok-free), ordinary structured writes
+outside the project and host `computer` are allowed without a prompt; credential/system paths stay refused
+and that write authority never reaches sandboxed Bash. Under `default`/`accept-edits`, structured mutations
+are automatic only in the project, canonical `additional_write_roots`, and the built-in `~/.neko-core/research`
+capability — an exact ordinary host target elsewhere still needs one human confirmation; `plan` denies.
+The user policy file `~/.neko-core/config.json` keeps its stricter prompt plus post-write JSON validation.
+Explicit CLI/TUI `--yolo` is tracked separately from ordinary `mode=auto`: while mode remains auto it
+additionally skips remaining approval prompts (workspace-destructive bash, policy-write, plan-exit).
+Shift+Tab away from auto revokes that authority immediately. Filesystem-wide grants, credential/agent-control
+targets, system locations, symlink/junction escapes, and hardlink aliases are refused at the structured
+boundary. When explicitly enabled, ordinary sandboxed Bash remains confined to the project and canonical
+additional roots. A timed-out SRT health probe may retry one real launch through the same exact SRT settings,
+but never authorizes an unconfined fallback. With the product default `sandbox:false`, Bash executes directly
+under the current Neko process identity and the runtime, doctor, and policy audit disclose `UNCONFINED AUTO`
+(ordinary bash without approval; workspace-destructive bash still asks once).
 
 Buffered foreground Bash rejects explicit sleep/poll loops whose declared wait budget exceeds 30 seconds.
 Servers and watchers use the existing background-job lifecycle followed by short bounded probes; long

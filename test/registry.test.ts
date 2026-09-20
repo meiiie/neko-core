@@ -15,7 +15,9 @@ test("policy warns on auto mode (bounded autonomy)", () => {
   const report = evaluatePolicy(cfg("auto"), { kind: "none", live: false });
   expect(report.verdict).toBe("warn");
   expect(report.findings.some((f) => f.code === "bounded_autonomy_on")).toBe(true);
-  expect(report.findings.some((f) => f.code === "auto_without_live_sandbox" && f.message.includes("UNCONFINED AUTO"))).toBe(true);
+  const unconfined = report.findings.find((f) => f.code === "auto_without_live_sandbox");
+  expect(unconfined?.message).toContain("UNCONFINED AUTO");
+  expect(unconfined?.message).toMatch(/destructive/i);
 });
 
 test("policy distinguishes an unavailable sandbox from an unhealthy fail-closed sandbox", () => {
@@ -24,7 +26,9 @@ test("policy distinguishes an unavailable sandbox from an unhealthy fail-closed 
     { kind: "none", live: false },
   );
   expect(unavailable.findings.some((finding) =>
-    finding.code === "auto_without_live_sandbox" && finding.message.includes("UNCONFINED AUTO")
+    finding.code === "auto_without_live_sandbox"
+    && finding.message.includes("UNCONFINED AUTO")
+    && /destructive/i.test(finding.message)
   )).toBe(true);
 
   const unhealthy = evaluatePolicy(
