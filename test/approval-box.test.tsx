@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import { Box } from "ink";
 
-import { ApprovalBox, type Approval } from "../src/ui/approval-box.tsx";
+import { ApprovalBox, approvalOptions, type Approval } from "../src/ui/approval-box.tsx";
 
 const plan = `## Plan
 
@@ -73,7 +73,8 @@ test("plan box shows header, footer and markdown content", () => {
   );
   const frame = c.lastFrame() ?? "";
   expect(frame).toContain("Ready to code?");
-  expect(frame).toContain("[y] proceed");
+  expect(frame).toContain("[y] auto");
+  expect(frame).toContain("[e] accept-edits");
   expect(frame).toContain("Edit src/foo.ts");
   expect(frame).toContain("Run the test suite");
   c.unmount();
@@ -148,4 +149,17 @@ test("edit reorder preview keeps shared middle as context (not delete+re-add)", 
   expect(plain).toMatch(/\+\s*line1 anchor-AAA/);
   expect(plain).toMatch(/\+\s*line3 anchor-BBB/);
   c.unmount();
+});
+
+test("plan exit options offer auto, accept-edits, and keep planning", () => {
+  expect(approvalOptions("exit_plan_mode")).toEqual([
+    "[y] auto",
+    "[e] accept-edits",
+    "[n] keep planning / Esc",
+  ]);
+  // Tool box still has session-always in the middle.
+  const bash = approvalOptions("bash", { command: "echo hi" });
+  expect(bash[0]).toContain("[y]");
+  expect(bash[1]).toContain("[a]lways");
+  expect(bash[2]).toContain("[n]");
 });
