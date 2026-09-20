@@ -158,6 +158,7 @@ export class CostTracker {
       (this.lastCacheWrite > 0 ? ` (${this.lastCacheWrite} input written to cache)` : "") +
       liveNote +
       (this.calls > 1 ? "\ninput is re-sent as context on each model call; session cumulative is not one prompt" : "") +
+      "\ntokens only — Neko does not estimate USD" +
       (efficiency ? `\n\n${efficiency}` : "")
     );
   }

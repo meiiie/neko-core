@@ -35,6 +35,7 @@ test("CostTracker.add handles missing usage, total fallback, and partial fields"
   expect(t.lastCompletion).toBe(20);
   expect(t.summary()).toContain("last request: 50 input / 20 output");
   expect(t.summary()).toContain("session cumulative is not one prompt");
+  expect(t.summary()).toContain("tokens only — Neko does not estimate USD");
 });
 
 test("CostTracker rejects malformed negative/NaN counters and clamps cached input to the prompt", () => {
