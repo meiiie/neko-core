@@ -10,7 +10,7 @@ import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { ChatApp } from "../src/ui/chat.tsx";
 import { CompactingLine, fmtElapsed, RunningLine, ThinkingLine } from "../src/ui/thinking-line.tsx";
 import { ApprovalBox } from "../src/ui/approval-box.tsx";
-import { toolResultDisplayLines, TranscriptLine, type Line } from "../src/ui/transcript.tsx";
+import { toolCallBulletColor, toolResultDisplayLines, TranscriptLine, type Line } from "../src/ui/transcript.tsx";
 import { TranscriptViewer } from "../src/ui/transcript-viewer.tsx";
 import { RichView } from "../src/ui/rich-transcript.tsx";
 import { NekoConfig } from "../src/adapters/config.ts";
@@ -845,6 +845,18 @@ test("a user prompt and a tool call each get a blank line above (turn separation
   const t = strip(render(<TranscriptLine line={{ id: 2, kind: "tool_call", text: "Bash(ls)" }} cfg={CFG} />).lastFrame()).split("\n");
   expect(t[0].trim()).toBe(""); // tool calls separate from the prompt / previous group
   expect(t.some((l) => l.includes("Bash(ls)"))).toBe(true);
+});
+
+test("failed tool_call bullet is red, success stays green", () => {
+  // Lived raise-bar-10: deny painted success-green ● Update(...) above red Denied by user.
+  // ink-testing-library strips SGR under NO_COLOR; assert the color helper + that both still render.
+  expect(toolCallBulletColor(undefined)).toBe("green");
+  expect(toolCallBulletColor(false)).toBe("green");
+  expect(toolCallBulletColor(true)).toBe("red");
+  const ok = strip(render(<TranscriptLine line={{ id: 1, kind: "tool_call", text: "Update(notes/x.txt)" }} cfg={CFG} />).lastFrame());
+  const bad = strip(render(<TranscriptLine line={{ id: 2, kind: "tool_call", text: "Update(notes/x.txt)", failed: true }} cfg={CFG} />).lastFrame());
+  expect(ok).toContain("Update(notes/x.txt)");
+  expect(bad).toContain("Update(notes/x.txt)");
 });
 
 test("user prompts render as padded message blocks", () => {

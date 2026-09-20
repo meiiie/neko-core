@@ -107,14 +107,32 @@ export function resultSummary(
       const base = target ? `Ran shell command: ${target}` : "Ran shell command";
       return `${base} (${outLines} line${outLines === 1 ? "" : "s"})`;
     }
-    case "write_file": return target ? `Wrote ${target}` : "Wrote file";
+    case "write_file": {
+      // Prefer the tool's "+N" file line count (obs echoes at most 16 rows). Lived: collapse hid size.
+      const m = obs.match(/\+(\d+)\)/);
+      const fileLines = m ? Number(m[1]) : n;
+      const base = target ? `Wrote ${target}` : "Wrote file";
+      return `${base} (${fileLines} line${fileLines === 1 ? "" : "s"})`;
+    }
     case "edit":
     case "multi_edit":
     case "apply_patch": return target ? `Edited ${target}` : "Applied file changes";
-    case "web_search": return target ? `Searched web for ${target}` : "Searched the web";
-    case "web_fetch": return target ? `Fetched ${target}` : "Fetched web page";
+    case "web_search": {
+      // Lived: "Searched web for … (ctrl+o to expand)" hid how much body was under the fold.
+      const base = target ? `Searched web for ${target}` : "Searched the web";
+      return `${base} (${n} line${n === 1 ? "" : "s"})`;
+    }
+    case "web_fetch": {
+      // Lived raise-bar-10: Fetched https://example.com (ctrl+o to expand) with no size.
+      const base = target ? `Fetched ${target}` : "Fetched web page";
+      return `${base} (${n} line${n === 1 ? "" : "s"})`;
+    }
     case "skill": return target ? `Loaded ${target} skill` : "Loaded skill";
-    default: return `Completed ${describeToolCall(name, args)}`;
+    default: {
+      // Generic/MCP tools: same honesty — collapse must name how much is under Ctrl+O.
+      const base = `Completed ${describeToolCall(name, args)}`;
+      return `${base} (${n} line${n === 1 ? "" : "s"})`;
+    }
   }
 }
 
@@ -178,6 +196,9 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
         if (callIndex >= 0) out.splice(callIndex, 1, combined);
         else out.push(combined);
       } else {
+        // Failures stay expanded under a tool_call header — paint that bullet red so a deny/error
+        // is not preceded by a success-green ● (lived raise-bar-10 deny + interrupt).
+        if (call && isToolFailure(obs)) call.line.failed = true;
         out.push({ id: nextId(), kind: "tool_result", text: obs });
       }
     }

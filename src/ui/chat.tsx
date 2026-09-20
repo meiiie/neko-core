@@ -91,6 +91,7 @@ import { planTurnCapabilities } from "../adapters/turn-capabilities.ts";
 import {
   contentToText,
   resultSummary,
+  isToolFailure,
   buildReplayLines,
   replaySessionLines,
   recoverTodos,
@@ -476,8 +477,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     relayRef.current?.refresh();
   }, [approval, busy, compacting, inflight, overlay, queued, step, todos]);
 
-  const addLine = (kind: LineKind, text: string, summary?: string, mirror = true) => {
-    const line = { id: idRef.current++, kind, text, summary };
+  const addLine = (kind: LineKind, text: string, summary?: string, mirror = true, failed = false) => {
+    const line: Line = { id: idRef.current++, kind, text, summary, ...(failed ? { failed: true } : {}) };
     // A streamed answer is rich Markdown before commit. Prime its final rows now so fullscreen never
     // flashes the cheap raw-markdown fallback while the asynchronous cache warmer catches up.
     if (fullscreenRef.current && (kind === "assistant" || kind === "user")) primeAnsiCache(line, contentColsRef.current, cfg);
@@ -788,7 +789,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           const summary = resultSummary(data.call?.name, obs, data.call?.arguments);
           if (summary) addLine("tool_result", `${done.text}\n${obs}`, summary);
           else {
-            addLine("tool_call", done.text);
+            // Failures stay expanded: paint the call bullet red so deny/interrupt is not success-green.
+            addLine("tool_call", done.text, undefined, true, isToolFailure(obs));
             addLine("tool_result", obs);
           }
           setTodos([...registryRef.current!.todos]);
