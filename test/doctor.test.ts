@@ -152,10 +152,18 @@ test("doctor surfaces the resident UIA fast path and rollback state", () => {
 
 test("doctor labels auto mode without a live sandbox as unconfined", () => {
   const checks = collectChecks(new NekoConfig({ mode: "auto", sandbox: false }, null, {}, ""));
-  expect(checks.find((check) => check.name === "mode"))
-    .toMatchObject({ status: "warn", detail: expect.stringContaining("UNCONFINED AUTO") });
-  expect(checks.find((check) => check.name === "bash_sandbox"))
-    .toMatchObject({ status: "warn", detail: expect.stringContaining("UNCONFINED AUTO") });
+  const mode = checks.find((check) => check.name === "mode")!;
+  const sandbox = checks.find((check) => check.name === "bash_sandbox")!;
+  expect(mode.status).toBe("warn");
+  expect(sandbox.status).toBe("warn");
+  expect(mode.detail).toContain("UNCONFINED AUTO");
+  expect(sandbox.detail).toContain("UNCONFINED AUTO");
+  // Freer-auto contract must stay visible in doctor (CONT-3): outside writes + computer allow, destructive still asks.
+  expect(mode.detail).toMatch(/outside structured writes/i);
+  expect(mode.detail).toMatch(/host computer/i);
+  expect(mode.detail).toMatch(/destructive bash still asks/i);
+  expect(sandbox.detail).toMatch(/workspace-destructive bash still asks/i);
+  expect(sandbox.detail).toMatch(/ordinary bash runs without approval/i);
 });
 
 test("doctor reports present-but-unhealthy SRT as fail-closed rather than unconfined", () => {
