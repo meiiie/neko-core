@@ -692,8 +692,11 @@ test("post-turn run-time line + placeholder drops after first turn", async () =>
     c.stdin.write("\r");
     expect(await until(c, (f) => /for \d+s/.test(f))).toBe(true); // completion line appears
     const frames = strip(c.frames.join("\n"));
-    expect(frames).toContain("last context ↑1.0k ↓10");
-    expect(frames).toContain("cache ↑800 (80%)");
+    // Live context uses max(provider last-prompt, local estimate). Estimate varies with
+    // loaded tool schemas/config, so assert the shape + that we did NOT keep the old
+    // provider-only pairing (↑1.0k with 80% cache of that tiny prompt).
+    expect(frames).toMatch(/last context ↑[\d.]+k ↓10 · cache ↑800 \(\d+%\)/);
+    expect(frames).not.toContain("last context ↑1.0k ↓10 · cache ↑800 (80%)");
     expect(frames).not.toMatch(/chat\s+fast path/);
     expect(strip(c.lastFrame())).not.toContain("Try:"); // placeholder gone
   } finally {

@@ -452,6 +452,21 @@ test("sql skill does not false-positive on plain JS edit prompts", () => {
   expect(matchesSkill("sql", "create index on users.email")).toBe(true);
 });
 
+test("sql skill ignores negated mentions (lived: do not touch SQL)", () => {
+  const negated = [
+    "Add avg(a,b) in src/math.js. Do not touch databases or SQL.",
+    "never use sql here",
+    "dont run any sql migrations",
+    "no sql please — plain JS only",
+    "avoid postgres for this scratch script",
+  ];
+  for (const prompt of negated) {
+    expect(matchesSkill("sql", prompt)).toBe(false);
+  }
+  // A real positive cue still wins even if a negated mention appears earlier.
+  expect(matchesSkill("sql", "do not mention mongo; write a postgres query join")).toBe(true);
+});
+
 test("clean-writing skill does not false-positive on normal coding prompts", () => {
   const coding = [
     "Create a small notes app in notes.js with a README.md and selftest",

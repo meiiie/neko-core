@@ -178,7 +178,12 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
         return <Text dimColor>{`  └ ${line.summary}${more ? " (ctrl+o to expand)" : ""}`}</Text>;
       }
       const all = toolResultDisplayLines(line.text);
-      const isError = /^(Error|Blocked|Denied|Refused)/.test(all[0] ?? "");
+      // Failed bash often opens with a stack frame, not "Error:" — also honor FAILED markers /
+      // an Error: line anywhere in the body so failures stay red and scannable.
+      const isError = /^(Error|Blocked|Denied|Refused)/i.test(all[0] ?? "")
+        || /\(exit \d+ -- command FAILED\)/.test(line.text)
+        || /^\[loop guard\]/im.test(line.text)
+        || /^Error:/m.test(line.text);
       const COLLAPSE = 8;
       const hidden = all.length - COLLAPSE;
       const shown = hidden > 0 ? all.slice(0, COLLAPSE) : all;
