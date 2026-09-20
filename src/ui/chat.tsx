@@ -98,6 +98,7 @@ import {
   renderTail,
   clampToRows,
   countNewActivities,
+  scrollAwayBaselineOnEdge,
   REPLAY_MAX_LINES,
   RESUME_SUMMARY_AT,
   collapsedToolResultExpandable,
@@ -444,6 +445,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [viewH, setViewH] = useState(Math.max(3, (stdout?.rows ?? 24) - 8)); // stable outer transcript height (anchor + band)
   const transcriptBoxRef = useRef<any>(null); // measure the outer flex region so a conditional anchor cannot resize its own input
   const scrollAwayLenRef = useRef(0); // lines.length when the user scrolled away -> "N new messages" pill count
+  const scrollAwayArmedRef = useRef(false); // rising-edge arm so baseline is set before first pill paint
   const estCacheRef = useRef({ len: -1, schemaCount: -1, val: 0 }); // footer ctx% estimate, cached across stream deltas
   // Tab title = the session NAME (stable), not the per-turn prompt. A resumed session keeps its name: its
   // /title name (pinned) or its first user message; a fresh one is named on its first turn (see handle()).
@@ -3113,9 +3115,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   );
   const scroll = useScroll(flat.length, viewH);
   // "New messages" pill count: activity appended since the scroll-away moment.
-  useEffect(() => {
-    if (rowScroll.scrolled) scrollAwayLenRef.current = lines.length;
-  }, [rowScroll.scrolled]);
+  // Capture baseline on the rising edge DURING render (not useEffect) so the first painted
+  // Jump-to-bottom frame never flashes a phantom "N new messages" from a stale/zero baseline.
+  {
+    const next = scrollAwayBaselineOnEdge(rowScroll.scrolled, lines.length, {
+      armed: scrollAwayArmedRef.current,
+      baseline: scrollAwayLenRef.current,
+    });
+    scrollAwayArmedRef.current = next.armed;
+    scrollAwayLenRef.current = next.baseline;
+  }
   const newSince = rowScroll.scrolled ? countNewActivities(lines, scrollAwayLenRef.current) : 0;
   // The jump pill's label + screen hit-box (row below the viewport, centered): shared by the hover
   // highlight and the click handler so what LIGHTS UP is exactly what's CLICKABLE.

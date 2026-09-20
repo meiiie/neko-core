@@ -106,6 +106,20 @@ export function countNewActivities(lines: Line[], from = 0): number {
   ).length;
 }
 
+/** Rising-edge baseline for the jump-to-bottom "N new messages" pill.
+ * Capture lines.length synchronously when reading mode engages so the first painted frame never
+ * counts the whole transcript (or activity that landed while sticky-bottom) as "new". A useEffect
+ * baseline runs after paint and flashed a phantom count. */
+export function scrollAwayBaselineOnEdge(
+  scrolled: boolean,
+  linesLength: number,
+  prev: { armed: boolean; baseline: number },
+): { armed: boolean; baseline: number } {
+  if (!scrolled) return { armed: false, baseline: prev.baseline };
+  if (prev.armed) return prev;
+  return { armed: true, baseline: linesLength };
+}
+
 /** One compact, past-tense outcome for every successful activity; full call + output stays under Ctrl+O. */
 export function resultSummary(
   name: string | undefined,
