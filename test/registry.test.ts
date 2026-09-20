@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { NekoConfig } from "../src/adapters/config.ts";
-import { evaluatePolicy, listCommands } from "../src/adapters/registry.ts";
+import { collectCapabilities, evaluatePolicy, listCommands } from "../src/adapters/registry.ts";
 
 function cfg(mode = "default") {
   return new NekoConfig({ mode }, null, {}, "");
@@ -55,4 +55,19 @@ test("command registry covers every canonical public CLI dispatch", () => {
     "version", "help",
   ];
   expect([...names].sort()).toEqual([...dispatched].sort());
+});
+
+test("capabilities file_write/shell mirror freer auto (not Claude-tight cwd/approval copy)", () => {
+  const autoCaps = collectCapabilities(cfg("auto"));
+  const fileWrite = autoCaps.find((c) => c.name === "file_write")!.detail;
+  const shell = autoCaps.find((c) => c.name === "shell")!.detail;
+  expect(fileWrite).toContain("mode=auto pre-authorizes ordinary outside-project writes");
+  expect(fileWrite).not.toMatch(/project plus explicit additional_write_roots/);
+  expect(shell).toContain("mode=auto");
+  expect(shell).toContain("destructive");
+  expect(shell).not.toBe("bash (gated: needs approval)");
+
+  const defaultCaps = collectCapabilities(cfg("default"));
+  expect(defaultCaps.find((c) => c.name === "file_write")!.detail).toContain("project plus explicit additional_write_roots");
+  expect(defaultCaps.find((c) => c.name === "shell")!.detail).toBe("bash (gated: needs approval)");
 });

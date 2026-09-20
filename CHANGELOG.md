@@ -8,6 +8,14 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **Jump-to-bottom pill baseline (CONT-5).** Reading-mode "N new messages" baseline is captured on the
+  rising edge of scroll-away during render, not in a post-paint `useEffect`. Stops a one-frame phantom
+  count of the whole transcript (or sticky-bottom growth) when PgUp / wheel engages the jump pill.
+
+- **Capabilities freer-auto honesty (CONT-5).** `neko capabilities` `file_write` / `shell` details under
+  product-default `auto` now mirror Grok-free runtime: ordinary outside structured writes pre-authorized;
+  ordinary bash without approval; workspace-destructive bash still asks. Non-auto modes keep prior copy.
+
 - **ACP freer-auto wording (CONT-4).** ACP session mode `auto`, `--yolo` docs, and Architecture/
   Sandbox permission copy now match the Grok-free contract: coding tools, outside structured writes,
   and host computer proceed without routine prompts; destructive bash still asks; seatbelts remain.

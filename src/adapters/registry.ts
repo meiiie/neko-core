@@ -147,20 +147,34 @@ export function collectCapabilities(config: NekoConfig, explicitYolo = false): C
     { name: "model_completion", klass: "agent", status: "enabled", detail: `${config.provider}: ${config.model || "(model unset)"}` },
     { name: "file_read", klass: "tool", status: "enabled", detail: "read_file + search + glob + ls (safe, no approval)" },
     { name: "disk_cleanup_scan", klass: "tool", status: process.platform === "win32" ? "enabled" : "unavailable", detail: "bounded Windows cleanup/cache metadata only; no file contents or deletion; independent of bash" },
-    { name: "file_write", klass: "tool", status: "enabled", detail: "write_file + edit (gated; project plus explicit additional_write_roots; built-in ~/.neko-core/research ledger)" },
+    {
+      name: "file_write",
+      klass: "tool",
+      status: "enabled",
+      // mode=auto pre-authorizes ordinary outside-project structured writes (Grok-free); other modes
+      // still prompt outside project / additional_write_roots. Credential/system paths stay refused.
+      detail: auto
+        ? "write_file + edit (gated; mode=auto pre-authorizes ordinary outside-project writes; credential/system paths refused; built-in ~/.neko-core/research ledger)"
+        : "write_file + edit (gated; project plus explicit additional_write_roots; built-in ~/.neko-core/research ledger)",
+    },
     {
       name: "shell",
       klass: "tool",
       status: "enabled",
       // "Gated-but-sandboxed" is a NAMED state like mode=auto: the gate stays in the contract,
       // the prompt is skipped only while confinement is LIVE (primitive + provisioning).
+      // Under product-default auto, ordinary bash is approval-free; destructive still asks in the run path.
       detail: explicitYolo
         ? config.sandbox && sandboxActive()
           ? "bash (approval-free under explicit --yolo; OS-sandboxed; hard seatbelts remain)"
           : "bash (approval-free under explicit --yolo when runnable; doctor reports confinement; hard seatbelts remain)"
-        : config.sandbox && config.sandboxAutoApprove && sandboxActive()
-          ? `bash (gated; explicitly auto-approved while OS-sandboxed: writes confined to workspace/temp plus explicit additional_write_roots, host reads remain available; sandbox_auto_approve=false to prompt)`
-          : "bash (gated: needs approval)",
+        : auto
+          ? config.sandbox && config.sandboxAutoApprove && sandboxActive()
+            ? `bash (mode=auto; OS-sandboxed auto-approve: writes confined to workspace/temp plus explicit additional_write_roots; destructive still asks; sandbox_auto_approve=false to prompt)`
+            : "bash (mode=auto: ordinary commands without approval; workspace-destructive still asks once; hard seatbelts remain)"
+          : config.sandbox && config.sandboxAutoApprove && sandboxActive()
+            ? `bash (gated; explicitly auto-approved while OS-sandboxed: writes confined to workspace/temp plus explicit additional_write_roots, host reads remain available; sandbox_auto_approve=false to prompt)`
+            : "bash (gated: needs approval)",
     },
     { name: "permission_modes", klass: "agent", status: "enabled", detail: "default / accept-edits / plan / auto (Shift+Tab to cycle in chat)" },
     { name: "approval_gate", klass: "agent", status: "enabled", detail: explicitYolo ? "yolo (explicit --yolo; mode=auto)" : `mode=${config.mode}` },

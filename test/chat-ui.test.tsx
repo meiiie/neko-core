@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
 import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
-import { buildReplayLines, clampToRows, collapsedToolResultExpandable, contentToText, countNewActivities, recoverTodos, renderTail, replaySessionLines, resultSummary,
+import { buildReplayLines, clampToRows, collapsedToolResultExpandable, contentToText, countNewActivities, scrollAwayBaselineOnEdge, recoverTodos, renderTail, replaySessionLines, resultSummary,
   isTodoWriteResultText,
   summarizeTodoWriteResult,
 } from "../src/ui/chat-lines.ts";
@@ -129,6 +129,19 @@ test("new-message count treats folded success and expanded failure as one activi
     { id: 4, kind: "tool_result", text: "Error: failed" },
   ];
   expect(countNewActivities(activity, 1)).toBe(2);
+});
+
+test("scroll-away pill baseline arms on rising edge and ignores sticky-bottom growth", () => {
+  let st = { armed: false, baseline: 0 };
+  st = scrollAwayBaselineOnEdge(true, 40, st); // first scroll-away
+  expect(st).toEqual({ armed: true, baseline: 40 });
+  expect(countNewActivities([{ kind: "user" } as any, { kind: "assistant" } as any], st.baseline)).toBe(0);
+  st = scrollAwayBaselineOnEdge(true, 55, st); // still scrolled; transcript grew below viewport
+  expect(st.baseline).toBe(40); // baseline frozen so "N new" can count from 40
+  st = scrollAwayBaselineOnEdge(false, 55, st); // jump to bottom
+  expect(st.armed).toBe(false);
+  st = scrollAwayBaselineOnEdge(true, 55, st); // scroll away again after sticky growth
+  expect(st).toEqual({ armed: true, baseline: 55 }); // no phantom count from prior baseline 40
 });
 
 test("prefixed screenshot capability guidance stays expanded", () => {
