@@ -500,6 +500,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   };
 
+  // Explicit --yolo must be visible in-session: footer shows "yolo", plus one boot line.
+  useEffect(() => {
+    if (!yolo) return;
+    addLine(
+      "info",
+      "launched with --yolo: approval prompts off while mode is auto; hard credential/system/catastrophic seatbelts remain. Shift+Tab cycles modes and suspends yolo until you return to auto.",
+    );
+  }, []);
+
   // A late tick cannot prevent a third-party/native stall, but it leaves a precise breadcrumb after
   // recovery instead of a vague "Neko froze" report. Silent by default; NEKO_DEBUG=ui-stall enables it.
   useEffect(() => {
@@ -1347,7 +1356,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const zone = hitIndexAt(ptr.x, ptr.y);
         setApprovalHover(zone >= 0 ? zone : null);
         if (ptr.kind === "press" && ptr.left && zone >= 0) {
-          const opts = approvalOptions(approval.toolName);
+          const opts = approvalOptions(approval.toolName, approval.args);
           settleApproval(zone === 0 ? "ok" : zone === opts.length - 1 ? "no" : "always");
         }
         return;
@@ -1472,7 +1481,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         registryRef.current!.mode = nm;
         setMode(nm);
         // Lived auto UX: silent cycle left people unsure whether they left ask-first — flash the contract.
-        addLine("info", `mode: ${nm} — ${modeDetail(nm)}`);
+        const yoloTag = yolo && nm === "auto" ? "yolo (explicit --yolo; prompts off) — " : "";
+        addLine("info", `mode: ${yoloTag}${nm} — ${modeDetail(nm)}`);
         return;
       }
       if (key.ctrl || key.meta) return; // Ctrl+Up/Down scrolls the transcript; never recall prompt history too
@@ -3636,7 +3646,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                   (image #79 - Claude Code truncates) and every chrome-height change churns the band
                   geometry, the ConPTY ghost's habitat. */}
               <Text wrap="truncate-end">
-                <Text color={MODE_COLOR[mode]}>{" ⏵⏵ "}{mode}</Text>
+                <Text color={yolo && mode === "auto" ? "magenta" : MODE_COLOR[mode]}>{" ⏵⏵ "}{yolo && mode === "auto" ? "yolo" : mode}</Text>
                 <Text dimColor> · shift+tab to cycle</Text>
                 {rcOn ? <Text color="magenta"> · /rc active</Text> : null}
               </Text>
