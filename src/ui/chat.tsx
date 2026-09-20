@@ -799,6 +799,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           if (isToolFailure(obs) && /^\(interrupted\)/i.test(obs.trim())) {
             interruptedBannerShownRef.current = true;
           }
+          // todo_write folds via resultSummary (raise-bar-12 density); full checklist under Ctrl+O.
           const summary = resultSummary(data.call?.name, obs, data.call?.arguments);
           if (summary) addLine("tool_result", `${done.text}\n${obs}`, summary);
           else {
@@ -1019,7 +1020,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       approvalFlashRef.current = null;
       setApprovalFlash(null);
       relayRef.current?.refresh();
-    }, 140);
+    // Lived raise-bar-12: 140ms always-flash was effectively invisible; keep yes/no snappy,
+    // but hold the session-scoped always confirmation long enough to read.
+    }, kind === "always" ? 700 : 180);
     return true;
   };
   // The total band content + the top CONTENT row currently visible (matches FrameDiffer.windowRows).
@@ -1413,14 +1416,22 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       flashCopyNote(copyBoth(draft) ? `copied draft (${draft.length} chars)` : "draft copy failed");
       return;
     }
-    if (key.ctrl && char === "o") { // toggle: expand the most recent collapsed tool output, press again to collapse
+    if (key.ctrl && char === "o") { // cycle expandable tool outputs: most recent → older → collapse
       // Match TranscriptLine: summarized rows hint/expand only when obs is more than an empty
       // sentinel; plain results still collapse at >8 lines.
-      const last = [...lines].reverse().find(
+      const expandables = lines.filter(
         (l) => l.kind === "tool_result" && (l.summary ? collapsedToolResultExpandable(l.text) : l.text.split("\n").length > 8),
       );
-      if (!last) { addLine("info", "nothing to expand"); return; }
-      setExpandedId((cur) => (cur === last.id ? null : last.id)); // second press collapses (no duplicate re-print)
+      if (!expandables.length) { addLine("info", "nothing to expand"); return; }
+      // Chronological order; walk newest → older, then collapse (raise-bar-12: Ctrl+O was most-recent-only
+      // while older rows still advertised "(ctrl+o to expand)").
+      setExpandedId((cur) => {
+        if (cur == null) return expandables[expandables.length - 1].id;
+        const idx = expandables.findIndex((l) => l.id === cur);
+        if (idx < 0) return expandables[expandables.length - 1].id;
+        if (idx === 0) return null; // oldest already open → collapse
+        return expandables[idx - 1].id;
+      });
       return;
     }
       // Alt+V is handled INSIDE TextInput (onPasteImage) so the [Image #N] token lands at the caret.
@@ -3360,7 +3371,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         return (
           <Box flexDirection="column" marginTop={1}>
             <TranscriptLine line={{ id: l.id, kind: "tool_result_full", text: all.slice(0, CAP).join("\n") }} cfg={cfg} cols={contentCols} />
-            <Text dimColor>{`     ${all.length > CAP ? `+${all.length - CAP} more lines - ` : ""}ctrl+o to collapse`}</Text>
+            <Text dimColor>{`     ${all.length > CAP ? `+${all.length - CAP} more lines - ` : ""}ctrl+o for older / collapse`}</Text>
           </Box>
         );
       })()}

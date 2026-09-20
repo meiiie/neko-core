@@ -46,9 +46,45 @@ const short = (value: any, cap = 80) => {
 };
 
 const ALWAYS_EXPANDED_TOOLS = new Set([
-  "todo_write", "update_plan", "memory", "workflow", "playbook",
+  // todo_write intentionally NOT here: lived raise-bar-12 reprinted the full checklist on every
+  // update (density). It now folds to summarizeTodoWriteResult; Ctrl+O still reveals the plan.
+  "update_plan", "memory", "workflow", "playbook",
   "mcp__neko_meeting__stop",
 ]);
+
+/** True when a tool_result body is a todo_write checklist (expanded form). */
+export function isTodoWriteResultText(text: string): boolean {
+  const body = String(text ?? "");
+  // Live expanded path paints obs alone ("Todos:\n..."); collapsed/replay stores "Update Todos\nTodos:\n...".
+  return /^Todos:\n/m.test(body) || /\nTodos:\n/.test(body);
+}
+
+/** Compact one-liner for a todo_write checklist (folded in the transcript; full plan under Ctrl+O). */
+export function summarizeTodoWriteResult(text: string, args?: any): string {
+  const fromArgs = Array.isArray(args?.todos) ? args.todos as { status?: string }[] : null;
+  let done = 0;
+  let total = 0;
+  let active = 0;
+  if (fromArgs && fromArgs.length) {
+    total = fromArgs.length;
+    for (const t of fromArgs) {
+      if (t?.status === "completed") done++;
+      else if (t?.status === "in_progress") active++;
+    }
+  } else {
+    for (const line of String(text ?? "").split("\n")) {
+      const m = line.match(/^\[(x|~| )\]\s+/);
+      if (!m) continue;
+      total++;
+      if (m[1] === "x") done++;
+      else if (m[1] === "~") active++;
+    }
+  }
+  if (total === 0) return "Updated todos";
+  if (active) return `Updated todos (${done}/${total} done, ${active} in progress)`;
+  return `Updated todos (${done}/${total} done)`;
+}
+
 const EMPTY_RESULT_SENTINELS = new Set(["(no matches)", "(no files)", "(empty)"]);
 
 /** Collapsed tool rows store `${toolCall}\n${obs}`. Hint Ctrl+O only when expand reveals more than an
@@ -128,6 +164,7 @@ export function resultSummary(
       return `${base} (${n} line${n === 1 ? "" : "s"})`;
     }
     case "skill": return target ? `Loaded ${target} skill` : "Loaded skill";
+    case "todo_write": return summarizeTodoWriteResult(obs, args);
     default: {
       // Generic/MCP tools: same honesty — collapse must name how much is under Ctrl+O.
       const base = `Completed ${describeToolCall(name, args)}`;
