@@ -5,6 +5,7 @@
  */
 import type { Agent } from "../core/agent.ts";
 import { COMPACT_AT, estimateRequestTokens } from "../core/agent.ts";
+import { effectiveContextTokens } from "../core/cost.ts";
 import { renderCompletionContract } from "../core/completion-contract.ts";
 import { loadConfig, type NekoConfig } from "../adapters/config.ts";
 import { rememberNote, renderContext } from "../adapters/context.ts";
@@ -821,8 +822,10 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       openFeedback(ctx);
       return;
     }
-    case "/cost":
-      return addLine("info", agent.cost.summary());
+    case "/cost": {
+      const estimate = estimateRequestTokens(agent.messages, ctx.registry.schemas());
+      return addLine("info", agent.cost.summary({ contextEstimate: estimate }));
+    }
     case "/usage": {
       const voice = formatVoiceUsage();
       if (cfg.usesGeminiAuth) {
@@ -1393,13 +1396,15 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       const win = cfg.contextWindow;
       const last = agent.cost.lastPrompt;
       const next = estimateRequestTokens(agent.messages, ctx.registry.schemas());
-      const used = last || next;
+      const used = effectiveContextTokens(last, next);
       const pct = Math.min(100, Math.max(0, Math.round((100 * used) / win)));
+      const providerPct = last ? Math.min(100, Math.max(0, Math.round((100 * last) / win))) : 0;
       return addLine(
         "info",
         `context window capacity: ${win} tokens\n` +
-        (last ? `last request: ${last} input / ${agent.cost.lastCompletion} output (${pct}% of capacity)\n` : "") +
-        `next request estimate: ~${next} tokens${last ? " (multimodal-safe estimate; provider usage above is authoritative)" : ` (${pct}% of capacity)`}\n` +
+        (last ? `last provider report: ${last} input / ${agent.cost.lastCompletion} output (${providerPct}% of capacity)\n` : "") +
+        `live context (max of provider last-prompt and local estimate): ~${used} tokens (${pct}% of capacity)\n` +
+        `next request estimate: ~${next} tokens\n` +
         `auto-compacts past ${Math.round(COMPACT_AT * 100)}%`,
       );
     }

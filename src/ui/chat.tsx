@@ -38,7 +38,7 @@ import { copyToClipboard, MAX_COPY_CHARS } from "./clipboard.ts";
 import { toolResultDisplayLines, TranscriptLine, type Line, type LineKind } from "./transcript.tsx";
 
 import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateRequestTokens, estimateTokens } from "../core/agent.ts";
-import type { Usage } from "../core/cost.ts";
+import { effectiveContextTokens, type Usage } from "../core/cost.ts";
 import { loadConfig } from "../adapters/config.ts";
 import { loadAgent } from "../adapters/agents.ts";
 import { ensureNekoHome, rememberNote } from "../adapters/context.ts";
@@ -2501,18 +2501,24 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const calls = Math.max(0, agentRef.current!.cost.calls - turnCallsStartRef.current);
         const lastPrompt = agentRef.current!.cost.lastPrompt;
         const lastCached = agentRef.current!.cost.lastCached;
+        const est = estimateRequestTokens(agentRef.current!.messages, registryRef.current!.schemas());
+        const liveCtx = effectiveContextTokens(lastPrompt, est);
         const cache = lastCached > 0
-          ? ` · cache ${UP}${fmtTok(lastCached)} (${Math.round((100 * lastCached) / Math.max(1, lastPrompt))}%)`
+          ? ` · cache ${UP}${fmtTok(lastCached)} (${Math.round((100 * lastCached) / Math.max(1, liveCtx))}%)`
           : "";
         const last = calls > 0
-          ? ` · last context ${UP}${fmtTok(lastPrompt)} ${DOWN}${fmtTok(agentRef.current!.cost.lastCompletion)}${cache}`
+          ? ` · last context ${UP}${fmtTok(liveCtx)} ${DOWN}${fmtTok(agentRef.current!.cost.lastCompletion)}${cache}`
           : " · provider usage unavailable";
         addLine("info", `${verbRef.current} for ${fmtDuration(secs)} · turn total ${UP}${fmtTok(inTok)} ${DOWN}${fmtTok(outTok)} tokens` +
           (calls > 1 ? ` across ${calls} model calls` : "") + last);
       }
-      // Auto-compact when the context window is nearly full (Claude-style), on the ACCURATE last-request
-      // token count. runCompaction shows the progress bar + a "freed ~Nk" line, so no bare notice needed.
-      if (result !== "[interrupted]" && agentRef.current!.cost.lastPrompt > COMPACT_AT * cfg.contextWindow) {
+      // Auto-compact on live context (max of provider last-prompt and local estimate). Compat
+      // endpoints that under-report lastPrompt would otherwise never auto-compact.
+      const compactUsed = effectiveContextTokens(
+        agentRef.current!.cost.lastPrompt,
+        estimateRequestTokens(agentRef.current!.messages, registryRef.current!.schemas()),
+      );
+      if (result !== "[interrupted]" && compactUsed > COMPACT_AT * cfg.contextWindow) {
         await runCompaction("auto");
       }
       turnCompleted = result !== "[interrupted]" && agentRef.current!.completionStatus.ok;
@@ -2758,7 +2764,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (estCacheRef.current.len !== messages.length || estCacheRef.current.schemaCount !== schemas.length) {
           estCacheRef.current = { len: messages.length, schemaCount: schemas.length, val: estimateRequestTokens(messages, schemas) };
         }
-        const used = Math.max(cost.lastPrompt || 0, estCacheRef.current.val);
+        const used = effectiveContextTokens(cost.lastPrompt, estCacheRef.current.val);
         return ctxPercent(used, cfg.contextWindow);
       })(),
     }),
@@ -3567,7 +3573,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 // Prefer the larger of provider last-prompt and local estimate. A small/wrong
                 // lastPrompt (compat endpoints) used to pin the footer at 0% against a 1M window
                 // even while /cost showed real cumulative usage.
-                const used = Math.max(cost.lastPrompt || 0, estCacheRef.current.val);
+                const used = effectiveContextTokens(cost.lastPrompt, estCacheRef.current.val);
                 const pct = ctxPercent(used, cfg.contextWindow);
                 const ctxColor = pct >= 85 ? "red" : pct >= 60 ? "yellow" : "#9a9a9a";
                 return (

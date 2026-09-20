@@ -301,11 +301,28 @@ function skillTokens(s: string): Set<string> {
   );
 }
 
+/** True when a match sits in a negated span ("do not … SQL", "never use postgres").
+ * Clause-aware: "do not mention mongo; write a postgres join" still matches postgres. */
+function matchNegated(text: string, index: number): boolean {
+  const prefix = text.slice(Math.max(0, index - 48), index);
+  const clause = prefix.split(/[.;!?]|(?:\b(?:but|however|instead|rather)\b)/i).pop() ?? prefix;
+  return /(?:do\s+not|don'?t|dont|never|avoid|skip|without|khong|dung)\b/i.test(clause)
+    || /\bno\s+$/i.test(prefix);
+}
+
 function regexMatches(skill: Skill, userText: string): boolean {
   if (!skill.match) return false;
   try {
-    const pattern = new RegExp(skill.match, "i");
-    return pattern.test(userText) || pattern.test(normalizeSkillText(userText));
+    // Global so we can inspect EVERY hit — a negated "SQL" must not hide a later real "postgres".
+    const pattern = new RegExp(skill.match, "gi");
+    for (const text of [userText, normalizeSkillText(userText)]) {
+      pattern.lastIndex = 0;
+      for (const hit of text.matchAll(pattern)) {
+        if (matchNegated(text, hit.index ?? 0)) continue;
+        return true;
+      }
+    }
+    return false;
   } catch {
     return false; // a malformed user-authored pattern must not break the REPL
   }

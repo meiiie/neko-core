@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { CostTracker } from "../src/core/cost.ts";
+import { CostTracker, effectiveContextTokens } from "../src/core/cost.ts";
 
 // CostTracker.add() has three real branches that nothing exercised before:
 //  - the `if (!usage) return;` no-op
@@ -100,4 +100,21 @@ test("CostTracker never reports an aggregated cache sum as larger than the live 
   const legacy = new CostTracker();
   legacy.add({ prompt_tokens: 360, cached_tokens: 200, context_tokens: 140, model_calls: 3 });
   expect(legacy.lastCached).toBe(140); // old aggregate shape is clamped, never displayed as impossible
+});
+
+
+test("effectiveContextTokens prefers the larger of provider last-prompt and local estimate", () => {
+  expect(effectiveContextTokens(53, 12_000)).toBe(12_000);
+  expect(effectiveContextTokens(20_000, 12_000)).toBe(20_000);
+  expect(effectiveContextTokens(0, 0)).toBe(0);
+  expect(effectiveContextTokens(Number.NaN as any, 100)).toBe(100);
+});
+
+test("CostTracker.summary surfaces live context estimate when provider under-reports", () => {
+  const t = new CostTracker();
+  t.add({ prompt_tokens: 53, completion_tokens: 95 });
+  const text = t.summary({ contextEstimate: 18_000 });
+  expect(text).toContain("last request: 53 input / 95 output");
+  expect(text).toContain("live context estimate: ~18000 tokens");
+  expect(t.summary()).not.toContain("live context estimate");
 });

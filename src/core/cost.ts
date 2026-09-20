@@ -30,6 +30,14 @@ export interface Usage {
   model_calls?: number;
 }
 
+
+/** Prefer the larger of provider last-prompt and a local estimate.
+ * Compat endpoints (lived: z.ai glm) often under-report prompt_tokens as a tiny
+ * delta; treating that as live context pinned footer ctx% and disabled auto-compact. */
+export function effectiveContextTokens(lastPrompt: number, estimate = 0): number {
+  return Math.max(Math.max(0, lastPrompt || 0), Math.max(0, estimate || 0));
+}
+
 export class CostTracker {
   readonly efficiency = new EfficiencyTracker();
   promptTokens = 0;
@@ -70,18 +78,24 @@ export class CostTracker {
     this.calls += Math.max(1, count(usage.model_calls));
   }
 
-  summary(): string {
+  summary(opts?: { contextEstimate?: number }): string {
     const efficiency = this.efficiency.summary();
     const cache = this.cachedTokens > 0 ? `, ${this.cachedTokens} cached (${Math.round((100 * this.cachedTokens) / Math.max(1, this.promptTokens))}% of in)` : "";
     const writes = this.cacheWriteTokens > 0 ? `, ${this.cacheWriteTokens} cache-written` : "";
     const additional = Math.max(0, this.totalTokens - this.promptTokens - this.completionTokens);
     const extra = additional > 0 ? `, ${additional} additional provider-reported tokens (for example reasoning/advisors)` : "";
+    const estimate = Math.max(0, Math.floor(opts?.contextEstimate ?? 0));
+    const live = effectiveContextTokens(this.lastPrompt, estimate);
+    const liveNote = estimate > this.lastPrompt
+      ? `\nlive context estimate: ~${live} tokens (provider last-prompt under-reported; drives footer ctx% / auto-compact)`
+      : "";
     return (
       `session cumulative: ${this.totalTokens} tokens over ${this.calls} provider-reported model call(s) ` +
       `(${this.promptTokens} input / ${this.completionTokens} output${cache}${writes}${extra})\n` +
       `last request: ${this.lastPrompt} input / ${this.lastCompletion} output` +
       (this.lastCached > 0 ? ` (${this.lastCached} input cached)` : "") +
       (this.lastCacheWrite > 0 ? ` (${this.lastCacheWrite} input written to cache)` : "") +
+      liveNote +
       (this.calls > 1 ? "\ninput is re-sent as context on each model call; session cumulative is not one prompt" : "") +
       (efficiency ? `\n\n${efficiency}` : "")
     );
