@@ -558,7 +558,7 @@ test("approval non-decision keys flash an in-box hint (not silent)", async () =>
     expect(vt.text()).toContain("Approve bash?");
     stdin.push("x"); // non-decision key — must flash the real keys, not vanish
     for (let waited = 0; waited < 2000 && !vt.text().includes("press [y]es"); waited += 25) await tick(25);
-    expect(vt.text()).toContain("press [y]es / [a]lways / [n]o");
+    expect(vt.text()).toContain("press [y]es / [a]lways this session / [n]o");
     stdin.push("y");
     for (let waited = 0; waited < 2000 && !vt.text().includes("ok after hint"); waited += 25) await tick(25);
     expect(vt.text()).toContain("ok after hint");

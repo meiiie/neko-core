@@ -36,6 +36,8 @@ test("successful tool activity folds to one past-tense line while preserving ful
   expect(resultSummary("bash", "(exit 0)\nok", { command: "bun test" })).toBe("Ran shell command: bun test");
   expect(resultSummary("search", "one match", { path: "src", pattern: "needle" })).toBe("Searched for needle (1 match)");
   expect(resultSummary("glob", "a.ts\nb.ts", { path: "src", pattern: "**/*.ts" })).toBe("Found 2 files for **/*.ts");
+  // Trailing newline in file -> one numbered read line (raise-bar-8); summary must not say 2.
+  expect(resultSummary("read_file", "    1  hello raise-bar-8", { path: "one.txt" })).toBe("Read one.txt (1 line)");
   expect(resultSummary("search", "(no matches)", { pattern: "missing" })).toBe("Searched for missing (0 matches)");
   expect(resultSummary("glob", "(no files)", { pattern: "**/*.missing" })).toBe("Found 0 files for **/*.missing");
   expect(resultSummary("ls", "(empty)", { path: "empty-dir" })).toBe("Listed empty-dir (0 items)");

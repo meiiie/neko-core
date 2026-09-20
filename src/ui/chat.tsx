@@ -1357,7 +1357,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         flashApprovalHint(
           approval.toolName === "exit_plan_mode"
             ? "press [y] proceed / [n] keep planning"
-            : "press [y]es / [a]lways / [n]o",
+            : "press [y]es / [a]lways this session / [n]o",
         );
       }
       return;

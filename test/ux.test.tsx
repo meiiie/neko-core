@@ -661,15 +661,27 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
     expect(no.match(/denied/g)).toHaveLength(1); // confirmation is not repeated in both header + footer
     // Flash always -> names the tool
     const always = strip(render(<ApprovalBox approval={approval} flash={{ kind: "always", tool: "bash" }} />).lastFrame());
-    expect(always).toContain("always-bash");
+    expect(always).toContain("always bash (this session)");
   });
 
 
+  test("ApprovalBox always-allow option names this session (not path-scoped forever)", () => {
+    const f = strip(render(<ApprovalBox approval={{
+      toolName: "write_file",
+      args: { path: "a.txt", content: "x\n" },
+      resolve: () => {},
+    }} />).lastFrame());
+    expect(f).toContain("[a]lways allow write_file (this session)");
+    expect(f).not.toContain("[a]lways allow write_file]");
+  });
+
   test("ApprovalBox flashes a key hint when hint prop is set", () => {
     const approval = { toolName: "bash", args: { command: "ls" }, resolve: () => {} };
-    const f = strip(render(<ApprovalBox approval={approval} hint="press [y]es / [a]lways / [n]o" />).lastFrame());
+    const f = strip(render(<ApprovalBox approval={approval} hint="press [y]es / [a]lways this session / [n]o" />).lastFrame());
     expect(f).toContain("Approve bash?");
-    expect(f).toContain("press [y]es / [a]lways / [n]o");
+    expect(f).toContain("press [y]es / [a]lways this session / [n]o");
+    // Option row itself names session scope (raise-bar-8 trust).
+    expect(f).toContain("[a]lways allow bash (this session)");
   });
 
   test("ApprovalBox elides unchanged anchor lines when appending after a function", () => {

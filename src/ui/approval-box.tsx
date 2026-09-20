@@ -34,7 +34,8 @@ function OptionRow({ options, hover }: { options: string[]; hover?: number | nul
  * order to settle: index 0 approves, last denies, middle - when present - is "always"). */
 export function approvalOptions(toolName: string): string[] {
   if (toolName === "exit_plan_mode") return ["[y] proceed (accept-edits)", "[n] keep planning / Esc"];
-  return ["[y]es", `[a]lways allow ${toolName}`, "[n]o / Esc"];
+  // Session-scoped tool-name allowlist (matches ACP "Always allow … in this session"); not path-scoped.
+  return ["[y]es", `[a]lways allow ${toolName} (this session)`, "[n]o / Esc"];
 }
 
 export interface Approval {
@@ -47,7 +48,7 @@ export type ApprovalFlash = { kind: "ok" | "no" | "always"; tool: string };
 
 const flashText = (flash: ApprovalFlash) => {
   if (flash.kind === "no") return "✗ denied";
-  if (flash.kind === "always") return `✓ always-${flash.tool}`;
+  if (flash.kind === "always") return `✓ always ${flash.tool} (this session)`;
   return "✓ approved";
 };
 

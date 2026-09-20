@@ -919,6 +919,25 @@ test("todo_write rejects ambiguous plans without corrupting the current plan", a
   expect(reg.todos[0].status).toBe("completed");
 });
 
+test("read_file does not invent a phantom blank line for a trailing newline", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "one.txt"), "hello raise-bar-8\n");
+  const out = String(await reg.execute("read_file", { path: "one.txt" }));
+  expect(out).toMatch(/\s1\s+hello raise-bar-8/);
+  expect(out).not.toMatch(/\s2\s/);
+  expect(out).not.toContain("(lines ");
+  // One numbered body line only (trailing \n must not become empty line 2).
+  expect(out.trim().split("\n")).toHaveLength(1);
+});
+
+test("write_file echo line count drops trailing-newline phantom fragment", async () => {
+  const { root, reg } = makeReg();
+  const out = String(await reg.execute("write_file", { path: "w.txt", content: "only\n" }));
+  expect(out).toContain("Wrote w.txt");
+  expect(out).toContain("+1)");
+  expect(out).not.toContain("+2)");
+});
+
 test("read_file offset/limit returns a line window numbered from the offset", async () => {
   const { root, reg } = makeReg();
   writeFileSync(join(root, "lines.txt"), Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join("\n"));
