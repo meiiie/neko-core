@@ -333,6 +333,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [approvalFlash, setApprovalFlash] = useState<ApprovalFlash | null>(null);
+  const [approvalHint, setApprovalHint] = useState<string | null>(null);
+  const approvalHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // DEC focus reporting is attention-aware rather than notification-happy: assume the terminal is
   // being watched until it explicitly reports focus-out. Unsupported terminals therefore stay silent.
   const terminalFocusedRef = useRef(true);
@@ -960,6 +962,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current);
     copyNoteTimer.current = setTimeout(() => setCopyNote(null), 2500);
   };
+  const flashApprovalHint = (msg: string) => {
+    setApprovalHint(msg);
+    if (approvalHintTimer.current) clearTimeout(approvalHintTimer.current);
+    approvalHintTimer.current = setTimeout(() => setApprovalHint(null), 2000);
+  };
   useEffect(() => () => {
     if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current);
     stopSelectionAutoScroll();
@@ -976,6 +983,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const flash = { kind, tool: current.toolName };
     approvalFlashRef.current = flash;
     setApprovalFlash(flash);
+    setApprovalHint(null);
+    if (approvalHintTimer.current) { clearTimeout(approvalHintTimer.current); approvalHintTimer.current = null; }
     approvalFlashTimer.current = setTimeout(() => {
       approvalFlashTimer.current = null;
       if (kind === "always") alwaysApproved.current.add(current.toolName);
@@ -1265,6 +1274,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   useEffect(() => () => {
     if (approvalFlashTimer.current) clearTimeout(approvalFlashTimer.current);
+    if (approvalHintTimer.current) clearTimeout(approvalHintTimer.current);
     approvalFlashRef.current = null;
   }, []);
 
@@ -1331,6 +1341,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         // Restore the pre-decision draft after all listeners for this input chunk have run: the decision
         // never leaks into the composer and an existing queued draft is preserved verbatim.
         queueMicrotask(() => { if (approvalFlashRef.current) setInput(draftBeforeDecision); });
+      } else if (
+        char &&
+        !key.ctrl &&
+        !key.meta &&
+        char.length === 1 &&
+        char >= " " &&
+        c !== "y" &&
+        c !== "a" &&
+        c !== "n"
+      ) {
+        // Non-decision keys used to vanish silently — users thought focus was broken. Flash the
+        // real keys in-box (copyNote row is hidden while ApprovalBox owns the chrome).
+        flashApprovalHint(
+          approval.toolName === "exit_plan_mode"
+            ? "press [y] proceed / [n] keep planning"
+            : "press [y]es / [a]lways / [n]o",
+        );
       }
       return;
     }
@@ -3470,7 +3497,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           }}
         />
         ) : approval ? (
-          <ApprovalBox approval={approval} flash={approvalFlash} width={contentCols} hover={approvalHover} />
+          <ApprovalBox approval={approval} flash={approvalFlash} width={contentCols} hover={approvalHover} hint={approvalHint} />
       ) : fullscreen && search ? (
         <Box flexDirection="column" flexShrink={0}>
           <Text dimColor>{"─".repeat(Math.max(10, contentCols))}</Text>

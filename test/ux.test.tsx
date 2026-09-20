@@ -664,6 +664,36 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
     expect(always).toContain("always-bash");
   });
 
+
+  test("ApprovalBox flashes a key hint when hint prop is set", () => {
+    const approval = { toolName: "bash", args: { command: "ls" }, resolve: () => {} };
+    const f = strip(render(<ApprovalBox approval={approval} hint="press [y]es / [a]lways / [n]o" />).lastFrame());
+    expect(f).toContain("Approve bash?");
+    expect(f).toContain("press [y]es / [a]lways / [n]o");
+  });
+
+  test("ApprovalBox elides unchanged anchor lines when appending after a function", () => {
+    const old_string = [
+      "export function clamp(n, lo, hi) {",
+      "  if (n < lo) return lo;",
+      "  if (n > hi) return hi;",
+      "  return n;",
+      "}",
+    ].join("\n");
+    const new_string = old_string + "\n\nexport function range(xs) {\n  return [0, 1];\n}";
+    const f = strip(render(<ApprovalBox approval={{
+      toolName: "edit",
+      args: { path: "src/stats.js", old_string, new_string },
+      resolve: () => {},
+    }} width={80} />).lastFrame());
+    expect(f).toContain("Approve edit?");
+    expect(f).toContain("unchanged line");
+    expect(f).toContain("export function range");
+    // The identical clamp body should not paint as both red and green noise.
+    expect(f).not.toContain("- if (n < lo) return lo;");
+  });
+
+
 test("reasoning shows live while busy, clears when done", async () => {
   const provider = new Reasoner();
   const c = render(<ChatApp fullscreen={false} yolo provider={provider} />);

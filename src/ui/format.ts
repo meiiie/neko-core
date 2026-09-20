@@ -82,3 +82,39 @@ export function relativeTime(iso: string): string {
   if (mo < 12) return ago(mo, "month");
   return ago(y, "year");
 }
+
+
+/** Collapse identical leading/trailing lines between old/new so approval diffs do not paint
+ * unchanged anchors as red/green noise (e.g. whole prior function restated only to append).
+ * Keeps up to `ctx` context lines on each side; returns the trimmed sides plus elision counts. */
+export function elideCommonEnds(
+  oldText: string,
+  newText: string,
+  ctx = 1,
+): { oldText: string; newText: string; elidedHead: number; elidedTail: number } {
+  const o = String(oldText ?? "").split("\n");
+  const n = String(newText ?? "").split("\n");
+  let head = 0;
+  while (head < o.length && head < n.length && o[head] === n[head]) head++;
+  let tail = 0;
+  while (
+    tail < o.length - head &&
+    tail < n.length - head &&
+    o[o.length - 1 - tail] === n[n.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  // Nothing shared, or both sides identical — leave the raw strings alone.
+  if ((head === 0 && tail === 0) || (head + tail >= o.length && head + tail >= n.length)) {
+    return { oldText: String(oldText ?? ""), newText: String(newText ?? ""), elidedHead: 0, elidedTail: 0 };
+  }
+  const keep = Math.max(0, Math.floor(ctx));
+  const start = Math.max(0, head - keep);
+  const droppedTail = Math.max(0, tail - keep);
+  return {
+    oldText: o.slice(start, o.length - droppedTail).join("\n"),
+    newText: n.slice(start, n.length - droppedTail).join("\n"),
+    elidedHead: start,
+    elidedTail: droppedTail,
+  };
+}
