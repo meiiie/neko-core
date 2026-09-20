@@ -63,6 +63,9 @@ function pushDiffSide(
   text: string,
   budget: { left: number },
 ): void {
+  // Empty mid must paint nothing — String("").split("\n") is [""], which would draw a phantom
+  // `- ` / `+ ` trust-noise line next to dim context after elideCommonEnds.
+  if (text === "") return;
   const lines = String(text ?? "").split("\n");
   for (let i = 0; i < lines.length; i++) {
     if (budget.left <= 0) {
@@ -82,10 +85,27 @@ function pushDiffSide(
   }
 }
 
+
+/** Dim, sign-less context kept by elideCommonEnds — shown once, never as red/green. */
+function pushContextLines(
+  preview: any[],
+  keyPrefix: string,
+  text: string,
+  budget: { left: number },
+): void {
+  if (!text) return;
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (budget.left <= 0) return;
+    preview.push(<Text key={`${keyPrefix}-ctx-${i}`} dimColor>{`  ${expandTabs(lines[i])}`}</Text>);
+    budget.left--;
+  }
+}
+
 function pushEditDiff(preview: any[], args: { path?: string; old_string?: string; new_string?: string }, keyPrefix = "e"): void {
   preview.push(<Text key={`${keyPrefix}-p`} color="gray">edit {args.path ?? "?"}</Text>);
   const budget = { left: APPROVAL_DIFF_MAX_LINES };
-  const { oldText, newText, elidedHead, elidedTail } = elideCommonEnds(
+  const { oldText, newText, elidedHead, elidedTail, headContext, tailContext } = elideCommonEnds(
     String(args.old_string ?? ""),
     String(args.new_string ?? ""),
   );
@@ -93,8 +113,10 @@ function pushEditDiff(preview: any[], args: { path?: string; old_string?: string
     preview.push(<Text key={`${keyPrefix}-head`} dimColor>{`  … ${elidedHead} unchanged line${elidedHead === 1 ? "" : "s"} above`}</Text>);
     budget.left--;
   }
+  pushContextLines(preview, `${keyPrefix}-hc`, headContext, budget);
   pushDiffSide(preview, `${keyPrefix}-o`, "-", "red", oldText, budget);
   pushDiffSide(preview, `${keyPrefix}-n`, "+", "green", newText, budget);
+  pushContextLines(preview, `${keyPrefix}-tc`, tailContext, budget);
   if (elidedTail > 0 && budget.left > 0) {
     preview.push(<Text key={`${keyPrefix}-tail`} dimColor>{`  … ${elidedTail} unchanged line${elidedTail === 1 ? "" : "s"} below`}</Text>);
     budget.left--;
@@ -159,8 +181,10 @@ export function ApprovalBox({ approval, flash, width, hover, hint }: { approval:
         preview.push(<Text key={`e${k}-head`} dimColor>{`  … ${trimmed.elidedHead} unchanged line${trimmed.elidedHead === 1 ? "" : "s"} above`}</Text>);
         budget.left--;
       }
+      pushContextLines(preview, `e${k}-hc`, trimmed.headContext, budget);
       pushDiffSide(preview, `e${k}-o`, "-", "red", trimmed.oldText, budget);
       pushDiffSide(preview, `e${k}-n`, "+", "green", trimmed.newText, budget);
+      pushContextLines(preview, `e${k}-tc`, trimmed.tailContext, budget);
       if (trimmed.elidedTail > 0 && budget.left > 0) {
         preview.push(<Text key={`e${k}-tail`} dimColor>{`  … ${trimmed.elidedTail} unchanged line${trimmed.elidedTail === 1 ? "" : "s"} below`}</Text>);
         budget.left--;

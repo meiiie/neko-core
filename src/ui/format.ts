@@ -86,12 +86,29 @@ export function relativeTime(iso: string): string {
 
 /** Collapse identical leading/trailing lines between old/new so approval diffs do not paint
  * unchanged anchors as red/green noise (e.g. whole prior function restated only to append).
- * Keeps up to `ctx` context lines on each side; returns the trimmed sides plus elision counts. */
+ * Keeps up to `ctx` context lines on each side as `headContext`/`tailContext` (render dim, not
+ * -/+); `oldText`/`newText` are the divergent middle only. `elidedHead`/`elidedTail` count lines
+ * fully dropped beyond that kept context. */
 export function elideCommonEnds(
   oldText: string,
   newText: string,
   ctx = 1,
-): { oldText: string; newText: string; elidedHead: number; elidedTail: number } {
+): {
+  oldText: string;
+  newText: string;
+  elidedHead: number;
+  elidedTail: number;
+  headContext: string;
+  tailContext: string;
+} {
+  const empty = {
+    oldText: String(oldText ?? ""),
+    newText: String(newText ?? ""),
+    elidedHead: 0,
+    elidedTail: 0,
+    headContext: "",
+    tailContext: "",
+  };
   const o = String(oldText ?? "").split("\n");
   const n = String(newText ?? "").split("\n");
   let head = 0;
@@ -106,15 +123,24 @@ export function elideCommonEnds(
   }
   // Nothing shared, or both sides identical — leave the raw strings alone.
   if ((head === 0 && tail === 0) || (head + tail >= o.length && head + tail >= n.length)) {
-    return { oldText: String(oldText ?? ""), newText: String(newText ?? ""), elidedHead: 0, elidedTail: 0 };
+    return empty;
   }
   const keep = Math.max(0, Math.floor(ctx));
-  const start = Math.max(0, head - keep);
-  const droppedTail = Math.max(0, tail - keep);
+  const headKeep = Math.min(keep, head);
+  const tailKeep = Math.min(keep, tail);
+  const elidedHead = head - headKeep;
+  const elidedTail = tail - tailKeep;
+  const headContext = headKeep > 0 ? o.slice(head - headKeep, head).join("\n") : "";
+  const tailContext = tailKeep > 0 ? o.slice(o.length - tail, o.length - tail + tailKeep).join("\n") : "";
+  // Divergent middle only — do NOT include kept context here (callers paint context dim once).
+  const oldMid = o.slice(head, o.length - tail);
+  const newMid = n.slice(head, n.length - tail);
   return {
-    oldText: o.slice(start, o.length - droppedTail).join("\n"),
-    newText: n.slice(start, n.length - droppedTail).join("\n"),
-    elidedHead: start,
-    elidedTail: droppedTail,
+    oldText: oldMid.join("\n"),
+    newText: newMid.join("\n"),
+    elidedHead,
+    elidedTail,
+    headContext,
+    tailContext,
   };
 }
