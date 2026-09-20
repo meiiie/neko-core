@@ -175,3 +175,14 @@ test("permission classes", () => {
   expect(resolveTool("computer").permission).toBe(GATED);
   expect(resolveTool("task").permission).toBe(GATED);
 });
+
+test("describeToolCall honestTruncate keeps path/command tail", () => {
+  const cmd = "bash -lc 'echo START; for i in 1 2 3; do echo item-$i; done; printf \"%s\\n\" very-long-path-/workspace/research/neko-ux-playground/raise-bar-13/notes/order.txt-with-extra-suffix-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'";
+  const label = describeToolCall("bash", { command: cmd });
+  expect(label.startsWith("Bash(")).toBe(true);
+  expect(label).toContain("…");
+  // Tail of the distinctive suffix must remain (mid-arg-only cut hid it as ve…).
+  expect(label).toMatch(/a{8,}/);
+  expect(label).not.toContain("ve…");
+  expect(label.length).toBeLessThanOrEqual("Bash(".length + 80 + 1);
+});

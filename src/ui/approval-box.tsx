@@ -42,6 +42,8 @@ export interface Approval {
   toolName: string;
   args: any;
   resolve: (ok: boolean) => void;
+  /** Serialized gate depth including this prompt (raise-bar-13: "1 of N" when >1). */
+  queueRemaining?: number;
 }
 
 export type ApprovalFlash = { kind: "ok" | "no" | "always"; tool: string };
@@ -215,9 +217,12 @@ export function ApprovalBox({ approval, flash, width, hover, hint }: { approval:
   } else {
     preview.push(<Text key="a" color="gray">{trunc(JSON.stringify(args), 200)}</Text>);
   }
+  const queue = approval.queueRemaining && approval.queueRemaining > 1
+    ? ` (1 of ${approval.queueRemaining})`
+    : "";
   return (
     <Box borderStyle="round" borderColor={color ?? "yellow"} paddingX={1} flexDirection="column" flexShrink={0} width={width}>
-      <Text bold color={color ?? "yellow"}>{status ?? `Approve ${toolName}?`}</Text>
+      <Text bold color={color ?? "yellow"}>{status ?? `Approve ${toolName}?${queue}`}</Text>
       {preview}
       {status ? null : <OptionRow options={approvalOptions(toolName)} hover={hover} />}
       {status || !hint ? null : <Text color="yellow">{hint}</Text>}

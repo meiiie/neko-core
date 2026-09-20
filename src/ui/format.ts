@@ -1,8 +1,9 @@
 /** Small formatting helpers shared across the UI. */
+import { honestTruncate } from "../shared/terminal-text.ts";
 
+/** One-line truncate for approval previews — head…tail so long paths stay identifiable. */
 export function trunc(s: string, n = 120): string {
-  const one = String(s).replace(/\s+/g, " ");
-  return one.length > n ? one.slice(0, n) + "..." : one;
+  return honestTruncate(s, n, "...");
 }
 
 

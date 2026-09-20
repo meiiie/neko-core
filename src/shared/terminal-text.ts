@@ -53,3 +53,35 @@ export function writeTerminalSafe(
 ): void {
   stream.write(terminalSafeText(value, options));
 }
+
+/**
+ * Truncate a one-line label while keeping head + tail visible (paths/commands).
+ * Mid-arg-only cuts lied about what was gated (lived raise-bar-13: collapse showed `ve...`).
+ */
+export function honestTruncate(value: any, cap: number, mark = "…"): string {
+  const one = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (cap <= 0) return "";
+  if (one.length <= cap) return one;
+  if (cap <= mark.length) return mark.slice(0, cap);
+  const keep = cap - mark.length;
+  if (keep <= 1) return one.slice(0, cap);
+  // Prefer a slightly longer head (command verbs) and a visible distinctive tail (path end).
+  let headLen = Math.max(1, Math.ceil(keep * 0.55));
+  let tailLen = Math.max(1, keep - headLen);
+  if (headLen + tailLen > keep) tailLen = keep - headLen;
+  let head = one.slice(0, headLen);
+  let tail = one.slice(one.length - tailLen);
+  // Snap head end to a path/space break when one is nearby (avoid mid-token head cut).
+  const snap = Math.max(head.lastIndexOf("/"), head.lastIndexOf(" "), head.lastIndexOf("-"));
+  if (snap >= Math.floor(headLen * 0.45)) {
+    head = head.slice(0, snap + (head[snap] === "/" ? 1 : 0));
+  }
+  let out = `${head}${mark}${tail}`;
+  if (out.length > cap) {
+    const over = out.length - cap;
+    if (head.length > over) head = head.slice(0, head.length - over);
+    else tail = tail.slice(over - head.length + 1);
+    out = `${head}${mark}${tail}`.slice(0, cap);
+  }
+  return out;
+}

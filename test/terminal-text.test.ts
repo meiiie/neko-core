@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { hasTerminalControl, terminalSafeText, writeTerminalSafe } from "../src/shared/terminal-text.ts";
+import { hasTerminalControl, honestTruncate, terminalSafeText, writeTerminalSafe } from "../src/shared/terminal-text.ts";
 
 describe("terminal-safe text", () => {
   test("escapes terminal controls while preserving ordinary Unicode and optional newlines", () => {
@@ -34,4 +34,20 @@ describe("terminal-safe text", () => {
     expect(terminalSafeText("Neko mô hình 模型", { ascii: true }))
       .toBe("Neko m\\u00f4 h\\u00ecnh \\u6a21\\u578b");
   });
+});
+
+
+test("honestTruncate keeps head and tail under cap", () => {
+  expect(honestTruncate("short", 80)).toBe("short");
+  const s = "head-" + "m".repeat(100) + "-TAILEND";
+  const out = honestTruncate(s, 40, "...");
+  expect(out.length).toBeLessThanOrEqual(40);
+  expect(out.startsWith("head")).toBe(true);
+  expect(out.endsWith("TAILEND")).toBe(true);
+  expect(out).toContain("...");
+});
+
+test("honestTruncate empty / tiny caps", () => {
+  expect(honestTruncate("abcdef", 0)).toBe("");
+  expect(honestTruncate("abcdef", 3, "…").length).toBeLessThanOrEqual(3);
 });

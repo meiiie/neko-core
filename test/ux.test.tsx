@@ -665,6 +665,16 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
   });
 
 
+  
+  test("ApprovalBox shows 1 of N when queueRemaining > 1", () => {
+    const strip = (s: string | undefined) => (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+    const solo = strip(render(<ApprovalBox approval={{ toolName: "edit", args: { path: "a.ts", old_string: "x", new_string: "y" }, resolve: () => {} }} />).lastFrame());
+    expect(solo).toContain("Approve edit?");
+    expect(solo).not.toContain("1 of ");
+    const queued = strip(render(<ApprovalBox approval={{ toolName: "edit", args: { path: "a.ts", old_string: "x", new_string: "y" }, resolve: () => {}, queueRemaining: 2 }} />).lastFrame());
+    expect(queued).toContain("Approve edit? (1 of 2)");
+  });
+
   test("ApprovalBox always-allow option names this session (not path-scoped forever)", () => {
     const f = strip(render(<ApprovalBox approval={{
       toolName: "write_file",

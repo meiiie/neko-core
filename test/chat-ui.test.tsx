@@ -42,6 +42,16 @@ test("successful tool activity folds to one past-tense line while preserving ful
   expect(resultSummary("bash", `(exit 0)\n${eighty}`, { command: "bash src/long.sh" }))
     .toBe("Ran shell command: bash src/long.sh (80 lines)");
   expect(resultSummary("bash", "(exit 0)", { command: "true" })).toBe("Ran shell command: true (0 lines)");
+
+  {
+    const longCmd = ("bash -lc 'echo START; printf \"%s\\n\" very-long-path-/workspace/x/notes/order.txt-with-extra-suffix-" + "a".repeat(80));
+    const collapsed = resultSummary("bash", "(exit 0)\n" + "line\n".repeat(5), { command: longCmd })!;
+    expect(collapsed.startsWith("Ran shell command: ")).toBe(true);
+    expect(collapsed).toContain("...");
+    expect(collapsed).toMatch(/a{8,} \(/);
+    expect(collapsed).not.toMatch(/ve\.\.\. \(/);
+  }
+
   expect(resultSummary("search", "one match", { path: "src", pattern: "needle" })).toBe("Searched for needle (1 match)");
   expect(resultSummary("glob", "a.ts\nb.ts", { path: "src", pattern: "**/*.ts" })).toBe("Found 2 files for **/*.ts");
   // Trailing newline in file -> one numbered read line (raise-bar-8); summary must not say 2.

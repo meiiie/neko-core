@@ -10,6 +10,7 @@
 import { describeToolCall } from "../core/tools.ts";
 import type { Line } from "./transcript.tsx";
 
+import { honestTruncate } from "../shared/terminal-text.ts";
 import { isText } from "../shared/wire.ts";
 
 /** Flatten a message's content (string or vision-array) to display text. */
@@ -40,10 +41,7 @@ export function isToolFailure(obs: string): boolean {
     || /^\(offset \d+ is beyond end of file\b/i.test(text);
 }
 
-const short = (value: any, cap = 80) => {
-  const text = String(value ?? "").replace(/\s+/g, " ").trim();
-  return text.length > cap ? `${text.slice(0, Math.max(0, cap - 3))}...` : text;
-};
+const short = (value: any, cap = 80) => honestTruncate(value, cap, "...");
 
 const ALWAYS_EXPANDED_TOOLS = new Set([
   // todo_write intentionally NOT here: lived raise-bar-12 reprinted the full checklist on every
