@@ -1,7 +1,7 @@
 ---
 name: research-method
 description: Research the real state of the art, doubt every conclusion, and keep a living research ledger so knowledge stays alive.
-match: (research|investigate|state of the art|\bsota\b|latest|newest|survey|compare approaches|benchmark|read the (papers|docs|literature)|find the best|deep dive|nghien cuu|tim hieu sau|vuot chuan)
+match: (research|investigate|state of the art|\bsota\b|survey|compare approaches|read the (papers|docs|literature)|find the best|deep dive|nghien cuu|tim hieu sau|vuot chuan|(?:latest|newest).{0,48}(?:research|papers?|docs|literature|sota|approaches|methods?)|(?:benchmark|compare).{0,48}(?:approaches|papers?|models?|methods?|sota))
 ---
 
 # Research method — chase SOTA, doubt everything, never ossify

@@ -1,7 +1,7 @@
 ---
 name: meeting-notes
 description: Listen to, transcribe, summarize, and extract decisions/action items from local meetings; nghe, ghi am, chep loi, tom tat cuoc hop tieng Viet.
-match: (?=[\s\S]*\b(?:meeting|call|standup|interview|webinar|teams|zoom|google meet|cuoc hop|hop online|phong van|hoi thao)\b)(?=[\s\S]*\b(?:listen|record|transcribe|transcript|minutes|notes|summary|summarize|action items|nghe|ghi am|chep loi|bien ban|ghi chu|tom tat|viec can lam)\b)
+match: (?=[\s\S]*\b(?:meeting|call|standup|interview|webinar|teams|zoom|google meet|cuoc hop|hop online|phong van|hoi thao)\b)(?=[\s\S]*\b(?:listen|record|transcribe|transcript|minutes|summary|summarize|action items|(?:take|taking|write|writing|draft)\s+notes|nghe|ghi am|chep loi|bien ban|ghi chu|tom tat|viec can lam)\b)
 ---
 
 # Meeting notes

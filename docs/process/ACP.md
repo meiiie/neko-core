@@ -18,8 +18,9 @@ neko acp --yolo
 neko acp --host-profile nekocut
 ```
 
-`--yolo` selects Neko's `auto` permission mode. It does not disable catastrophic-command checks,
-workspace/path containment, sandbox policy, or explicit consent for host computer control.
+`--yolo` selects Neko's `auto` permission mode (freer autonomy): ordinary coding tools, outside-project
+structured writes, and host computer proceed without routine prompts. It does not disable catastrophic-command
+checks, credential/system path seatbelts, sandbox policy when configured, or destructive-bash warnings.
 
 ## Zed custom agent
 
@@ -135,9 +136,10 @@ credentials, and native lease IDs. Neko allowlists the model-visible status/snap
 values, refuses protected inputs, stops for CAPTCHA or human takeover, and best-effort releases control after each
 turn and on cancel/close/disconnect. `status` and `observe` are read-only verification evidence;
 `acquire`/`release` are control-plane lifecycle and do not invalidate a fresh app-state observation; only
-`focus`, `invoke`, and `set_text` change semantic app state. Acquire and state-changing actions retain Neko's
-host-computer consent boundary. Provider-native children inside the same
-AgentSession share that one bounded port and never create another native owner.
+`focus`, `invoke`, and `set_text` change semantic app state. Acquire and state-changing actions still pass
+through Neko's permission gate and seatbelts (`auto` allows host computer; `plan` denies; other modes prompt).
+Provider-native children inside the same AgentSession share that one bounded port and never create another
+native owner.
 
 ACP clients that advertise Terminal Auth support can also launch Neko's corresponding method. It runs
 `neko login openai chatgpt` in a separate interactive terminal, so browser OAuth never shares the ACP
@@ -154,7 +156,7 @@ ACP session modes map one-to-one to Neko's named permission states:
 | `default` | Prompt through `session/request_permission` before gated writes/commands. |
 | `accept-edits` | Approve Neko file edits; other gated actions still prompt. |
 | `plan` | Hard-deny every gated action. No permission dialog can override it. |
-| `auto` | Approve bounded coding tools; Neko seatbelts and host-computer consent still apply. |
+| `auto` | Approve coding tools, outside structured writes, and host computer; destructive bash still asks; seatbelts remain. |
 
 The permission dialog offers allow/reject once and allow/reject for the current ACP session. Persistent
 choices are deliberately scoped to that session and disappear when it closes. A disconnected or

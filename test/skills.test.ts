@@ -334,9 +334,34 @@ test("meeting-notes routes Vietnamese and English meeting capture requests witho
     "Nghe va chep loi cuoc hop Teams nay, sau do tom tat bien ban va viec can lam",
     "Record this Zoom meeting and produce timestamped action items",
     "Tom tat cuoc hop online dang phat tren may tinh",
+    "write a meeting summary of the standup notes",
+    "take notes during the meeting",
   ]) expect(matchesSkill("meeting-notes", prompt)).toBe(true);
-  for (const prompt of ["xin chao", "tom tat file README", "mo Zoom de kiem tra cap nhat"])
-    expect(matchesSkill("meeting-notes", prompt)).toBe(false);
+  for (const prompt of [
+    "xin chao",
+    "tom tat file README",
+    "mo Zoom de kiem tra cap nhat",
+    // Filename / edit prompts must not look like capture work (CONT-4).
+    "multi_edit the meeting notes file notes/a.txt",
+    "append RAISE to the meeting notes file",
+    "edit notes/meeting notes.md",
+  ]) expect(matchesSkill("meeting-notes", prompt)).toBe(false);
+});
+
+test("research-method does not false-positive on ordinary coding prompts with latest/newest/benchmark", () => {
+  for (const prompt of [
+    "research the latest React docs",
+    "compare approaches for sticky scroll",
+    "investigate state of the art RAG",
+    "find the best library for CSV parsing",
+  ]) expect(matchesSkill("research-method", prompt)).toBe(true);
+  for (const prompt of [
+    "edit the file; latest code is in src/",
+    "use the newest API in this module",
+    "run unit benchmark for stats.js",
+    "benchmark this function",
+    "fix the median bug in stats.js",
+  ]) expect(matchesSkill("research-method", prompt)).toBe(false);
 });
 
 test("office artifacts route in English and Vietnamese and require saved-result verification", () => {

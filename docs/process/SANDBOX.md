@@ -3,9 +3,10 @@
 Neko has layered safety for the gated tools:
 
 1. **Permission modes** (default/accept-edits/plan/auto) + the inline approval gate.
-2. **Structured-write confinement** — `write_file`/`edit`/`multi_edit` refuse paths outside the
-   workspace or an exact `additional_write_roots` capability and reject outside credential paths, link
-   escapes, and existing multiply-linked regular files before approval or hooks.
+2. **Structured-write confinement** — `write_file`/`edit`/`multi_edit` reject credential/system paths,
+   link escapes, and existing multiply-linked regular files before approval or hooks. Under `default` /
+   `accept-edits`, ordinary paths outside the workspace (or an exact `additional_write_roots` grant) still
+   prompt; under product-default `auto`/`--yolo` those ordinary outside writes are allowed (see below).
 3. **Catastrophic-command seatbelt** — `bash` refuses `rm -rf /`, `mkfs`, fork bombs, `format c:`,
    `> /dev/sd*`, etc. (unless `allow_dangerous_bash: true`).
 4. **Adversarial check** (opt-in) — a model pass vets auto-approved mutating actions.

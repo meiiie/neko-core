@@ -8,6 +8,16 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **ACP freer-auto wording (CONT-4).** ACP session mode `auto`, `--yolo` docs, and Architecture/
+  Sandbox permission copy now match the Grok-free contract: coding tools, outside structured writes,
+  and host computer proceed without routine prompts; destructive bash still asks; seatbelts remain.
+  Stale "host-computer consent remain active" / "bounded coding tools" Claude-tight phrasing removed
+  from the IDE-visible mode picker and ACP docs.
+
+- **Skill router false-positive tighten (CONT-4).** `research-method` no longer routes on bare
+  `latest` / `newest` / `benchmark` in ordinary coding prompts. `meeting-notes` no longer routes on
+  filename-only "meeting notes" without a capture/summary verb (`take/write notes`, summary, record, …).
+
 - **Plan-exit mode choice (CONT-2).** `exit_plan_mode` ApprovalBox offers Claude-shaped
   `[y] auto` / `[e] accept-edits` / `[n] keep planning` instead of forcing
   accept-edits. Flash shows `approved → auto|accept-edits`. Pointer zones match. Remote/ACP

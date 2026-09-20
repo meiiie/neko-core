@@ -572,8 +572,9 @@ new action, lease, permission mode, or child authority.
 
 The ACP client's permission response is only an implementation of core's `ApprovalGate`. Core still
 decides whether a call is allowed, denied, or eligible to prompt. In particular, `plan` is a hard deny;
-`auto` does not bypass host-computer consent or seatbelts; and allow/reject-always choices are scoped to
-one ACP session. ACP stdout is protocol-only.
+`auto` allows ordinary coding tools, outside structured writes, and host computer while seatbelts and
+destructive-bash warnings remain; and allow/reject-always choices are scoped to one ACP session. ACP
+stdout is protocol-only.
 
 ## Verify loop (the harness)
 
