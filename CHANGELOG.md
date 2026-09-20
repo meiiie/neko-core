@@ -8,6 +8,11 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **Quieter Shift+Tab mode flash.** Mode-cycle contract feedback uses the reserved ephemeral
+  status row (~1.8s) instead of appending durable transcript `mode:` lines (CONT-1). Footer
+  chip still updates immediately. Shift+Tab remains disabled while an approval is open.
+  Boot / `--yolo` / resume disclosures stay one-shot durable info lines.
+
 - **Grok-free product-default `auto`.** Ordinary `write_file`/`edit`/`multi_edit` outside the
   project and gated `computer` actions are **allowed** under ordinary `auto` (not only
   `--yolo`), matching Grok Build sandbox-off freer posture. `plan` still denies. Workspace-

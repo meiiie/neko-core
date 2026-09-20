@@ -1014,10 +1014,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const selectedText = useRef("");                                 // the current persisted selection's text (for Ctrl+C)
   const [copyNote, setCopyNote] = useState<string | null>(null);   // transient copy confirmation, auto-clears
   const copyNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flashCopyNote = (msg: string) => {
+  const flashCopyNote = (msg: string, ms = 2500) => {
     setCopyNote(msg);
     if (copyNoteTimer.current) clearTimeout(copyNoteTimer.current);
-    copyNoteTimer.current = setTimeout(() => setCopyNote(null), 2500);
+    copyNoteTimer.current = setTimeout(() => setCopyNote(null), ms);
   };
   const flashApprovalHint = (msg: string) => {
     setApprovalHint(msg);
@@ -1503,9 +1503,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const nm = nextMode(registryRef.current!.mode);
         registryRef.current!.mode = nm;
         setMode(nm);
-        // Lived auto UX: silent cycle left people unsure whether they left ask-first — flash the contract.
+        // Lived CONT-1: durable transcript `mode:` lines were scroll noise; keep the contract flash
+        // on the reserved ephemeral status row (same band as copy confirmations). Footer chip still
+        // updates immediately. Shift+Tab remains inactive while an ApprovalBox is open (policy C).
         const yoloTag = yolo && nm === "auto" ? "yolo (explicit --yolo; prompts off) — " : "";
-        addLine("info", `mode: ${yoloTag}${nm} — ${modeDetail(nm)}`);
+        flashCopyNote(`mode: ${yoloTag}${nm} — ${modeDetail(nm)}`, 1800);
         return;
       }
       if (key.ctrl || key.meta) return; // Ctrl+Up/Down scrolls the transcript; never recall prompt history too

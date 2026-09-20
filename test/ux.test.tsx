@@ -856,8 +856,33 @@ test("Shift+Tab cycles the permission mode (auto -> default)", async () => {
   expect(strip(c.lastFrame())).toContain("auto");
   c.stdin.write("\x1b[Z"); // Shift+Tab
   await tick(50);
-  expect(strip(c.lastFrame())).toContain("default");
+  const after = strip(c.lastFrame());
+  expect(after).toContain("default");
+  // Quieter CONT-1: contract flash is ephemeral status, not a durable transcript info line.
+  expect(after).toMatch(/mode:\s*(?:yolo[^\n]*—\s*)?default/);
   c.unmount();
+});
+
+test("Shift+Tab mode flash does not stack durable transcript mode lines", async () => {
+  const c = render(<ChatApp fullscreen={false} yolo={false} provider={new Echo()} />);
+  try {
+    await tick();
+    c.stdin.write("\x1b[Z"); // auto -> default
+    await tick(40);
+    c.stdin.write("\x1b[Z"); // default -> accept-edits
+    await tick(40);
+    c.stdin.write("\x1b[Z"); // accept-edits -> plan
+    await tick(40);
+    // Wait out the 1800ms ephemeral flash; durable transcript must not keep `mode: …` lines.
+    await tick(2000);
+    const after = strip(c.lastFrame() ?? "");
+    expect(after).toMatch(/plan/); // footer chip
+    expect(after).not.toMatch(/mode:\s+(?:yolo[^\n]*—\s*)?(?:default|accept-edits|plan|auto)\b/);
+    // Boot disclosure uses "mode auto:" (no colon after mode) and must remain.
+    expect(after).toMatch(/mode auto:/);
+  } finally {
+    c.unmount();
+  }
 });
 
 test("slash menu autocompletes as you type", async () => {
