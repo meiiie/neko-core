@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import { cloneElement } from "react";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -512,6 +512,41 @@ test("sticky prompt click stays exact while an uncommitted streaming tail extend
   }
 }, 15000);
 
+
+test("TUI --continue restores session.mode (not silent reboot to config auto)", async () => {
+  const prevHome = process.env.HOME;
+  const prevMode = process.env.NEKO_MODE;
+  const home = mkdtempSync(join(tmpdir(), "neko-mode-restore-"));
+  try {
+    delete process.env.NEKO_MODE;
+    process.env.HOME = home;
+    mkdirSync(join(home, ".neko-core"), { recursive: true });
+    writeFileSync(join(home, ".neko-core", "config.json"), JSON.stringify({ mode: "auto" }));
+    class EchoP {
+      async complete() { return { content: "hi", tool_calls: [] }; }
+    }
+    const resumed: any = {
+      id: "mode-restore-ux3",
+      createdAt: new Date().toISOString(),
+      updatedAt: "",
+      cwd: process.cwd(),
+      model: "m",
+      mode: "plan",
+      messages: [{ role: "user", content: "stay in plan" }, { role: "assistant", content: "ok" }],
+    };
+    const c = render(<ChatApp fullscreen={false} provider={new EchoP() as any} resumedSession={resumed} />);
+    await Bun.sleep(120);
+    const frame = strip(c.lastFrame());
+    expect(frame).toMatch(/mode restored:\s*plan/i);
+    const status = frame.split("\n").find((line) => line.includes("shift+tab")) ?? "";
+    expect(status).toContain("plan");
+    c.unmount();
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+    if (prevMode === undefined) delete process.env.NEKO_MODE; else process.env.NEKO_MODE = prevMode;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 test("explicit --yolo footer shows yolo not plain auto", async () => {
   class Echo {

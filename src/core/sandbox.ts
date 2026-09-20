@@ -576,7 +576,7 @@ export function withSrtStateVolumeGuidance(raw: string): string {
  * Deliberately does NOT fire on a plain single-file delete (`rm file.txt`) - that keeps ordinary
  * cleanup convenient; it fires on the mass/irreversible forms (recursive/force/glob rm, git history
  * or worktree wipers, find -delete, script-driven deletion, shred/truncate, force/mirror git push,
- * or git push to a URL remote). Ordinary product-default
+ * git push to a URL remote, sudo elevation, or curl|sh / wget|sh). Ordinary product-default
  * auto still asks once for these; zero prompts require session "always allow bash" or explicit --yolo. */
 export function destructiveInWorkspace(command: string): string | null {
   const c = String(command).replace(/\s+/g, " ").trim();
@@ -598,6 +598,10 @@ export function destructiveInWorkspace(command: string): string | null {
   if (/\bfind\b[^|;]*-(delete|exec\s+rm)\b/.test(c)) return "find -delete / -exec rm";
   if (/\b(python3?|node|ruby|perl|deno|bun)\b[^|;]*\b(rmtree|removedirs|shutil|os\.remove|os\.unlink|fs\.rm|unlink\(|rimraf)/i.test(c)) return "script-driven deletion";
   if (/\b(shred|truncate)\b/.test(c)) return "shred/truncate (irrecoverable)";
+  // Host privilege: sudo leaves the workspace seatbelt. Product-default auto asks once (like rm -rf).
+  if (/(?:^|\s|[;&|])sudo(?:\s|$)/.test(c)) return "sudo (elevated privileges)";
+  // Classic remote-script bootstrap: curl|sh / wget|sh (also `| bash`).
+  if (/\b(curl|wget)\b[^\n|;]*\|\s*(?:ba)?sh\b/i.test(c)) return "pipe remote download to a shell (curl|sh)";
   return null;
 }
 

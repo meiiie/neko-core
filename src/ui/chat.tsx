@@ -79,7 +79,7 @@ import { debug } from "../shared/debug.ts";
 import { expandPlaceholders } from "../shared/paste-collapse.ts";
 import { prepareCompletionAlert } from "../adapters/completion-sound.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
-import { modeDetail, nextMode, type PermissionMode } from "../core/permissions.ts";
+import { isMode, modeDetail, nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
 import { AsyncSessionWriter, latestSession, loadSession, newSessionId, renameSession, type Session } from "../adapters/session.ts";
 import { applySkillPolicyForTurn, matchesSkill } from "../adapters/skills.ts";
@@ -258,6 +258,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             maxRows: Math.max(8, Math.min(20, rows - 10)),
           })));
       out.push({ id: idRef.current++, kind: "info", text: `(resumed ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)` });
+      const savedMode = resumedRef.current.mode;
+      if (typeof savedMode === "string" && isMode(savedMode) && savedMode !== cfg.mode && !yolo) {
+        out.push({ id: idRef.current++, kind: "info", text: `mode restored: ${savedMode} — ${modeDetail(savedMode)} (session; config default is ${cfg.mode})` });
+      }
       const left = recoverTodos(resumedRef.current.messages).filter((t) => t.status !== "completed").length;
       if (left) out.push({ id: idRef.current++, kind: "info", text: `Picking up where you left off - ${left} task${left > 1 ? "s" : ""} still open. Just tell me to keep going (in your own words), or /continue.` });
     }
@@ -375,7 +379,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const remoteOverlayRef = useRef<{ id: string; overlay: Overlay } | null>(null);
   const relayUiRef = useRef<RemoteUiState>({});
   const [pendingMulti, setPendingMulti] = useState(false);
-  const [mode, setMode] = useState<PermissionMode>(yolo ? "auto" : cfg.mode);
+  // ACP restores session.mode on resume; TUI previously always rebooted to config mode, so a
+  // Shift+Tab to plan/default silently vanished under --continue (lived UX-3 trust/clarity).
+  const resumedMode = resumedRef.current?.mode;
+  const [mode, setMode] = useState<PermissionMode>(
+    yolo ? "auto" : (typeof resumedMode === "string" && isMode(resumedMode) ? resumedMode : cfg.mode),
+  );
   const modeRef = useRef<PermissionMode>(mode);
   useEffect(() => {
     modeRef.current = mode;
@@ -636,7 +645,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   const registryRef = useRef<ToolRegistry | null>(null);
   if (!registryRef.current) {
-    const baseRegistry = new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub);
+    const baseRegistry = new ToolRegistry(process.cwd(), yolo ? "auto" : (typeof resumedRef.current?.mode === "string" && isMode(resumedRef.current.mode) ? resumedRef.current.mode : cfg.mode), gate, mcpHub);
     baseRegistry.explicitYolo = yolo;
     registryRef.current = configureToolRegistry(
       baseRegistry,
@@ -873,6 +882,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       updatedAt: new Date().toISOString(),
       cwd: process.cwd(),
       model: cfg.model,
+      provider: cfg.provider,
+      profile: cfg.profile ?? null,
+      mode: modeRef.current,
       title: pinnedTitleRef.current || undefined,
       messages: agentRef.current!.messages,
       completionContract: agentRef.current!.completionContract,
