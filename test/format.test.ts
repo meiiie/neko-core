@@ -24,10 +24,23 @@ test("elideCommonEnds drops identical anchors when appending after a function", 
   const newText = oldText + "\n\nexport function range(xs) {\n  return [xs[0], xs[0]];\n}";
   const r = elideCommonEnds(oldText, newText, 1);
   expect(r.elidedHead).toBeGreaterThan(0);
-  // Shared clamp body is elided; only 1 context line kept from the common prefix.
-  expect(r.oldText).not.toContain("if (n < lo) return lo;");
+  // Shared clamp body is fully dropped beyond 1 dim context line; mid is additions only.
+  expect(r.oldText).toBe("");
+  expect(r.headContext).toBe("}");
   expect(r.newText).toContain("export function range");
-  expect(r.newText).toContain("}"); // trailing context from the shared prefix
+  expect(r.newText).not.toMatch(/^-/); // mid must not restate the context brace as a -/+ side
+  expect(r.newText.startsWith("\n") || r.newText.startsWith("export")).toBe(true);
+});
+
+test("elideCommonEnds mid-only append after a single shared line (multi_edit-style)", () => {
+  const oldText = 'assert(JSON.stringify(chunk([1, 2], 2)) === "[[1,2]]", "chunk");';
+  const newText = oldText + '\nassert(JSON.stringify(groupBy([], x => x)) === "{}", "groupBy empty");';
+  const r = elideCommonEnds(oldText, newText, 1);
+  expect(r.elidedHead).toBe(0);
+  expect(r.headContext).toBe(oldText);
+  expect(r.oldText).toBe("");
+  expect(r.newText).toContain("groupBy empty");
+  expect(r.newText).not.toContain("chunk");
 });
 
 test("elideCommonEnds leaves unrelated sides alone", () => {

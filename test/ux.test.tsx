@@ -691,6 +691,29 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
     expect(f).toContain("export function range");
     // The identical clamp body should not paint as both red and green noise.
     expect(f).not.toContain("- if (n < lo) return lo;");
+    // Kept context brace must be dim once — never a false -}/+} pair (raise-bar-4 lived).
+    expect(f).not.toContain("- }");
+    expect(f).toContain("+ export function range");
+  });
+
+  test("ApprovalBox multi_edit append elides shared line as dim context (not -/+)", () => {
+    const line = 'assert(JSON.stringify(chunk([1, 2, 3, 4, 5], 2)) === "[[1,2],[3,4],[5]]", "chunk");';
+    const f = strip(render(<ApprovalBox approval={{
+      toolName: "multi_edit",
+      args: {
+        path: "test/selftest.js",
+        edits: [{
+          old_string: line,
+          new_string: line + '\nassert(JSON.stringify(groupBy([], x => x)) === "{}", "groupBy empty");',
+        }],
+      },
+      resolve: () => {},
+    }} width={80} />).lastFrame());
+    expect(f).toContain("Approve multi_edit?");
+    expect(f).toContain("groupBy empty");
+    // Shared chunk assert must not appear as both removed and added.
+    expect(f).not.toContain("- assert(JSON.stringify(chunk");
+    expect(f).toContain("+ assert(JSON.stringify(groupBy");
   });
 
 
