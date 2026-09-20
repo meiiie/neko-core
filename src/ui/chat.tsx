@@ -525,7 +525,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (mode !== "auto") return;
     addLine(
       "info",
-      "mode auto: coding tools, outside structured writes, and host computer run without prompts; workspace-destructive bash still asks once; credential/system/catastrophic seatbelts remain.",
+      "mode auto: coding tools, outside writes, and computer run without prompts; destructive bash still asks; seatbelts remain.",
     );
   }, []);
 

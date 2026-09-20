@@ -203,11 +203,11 @@ export function collectChecks(
       status: config.mode === "auto" ? "warn" : "ok",
       name: "mode",
       detail: unconfinedAuto
-        ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - UNCONFINED AUTO: gated tools run without approval and bash has no live OS sandbox`
+        ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - UNCONFINED AUTO: gated coding tools, outside structured writes, and host computer run without approval; bash has no live OS sandbox; destructive bash still asks`
         : failClosedAuto
-          ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - other gated tools run without approval; bash FAILS CLOSED because the configured ${sandboxKind} sandbox is unusable`
+          ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - gated coding tools, outside structured writes, and host computer run without approval; bash FAILS CLOSED because the configured ${sandboxKind} sandbox is unusable; destructive bash still asks when bash can run`
         : config.mode === "auto"
-          ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - gated tools run without approval`
+          ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - gated coding tools, outside structured writes, and host computer run without approval; destructive bash still asks`
           : config.mode,
     },
     {
@@ -221,7 +221,7 @@ export function collectChecks(
       status: unconfinedAuto || (config.sandbox && !sandboxLive) ? "warn" : "ok",
       name: "bash_sandbox",
       detail: unconfinedAuto
-        ? `UNCONFINED AUTO: ${config.sandbox ? "sandbox requested but not live" : "sandbox disabled"}; bash runs without approval. The seatbelt is not confinement.`
+        ? `UNCONFINED AUTO: ${config.sandbox ? "sandbox requested but not live" : "sandbox disabled"}; ordinary bash runs without approval; workspace-destructive bash still asks. The seatbelt is not confinement.`
         : config.sandbox
         ? sandboxKind === "none"
           ? "requested but unavailable on this OS - seatbelt + approval gate still apply"
