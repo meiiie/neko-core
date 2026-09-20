@@ -170,7 +170,7 @@ export function collectCapabilities(config: NekoConfig, explicitYolo = false): C
       status: auto ? "enabled" : "disabled",
       detail: explicitYolo
         ? "explicit --yolo: approval prompts are disabled; hard credential/system/catastrophic seatbelts remain"
-        : "mode=auto: bounded gated tools run without prompting; host computer control still requires explicit consent",
+        : "mode=auto: gated coding tools, ordinary outside structured writes, and host computer run without prompting; destructive bash still asks once; hard seatbelts remain",
     },
     { name: "introspection", klass: "cli", status: "enabled", detail: "tools/agents/commands/capabilities/policy registries" },
     { name: "meeting_companion", klass: "tool", status: "enabled", detail: "explicit-consent local capture; optional local transcription; timestamped evidence" },
@@ -265,7 +265,7 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
       subject: "mode",
       message: explicitYolo
         ? "explicit --yolo: approval prompts are disabled. Hard credential/system/catastrophic seatbelts remain."
-        : "mode=auto: bounded gated tools run without prompting, while host-boundary prompts remain. Named state, not hidden.",
+        : "mode=auto: gated coding tools, ordinary outside writes, and host computer run without prompting; workspace-destructive bash still asks once; hard seatbelts remain. Named state, not an LLM classifier.",
     });
     if (!config.sandbox || sandboxKind === "none") {
       findings.push({
@@ -310,7 +310,9 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
       subject: "read_outside_root",
       message: explicitYolo
         ? "Reads may resolve outside the project directory. Exact ordinary structured writes are pre-authorized by explicit --yolo for this launch; this authority never reaches sandboxed Bash. System and credential paths (SSH, .env, key material, browser stores), symlink/junction escapes, and hardlink aliases stay refused. ~/.neko-core/config.json is additionally JSON-validated after every write. Set read_outside_root:false for a hard read wall."
-        : "Reads may resolve outside the project directory. Structured writes are automatic only in the project and exact additional_write_roots; an ordinary target elsewhere requires one human confirmation for that exact change. This transient authority never reaches sandboxed Bash. System and credential paths (SSH, .env, key material, browser stores), symlink/junction escapes, and hardlink aliases stay refused. ~/.neko-core/config.json is additionally JSON-validated after consent. Set read_outside_root:false for a hard read wall.",
+        : config.mode === "auto"
+          ? "Reads may resolve outside the project directory. Exact ordinary structured writes outside the project are pre-authorized under mode=auto (Grok-free); this authority never reaches sandboxed Bash. System and credential paths (SSH, .env, key material, browser stores), symlink/junction escapes, and hardlink aliases stay refused. ~/.neko-core/config.json still needs confirmation unless --yolo. Set read_outside_root:false for a hard read wall."
+          : "Reads may resolve outside the project directory. Structured writes are automatic only in the project and exact additional_write_roots; an ordinary target elsewhere requires one human confirmation for that exact change. This transient authority never reaches sandboxed Bash. System and credential paths (SSH, .env, key material, browser stores), symlink/junction escapes, and hardlink aliases stay refused. ~/.neko-core/config.json is additionally JSON-validated after consent. Set read_outside_root:false for a hard read wall.",
     });
   }
 
@@ -322,7 +324,9 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
       .map((path) => path === config.researchWriteRoot ? "~/.neko-core/research" : path)
       .join(", ")}. Auto mode skips prompts inside these exact roots; ${explicitYolo
         ? "explicit --yolo pre-authorizes an exact ordinary target elsewhere for this launch"
-        : "an ordinary target elsewhere still needs exact human consent"}.`,
+        : config.mode === "auto"
+          ? "mode=auto also pre-authorizes an exact ordinary target elsewhere (credential/system paths stay refused)"
+          : "an ordinary target elsewhere still needs exact human consent"}.`,
   });
 
   const verdict = findings.some((f) => f.severity === "fail")

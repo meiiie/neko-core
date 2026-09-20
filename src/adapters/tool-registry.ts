@@ -31,10 +31,10 @@ function modeRuntimeDetail(
             : "explicit --yolo removes approval prompts; hard seatbelts still apply";
       }
       return failClosedBash
-        ? "non-bash gated tools run without an approval prompt; bash FAILS CLOSED until its configured OS sandbox is healthy; host computer control still requires explicit consent"
+        ? "non-bash gated tools run without an approval prompt; bash FAILS CLOSED until its configured OS sandbox is healthy; outside structured writes and host computer are allowed under auto; destructive bash still asks; Neko seatbelts still apply"
         : unconfinedAuto
-          ? "UNCONFINED AUTO: bounded gated tools run without an approval prompt and bash runs on the host; host computer control still requires explicit consent; Neko seatbelts still apply"
-          : "bounded gated tools run without an approval prompt; host computer control still requires explicit consent; Neko seatbelts still apply";
+          ? "UNCONFINED AUTO: gated coding tools, outside structured writes, and host computer run without an approval prompt; bash runs on the host; destructive bash still asks; Neko seatbelts still apply"
+          : "gated coding tools, outside structured writes, and host computer run without an approval prompt; destructive bash still asks; Neko seatbelts still apply";
     case "plan":
       return "all gated Neko actions are denied; safe inspection tools remain available";
     case "accept-edits":

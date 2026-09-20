@@ -17,7 +17,7 @@ test("runtime block makes Neko mode and provider-native separation authoritative
 
   expect(block).toStartWith("# NEKO DYNAMIC-TOOL RUNTIME\n");
   expect(block).toContain("Effective Neko permission mode: auto");
-  expect(block).toContain("host computer control still requires explicit consent");
+  expect(block).toMatch(/host computer (?:are allowed under auto|run without an approval prompt)/);
   expect(block).toContain("Provider-native shell, apply_patch/edit, approvals, sandbox, and skills are a separate transport runtime");
   expect(block).toContain("Neko bash dynamic tool: callable");
   expect(block).toContain("this same host and current Neko process identity");

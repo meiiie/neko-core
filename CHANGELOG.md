@@ -8,13 +8,25 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **Grok-free product-default `auto`.** Ordinary `write_file`/`edit`/`multi_edit` outside the
+  project and gated `computer` actions are **allowed** under ordinary `auto` (not only
+  `--yolo`), matching Grok Build sandbox-off freer posture. `plan` still denies. Workspace-
+  destructive bash (rm -rf, force-push, sudo, curl|sh, …) still asks once with ⚠.
+  Credential/system/catastrophic seatbelts and `~/.neko-core/config.json` confirmation remain.
+  Docs, `decide()`, doctor/policy, and runtime-block wording updated — not an LLM classifier.
 - **ToolRegistry / library hosts now default to permission mode `auto`.** Config and the TUI
   already treated omitted `mode` as bounded auto (since 0.24.10); the constructor and README
   host sample still said `default`. Aligning them makes SDK embeds and omitted-arg call sites
   match Claude Code / Grok Build product default. Shift+Tab still cycles
-  `default | accept-edits | plan | auto`; set `"mode": "default"` for asks-first. Ordinary
-  `auto` still prompts for host computer control (not YOLO). ACP session-list metadata falls
-  back to `auto` when a record has no stored mode.
+  `default | accept-edits | plan | auto`; set `"mode": "default"` for asks-first. ACP
+  session-list metadata falls back to `auto` when a record has no stored mode.
+
+### Added
+
+- **Optional ASCII TUI chrome** (`src/ui/chrome-glyphs.ts`): `NEKO_ASCII_CHROME=1` or
+  non-UTF-8 locale / `TERM=dumb` maps ApprovalBox ⚠✓✗, footer mode chip, and tree/error prefixes to
+  ASCII (`!` / `+` / `X` / `>>` / `|-`). Footer mode chip defaults to `>>` (U+23F5 ⏵⏵ tofu'd as `??` on thin Linux CSR fonts). Body text and OSC tab titles (🐱) are untouched. No Nerd
+  Font / Symbola dependency.
 
 
 ## [1.6.2] - 2026-09-09

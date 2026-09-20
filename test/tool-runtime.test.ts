@@ -28,7 +28,7 @@ test("write then read", async () => {
   expect(await reg.execute("read_file", { path: "a.txt" })).toContain("hi");
 });
 
-test("an exact outside-workspace structured write always prompts and remains checkpoint-reversible", async () => {
+test("auto mode allows an exact outside-workspace structured write without prompting and remains checkpoint-reversible", async () => {
   let prompts = 0;
   const { root, reg } = makeReg("auto", () => { prompts++; return true; });
   const outside = mkdtempSync(join(tmpdir(), "neko-host-write-"));
@@ -36,7 +36,7 @@ test("an exact outside-workspace structured write always prompts and remains che
   writeFileSync(target, "before");
   try {
     expect(await reg.execute("write_file", { path: target, content: "after" })).toContain("Wrote");
-    expect(prompts).toBe(1);
+    expect(prompts).toBe(0);
     expect(readFileSync(target, "utf8")).toBe("after");
     expect(reg.restoreCheckpoint()).toBe(1);
     expect(readFileSync(target, "utf8")).toBe("before");
@@ -46,9 +46,9 @@ test("an exact outside-workspace structured write always prompts and remains che
   }
 });
 
-test("outside-workspace structured writes are denied without consent and system roots never reach the prompt", async () => {
+test("default mode still prompts for outside-workspace writes; system roots never reach the prompt", async () => {
   let prompts = 0;
-  const { root, reg } = makeReg("auto", () => { prompts++; return false; });
+  const { root, reg } = makeReg("default", () => { prompts++; return false; });
   const outside = mkdtempSync(join(tmpdir(), "neko-host-deny-"));
   const target = join(outside, "denied.txt");
   try {
@@ -329,24 +329,17 @@ test("auto mode refuses unsandboxed host-daemon commands without an explicit ove
   expect(out).toContain("allow_dangerous_bash");
 });
 
-test("auto mode cannot silently cross the computer host boundary", async () => {
+test("auto mode allows computer without calling the approval gate", async () => {
   let prompts = 0;
   let executions = 0;
   const { reg } = makeReg("auto", () => { prompts++; return false; });
   reg.computerHandler = () => { executions++; return "host action ran"; };
 
-  expect(await reg.execute("computer", { action: "read" })).toContain("Denied by user");
-  expect(prompts).toBe(1);
-  expect(executions).toBe(0);
-
-  // An affirmative approval is separate, explicit authority; auto mode alone was insufficient.
-  reg.prompt = () => { prompts++; return true; };
   expect(await reg.execute("computer", { action: "read" })).toBe("host action ran");
-  expect(prompts).toBe(2);
-  expect(executions).toBe(1);
+  expect({ prompts, executions }).toEqual({ prompts: 0, executions: 1 });
 });
 
-test("explicit yolo crosses the computer boundary without calling the approval gate", async () => {
+test("explicit yolo still crosses the computer boundary without calling the approval gate", async () => {
   let prompts = 0;
   let executions = 0;
   const { reg } = makeReg("auto", () => { prompts++; return false; });

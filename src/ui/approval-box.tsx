@@ -9,6 +9,7 @@ import { Markdown } from "./markdown.tsx";
 
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
+import { chromeDenyPrefix, chromeOkPrefix, chromeWarnPrefix } from "./chrome-glyphs.ts";
 
 /** The clickable option row: each option is a hit zone (HIT_SENTINEL anchor) with a REAL hover
  * state, same contract as the jump pill - what lights up is exactly what a click settles. The
@@ -54,9 +55,9 @@ export interface Approval {
 export type ApprovalFlash = { kind: "ok" | "no" | "always"; tool: string };
 
 const flashText = (flash: ApprovalFlash) => {
-  if (flash.kind === "no") return "✗ denied";
-  if (flash.kind === "always") return `✓ always ${flash.tool} (this session)`;
-  return "✓ approved";
+  if (flash.kind === "no") return `${chromeDenyPrefix().trimEnd()} denied`;
+  if (flash.kind === "always") return `${chromeOkPrefix().trimEnd()} always ${flash.tool} (this session)`;
+  return `${chromeOkPrefix().trimEnd()} approved`;
 };
 
 /** Tall enough to review a typical edit without truncating mid-token; still capped so a huge
@@ -195,12 +196,12 @@ export function ApprovalBox({ approval, flash, width, hover, hint }: { approval:
     // When the ONLY reason bash is prompting is that it destroys workspace data (otherwise a live
     // sandbox would auto-approve it), say so - the user is confirming an irreversible delete.
     const why = destructiveInWorkspace(String(args.command ?? ""));
-    if (why) preview.push(<Text key="warn" color="red">{"⚠ "}{why} - confirm before it runs</Text>);
+    if (why) preview.push(<Text key="warn" color="red">{chromeWarnPrefix()}{why} - confirm before it runs</Text>);
   } else if (toolName === "write_file") {
     const content = String(args.content ?? "");
     const path = String(args.path ?? "?");
     if (path !== "?" && looksOutsideWorkspace(path)) {
-      preview.push(<Text key="owarn" color="red">{"⚠ "}outside workspace — confirm this exact host write</Text>);
+      preview.push(<Text key="owarn" color="red">{chromeWarnPrefix()}outside workspace — confirm this exact host write</Text>);
     }
     const existing = readWorkspaceFile(path === "?" ? "" : path);
     if (existing != null) {
@@ -221,12 +222,12 @@ export function ApprovalBox({ approval, flash, width, hover, hint }: { approval:
     }
   } else if (toolName === "edit") {
     if (args?.path && looksOutsideWorkspace(String(args.path))) {
-      preview.push(<Text key="owarn" color="red">{"⚠ "}outside workspace — confirm this exact host write</Text>);
+      preview.push(<Text key="owarn" color="red">{chromeWarnPrefix()}outside workspace — confirm this exact host write</Text>);
     }
     pushEditDiff(preview, args);
   } else if (toolName === "multi_edit") {
     if (args?.path && looksOutsideWorkspace(String(args.path))) {
-      preview.push(<Text key="owarn" color="red">{"⚠ "}outside workspace — confirm this exact host write</Text>);
+      preview.push(<Text key="owarn" color="red">{chromeWarnPrefix()}outside workspace — confirm this exact host write</Text>);
     }
     const edits = Array.isArray(args.edits) ? args.edits : [];
     preview.push(<Text key="p" color="gray">multi_edit {args.path ?? "?"} ({edits.length} edit{edits.length === 1 ? "" : "s"})</Text>);
