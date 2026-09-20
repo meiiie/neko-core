@@ -1168,3 +1168,41 @@ test("omitted mode is auto: gated write does not prompt", async () => {
   }
 });
 
+test("auto mode: ordinary bash + writes silent; workspace-destructive bash prompts once; yolo skips", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-tr-destruct-"));
+  writeFileSync(join(root, "keep.txt"), "x");
+  try {
+    let prompts = 0;
+    const seen: string[] = [];
+    const reg = new ToolRegistry(root, "auto", async (_n, args) => {
+      prompts++;
+      seen.push(String(args?.command ?? ""));
+      return false;
+    });
+
+    expect(await reg.execute("write_file", { path: "a.txt", content: "ok" })).toStartWith("Wrote ");
+    expect(await reg.execute("bash", { command: "echo hello" })).toContain("hello");
+    // Plain single-file rm stays prompt-free under auto (everyday cleanup).
+    expect(await reg.execute("bash", { command: "rm keep.txt" })).not.toContain("Denied by user");
+    expect(prompts).toBe(0);
+
+    const destructive = ["rm -rf build", "git reset --hard", "git clean -fd", "find . -name '*.o' -delete", "shred keep.txt"];
+    for (const command of destructive) {
+      const before = prompts;
+      const out = await reg.execute("bash", { command });
+      expect(prompts).toBe(before + 1);
+      expect(out).toContain("Denied by user");
+    }
+    expect(seen).toEqual(destructive);
+
+    // Explicit --yolo authority skips the destructive seatbelt prompt (session always-allow is UI-side).
+    prompts = 0;
+    const yolo = new ToolRegistry(root, "auto", async () => { prompts++; return false; });
+    yolo.explicitYolo = true;
+    const yoloOut = await yolo.execute("bash", { command: "rm -rf build" });
+    expect(yoloOut).not.toContain("Denied by user");
+    expect(prompts).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

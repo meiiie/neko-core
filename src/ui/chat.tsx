@@ -79,7 +79,7 @@ import { debug } from "../shared/debug.ts";
 import { expandPlaceholders } from "../shared/paste-collapse.ts";
 import { prepareCompletionAlert } from "../adapters/completion-sound.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
-import { nextMode, type PermissionMode } from "../core/permissions.ts";
+import { modeDetail, nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
 import { AsyncSessionWriter, latestSession, loadSession, newSessionId, renameSession, type Session } from "../adapters/session.ts";
 import { applySkillPolicyForTurn, matchesSkill } from "../adapters/skills.ts";
@@ -1471,6 +1471,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const nm = nextMode(registryRef.current!.mode);
         registryRef.current!.mode = nm;
         setMode(nm);
+        // Lived auto UX: silent cycle left people unsure whether they left ask-first — flash the contract.
+        addLine("info", `mode: ${nm} — ${modeDetail(nm)}`);
         return;
       }
       if (key.ctrl || key.meta) return; // Ctrl+Up/Down scrolls the transcript; never recall prompt history too
