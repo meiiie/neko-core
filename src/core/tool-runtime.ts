@@ -1419,6 +1419,15 @@ export class ToolRegistry {
       if (decision === "allow") decision = "prompt";
       this.denialNote = this.denialNote ?? "This target is outside the workspace and configured write roots; only this exact structured change is being requested.";
     }
+    // Product-default auto still withholds the no-prompt path for irreversible workspace destruction
+    // (docs/SANDBOX.md). The approval box paints ⚠; --yolo / session "always allow bash" skip this.
+    if (spec.name === "bash" && decision === "allow" && !explicitYolo) {
+      const why = destructiveInWorkspace(String(args.command ?? ""));
+      if (why) {
+        decision = "prompt";
+        this.denialNote = this.denialNote ?? `${why} — confirm before it runs`;
+      }
+    }
     if (decision === "deny") {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
     }
