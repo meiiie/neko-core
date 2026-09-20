@@ -1409,15 +1409,19 @@ export class ToolRegistry {
     const policyWrite = isPolicyConfigTarget(structuredPath);
     const explicitYolo = this.isExplicitYolo();
     let decision = decide(this.mode, spec, args, { sandboxedBash, yolo: explicitYolo });
+    // Per-call reason for the approval box / denial observation. Keep a host-pinned
+    // denialNote (headless non-interactive) when already set; never use `??` against "" —
+    // the field defaults to "" so `??` silently dropped every auto reason (trust bug).
+    let callNote = this.denialNote;
     // Policy mutations require explicit yolo authority or a human gate.
     if (policyWrite && decision === "allow" && !explicitYolo) {
       decision = "prompt";
-      this.denialNote = this.denialNote ?? "~/.neko-core/config.json is Neko's policy file: this exact change needs your confirmation and a Neko restart to take effect.";
+      if (!callNote) callNote = "~/.neko-core/config.json is Neko's policy file: this exact change needs your confirmation and a Neko restart to take effect.";
     }
     // Auto mode does not grant ambient host-write authority.
     if (hostWrite && !explicitYolo) {
       if (decision === "allow") decision = "prompt";
-      this.denialNote = this.denialNote ?? "This target is outside the workspace and configured write roots; only this exact structured change is being requested.";
+      if (!callNote) callNote = "This target is outside the workspace and configured write roots; only this exact structured change is being requested.";
     }
     // Product-default auto still withholds the no-prompt path for irreversible workspace destruction
     // (docs/SANDBOX.md). The approval box paints ⚠; --yolo / session "always allow bash" skip this.
@@ -1425,10 +1429,15 @@ export class ToolRegistry {
       const why = destructiveInWorkspace(String(args.command ?? ""));
       if (why) {
         decision = "prompt";
-        this.denialNote = this.denialNote ?? `${why} — confirm before it runs`;
+        if (!callNote) callNote = `${why} — confirm before it runs`;
       }
     }
+    // Expose the call note during the prompt (ApprovalBox / gate readers), then restore any
+    // host-pinned denialNote so the next call does not inherit a stale auto reason.
+    const pinnedNote = this.denialNote;
+    if (callNote) this.denialNote = callNote;
     if (decision === "deny") {
+      this.denialNote = pinnedNote;
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
     }
     // Read-only preflight for edit/multi_edit: a known old_string mismatch never reaches the
@@ -1439,13 +1448,18 @@ export class ToolRegistry {
         allowHostWrites: hostWrite,
         strictEditMatch: name === "edit" && Boolean(this.turnToolPolicy?.editTarget),
       });
-      if (mismatch) return mismatch;
+      if (mismatch) {
+        this.denialNote = pinnedNote;
+        return mismatch;
+      }
     }
     if (decision === "prompt" && !(await this.prompt(name, args))) {
       const detail = describe(name, args);
       const suffix = detail && detail !== name ? ` (${detail})` : "";
-      return `Denied by user: ${name}${suffix}${this.denialNote ? `\n${this.denialNote}` : ""}`;
+      this.denialNote = pinnedNote;
+      return `Denied by user: ${name}${suffix}${callNote ? `\n${callNote}` : ""}`;
     }
+    this.denialNote = pinnedNote;
     // Review auto-approved mutations when an adversarial checker is configured.
     if (decision === "allow" && effectivePermission(spec, args) === GATED && this.checkAction) {
       const v = await this.checkAction(name, args);

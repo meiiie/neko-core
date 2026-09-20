@@ -512,6 +512,19 @@ test("sticky prompt click stays exact while an uncommitted streaming tail extend
   }
 }, 15000);
 
+
+test("explicit --yolo footer shows yolo not plain auto", async () => {
+  class Echo {
+    async complete() { return { content: "hi", tool_calls: [] }; }
+  }
+  const c = render(<ChatApp fullscreen={false} yolo provider={new Echo() as any} />);
+  await Bun.sleep(80);
+  const frame = strip(c.lastFrame());
+  expect(frame).toContain("yolo");
+  expect(frame).toMatch(/launched with --yolo/i);
+  c.unmount();
+});
+
 test("input footer: the prompt is BOXED by a rule above AND below, status beneath", () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   const lines = strip(c.lastFrame()).split("\n");
@@ -683,6 +696,27 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
     }} />).lastFrame());
     expect(f).toContain("[a]lways allow write_file (this session)");
     expect(f).not.toContain("[a]lways allow write_file]");
+  });
+
+  test("ApprovalBox destructive bash warns and clarifies always-allow covers destructive", () => {
+    const f = strip(render(<ApprovalBox approval={{
+      toolName: "bash",
+      args: { command: "rm -rf build" },
+      resolve: () => {},
+    }} />).lastFrame());
+    expect(f).toContain("⚠");
+    expect(f).toContain("recursive/force/wildcard delete (rm)");
+    expect(f).toContain("[a]lways allow bash (this session — incl. destructive)");
+  });
+
+  test("ApprovalBox outside-workspace write shows host-write warning", () => {
+    const f = strip(render(<ApprovalBox approval={{
+      toolName: "write_file",
+      args: { path: "/tmp/neko-host-write-ux.txt", content: "x\n" },
+      resolve: () => {},
+    }} />).lastFrame());
+    expect(f).toContain("outside workspace");
+    expect(f).toContain("confirm this exact host write");
   });
 
   test("ApprovalBox flashes a key hint when hint prop is set", () => {

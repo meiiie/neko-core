@@ -575,7 +575,8 @@ export function withSrtStateVolumeGuidance(raw: string): string {
  *
  * Deliberately does NOT fire on a plain single-file delete (`rm file.txt`) - that keeps ordinary
  * cleanup convenient; it fires on the mass/irreversible forms (recursive/force/glob rm, git history
- * or worktree wipers, find -delete, script-driven deletion, shred/truncate). Ordinary product-default
+ * or worktree wipers, find -delete, script-driven deletion, shred/truncate, force/mirror git push,
+ * or git push to a URL remote). Ordinary product-default
  * auto still asks once for these; zero prompts require session "always allow bash" or explicit --yolo. */
 export function destructiveInWorkspace(command: string): string | null {
   const c = String(command).replace(/\s+/g, " ").trim();
@@ -583,6 +584,17 @@ export function destructiveInWorkspace(command: string): string | null {
   if (/\bgit\s+clean\b/.test(c) && /\s-[a-z]*f/i.test(c)) return "git clean -f (removes untracked files)";
   if (/\bgit\s+reset\b[^|;]*--hard/.test(c)) return "git reset --hard (discards uncommitted work)";
   if (/\bgit\s+checkout\b[^|;]*(--\s*\.|\s\.\s*$)/.test(c)) return "git checkout -- . (discards changes)";
+  // Force / mirror push rewrites remote history; a URL remote skips the configured remote name.
+  if (/\bgit\s+push\b/.test(c)) {
+    if (/\s--force\b|\s--force-with-lease\b|\s--mirror\b|\s-[a-z]*f\b/i.test(c)) {
+      return "git push --force/--mirror (rewrites remote history)";
+    }
+    // `git push origin +main` / `git push +refs/heads/x` force via +refspec.
+    if (/\s\+[A-Za-z0-9_./:~^@{}_-]+/.test(c)) return "git push +refspec (force push)";
+    if (/(?:^|\s)(?:https?:\/\/|git@|ssh:\/\/|file:\/\/)/i.test(c)) {
+      return "git push to a URL remote (not a configured remote name)";
+    }
+  }
   if (/\bfind\b[^|;]*-(delete|exec\s+rm)\b/.test(c)) return "find -delete / -exec rm";
   if (/\b(python3?|node|ruby|perl|deno|bun)\b[^|;]*\b(rmtree|removedirs|shutil|os\.remove|os\.unlink|fs\.rm|unlink\(|rimraf)/i.test(c)) return "script-driven deletion";
   if (/\b(shred|truncate)\b/.test(c)) return "shred/truncate (irrecoverable)";

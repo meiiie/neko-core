@@ -117,7 +117,7 @@ seatbelts.
 **Ordinary/full-turn exception — workspace-destructive commands still confirm.** The sandbox contains the blast radius
 to the workspace, but the workspace itself (your code + `.git`) is writable, so a command that
 *irreversibly destroys data there* — recursive/force/wildcard `rm`, `git clean -f`, `git reset
---hard`, `git checkout -- .`, `find -delete`, script-driven deletion, `shred`/`truncate` — is
+--hard`, `git checkout -- .`, force/mirror `git push` (or push to a URL remote), `find -delete`, script-driven deletion, `shred`/`truncate` — is
 **withheld from auto-approve and asks once** (the approval box shows a `⚠` reason). A plain
 single-file `rm file.txt` does not, so everyday cleanup stays convenient. This is a "should we still
 ask?" heuristic, not a containment (the sandbox already is that): a miss just means a contained

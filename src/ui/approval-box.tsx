@@ -32,10 +32,15 @@ function OptionRow({ options, hover }: { options: string[]; hover?: number | nul
 
 /** Zone labels for a pending approval, in hit-zone order (chat's pointer handler uses the same
  * order to settle: index 0 approves, last denies, middle - when present - is "always"). */
-export function approvalOptions(toolName: string): string[] {
+export function approvalOptions(toolName: string, args?: any): string[] {
   if (toolName === "exit_plan_mode") return ["[y] proceed (accept-edits)", "[n] keep planning / Esc"];
   // Session-scoped tool-name allowlist (matches ACP "Always allow … in this session"); not path-scoped.
-  return ["[y]es", `[a]lways allow ${toolName} (this session)`, "[n]o / Esc"];
+  // When the box is already warning about irreversible bash, say that [a] covers those too.
+  const destructive = toolName === "bash" && args && destructiveInWorkspace(String(args.command ?? ""));
+  const always = destructive
+    ? `[a]lways allow ${toolName} (this session — incl. destructive)`
+    : `[a]lways allow ${toolName} (this session)`;
+  return ["[y]es", always, "[n]o / Esc"];
 }
 
 export interface Approval {
@@ -74,6 +79,19 @@ function pushContextLines(
   }
 }
 
+
+/** True when the approval path looks like an outside-workspace / absolute host write. Best-effort
+ * UI signal only — ToolRegistry still enforces the real host-write gate. */
+function looksOutsideWorkspace(relPath: string): boolean {
+  try {
+    const root = resolve(process.cwd());
+    const abs = resolve(root, String(relPath ?? ""));
+    const rel = relative(root, abs);
+    return !rel || rel.startsWith("..") || isAbsolute(rel);
+  } catch {
+    return true;
+  }
+}
 
 /** Read a workspace-relative file for overwrite approval previews. Returns null when missing or
  * outside cwd — never follows an escaping path. Best-effort only (UI preview; gate still applies). */
@@ -165,7 +183,7 @@ export function ApprovalBox({ approval, flash, width, hover, hint }: { approval:
       <Box borderStyle="round" borderColor={color ?? "blue"} paddingX={1} flexDirection="column" flexShrink={0}>
         <Text bold color={color ?? "blue"}>{status ?? "Ready to code?"}</Text>
         <Markdown text={String(args.plan ?? "")} width={mdWidth} minWidth={10} />
-        {status ? null : <OptionRow options={approvalOptions(toolName)} hover={hover} />}
+        {status ? null : <OptionRow options={approvalOptions(toolName, args)} hover={hover} />}
         {status || !hint ? null : <Text color="yellow">{hint}</Text>}
       </Box>
     );
@@ -181,6 +199,9 @@ export function ApprovalBox({ approval, flash, width, hover, hint }: { approval:
   } else if (toolName === "write_file") {
     const content = String(args.content ?? "");
     const path = String(args.path ?? "?");
+    if (path !== "?" && looksOutsideWorkspace(path)) {
+      preview.push(<Text key="owarn" color="red">{"⚠ "}outside workspace — confirm this exact host write</Text>);
+    }
     const existing = readWorkspaceFile(path === "?" ? "" : path);
     if (existing != null) {
       // Overwrite must show what disappears — all-green create paint hid the prior file (raise-bar-6).
@@ -199,8 +220,14 @@ export function ApprovalBox({ approval, flash, width, hover, hint }: { approval:
       if (lines.length > show) preview.push(<Text key="more" dimColor>{`  … +${lines.length - show} more lines`}</Text>);
     }
   } else if (toolName === "edit") {
+    if (args?.path && looksOutsideWorkspace(String(args.path))) {
+      preview.push(<Text key="owarn" color="red">{"⚠ "}outside workspace — confirm this exact host write</Text>);
+    }
     pushEditDiff(preview, args);
   } else if (toolName === "multi_edit") {
+    if (args?.path && looksOutsideWorkspace(String(args.path))) {
+      preview.push(<Text key="owarn" color="red">{"⚠ "}outside workspace — confirm this exact host write</Text>);
+    }
     const edits = Array.isArray(args.edits) ? args.edits : [];
     preview.push(<Text key="p" color="gray">multi_edit {args.path ?? "?"} ({edits.length} edit{edits.length === 1 ? "" : "s"})</Text>);
     const budget = { left: APPROVAL_DIFF_MAX_LINES };
@@ -224,7 +251,7 @@ export function ApprovalBox({ approval, flash, width, hover, hint }: { approval:
     <Box borderStyle="round" borderColor={color ?? "yellow"} paddingX={1} flexDirection="column" flexShrink={0} width={width}>
       <Text bold color={color ?? "yellow"}>{status ?? `Approve ${toolName}?${queue}`}</Text>
       {preview}
-      {status ? null : <OptionRow options={approvalOptions(toolName)} hover={hover} />}
+      {status ? null : <OptionRow options={approvalOptions(toolName, args)} hover={hover} />}
       {status || !hint ? null : <Text color="yellow">{hint}</Text>}
     </Box>
   );
