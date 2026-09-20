@@ -2683,6 +2683,13 @@ export function dangerousCommand(command: string): string | null {
     if (/\brm\b/.test(c) && /-[a-z]*r/i.test(c) && /-[a-z]*f/i.test(c) && /\s["']?(\/|\/\*|~|\$HOME)["']?(\s|$)/.test(c)) {
       return "recursive force-delete of / or home";
     }
+  // World-writable / recursive chmod of / or $HOME is a host-wide privilege disaster (lived UX-3).
+  if (/\bchmod\b/.test(c)) {
+    const targetRoot = /\s["']?(\/|\/\*|~|\$HOME)["']?(?:\s|$)/.test(c);
+    if (targetRoot && (/(?:^|\s)(?:777|a?[+]?[rwx]*w|o[+]?[rwx]*w|ugo=rwx)(?:\s|$)/i.test(c) || /\s-[a-z]*R\b/i.test(c))) {
+      return "world-writable or recursive chmod of / or home";
+    }
+  }
   if (/\bdd\b.*\bof=\/dev\//i.test(c)) return "dd to a raw device";
   if (/\bmkfs(\.\w+)?\b/i.test(c)) return "filesystem format (mkfs)";
   if (/:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/.test(c)) return "fork bomb";
