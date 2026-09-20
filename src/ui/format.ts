@@ -84,11 +84,49 @@ export function relativeTime(iso: string): string {
 }
 
 
+/** True for lines that are weak approval-diff anchors on their own (raise-bar-5 lived: a lone
+ * dim `}` after "… N unchanged above" does not tell the user which function they are appending to). */
+export function isTrivialContextLine(line: string): boolean {
+  const t = String(line ?? "").trim();
+  return t === "" || t === "{" || t === "}" || t === "};" || t === ");" || t === "]" || t === "],";
+}
+
+/** Widen a kept context window into the shared region until it includes a non-trivial line. */
+function widenContext(
+  lines: string[],
+  from: number,
+  to: number,
+  toward: "head" | "tail",
+  maxExtra = 6,
+): { from: number; to: number } {
+  let a = from;
+  let b = to;
+  const trivial = () => {
+    if (a >= b) return true;
+    for (let i = a; i < b; i++) if (!isTrivialContextLine(lines[i]!)) return false;
+    return true;
+  };
+  let extra = 0;
+  while (trivial() && extra < maxExtra) {
+    if (toward === "head") {
+      if (a <= 0) break;
+      a--;
+    } else {
+      if (b >= lines.length) break;
+      b++;
+    }
+    extra++;
+  }
+  return { from: a, to: b };
+}
+
 /** Collapse identical leading/trailing lines between old/new so approval diffs do not paint
  * unchanged anchors as red/green noise (e.g. whole prior function restated only to append).
  * Keeps up to `ctx` context lines on each side as `headContext`/`tailContext` (render dim, not
  * -/+); `oldText`/`newText` are the divergent middle only. `elidedHead`/`elidedTail` count lines
- * fully dropped beyond that kept context. */
+ * fully dropped beyond that kept context. When the naive kept window is only trivial braces /
+ * blanks, widen into the shared region so append approvals show a meaningful anchor (e.g.
+ * `return n;` above `}`, not `}` alone). */
 export function elideCommonEnds(
   oldText: string,
   newText: string,
@@ -128,10 +166,25 @@ export function elideCommonEnds(
   const keep = Math.max(0, Math.floor(ctx));
   const headKeep = Math.min(keep, head);
   const tailKeep = Math.min(keep, tail);
-  const elidedHead = head - headKeep;
-  const elidedTail = tail - tailKeep;
-  const headContext = headKeep > 0 ? o.slice(head - headKeep, head).join("\n") : "";
-  const tailContext = tailKeep > 0 ? o.slice(o.length - tail, o.length - tail + tailKeep).join("\n") : "";
+  let headFrom = head - headKeep;
+  let headTo = head;
+  if (headKeep > 0) {
+    const w = widenContext(o, headFrom, headTo, "head");
+    headFrom = w.from;
+    headTo = w.to;
+  }
+  const tailStart = o.length - tail;
+  let tailFrom = tailStart;
+  let tailTo = tailStart + tailKeep;
+  if (tailKeep > 0) {
+    const w = widenContext(o, tailFrom, tailTo, "tail");
+    tailFrom = w.from;
+    tailTo = w.to;
+  }
+  const elidedHead = headFrom;
+  const elidedTail = o.length - tailTo;
+  const headContext = headTo > headFrom ? o.slice(headFrom, headTo).join("\n") : "";
+  const tailContext = tailTo > tailFrom ? o.slice(tailFrom, tailTo).join("\n") : "";
   // Divergent middle only — do NOT include kept context here (callers paint context dim once).
   const oldMid = o.slice(head, o.length - tail);
   const newMid = n.slice(head, n.length - tail);

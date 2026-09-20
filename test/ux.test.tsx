@@ -694,6 +694,8 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
     // Kept context brace must be dim once — never a false -}/+} pair (raise-bar-4 lived).
     expect(f).not.toContain("- }");
     expect(f).toContain("+ export function range");
+    // Meaningful dim context (raise-bar-5): not a lone `}` — show a real anchor line.
+    expect(f).toContain("return n;");
   });
 
   test("ApprovalBox multi_edit append elides shared line as dim context (not -/+)", () => {
