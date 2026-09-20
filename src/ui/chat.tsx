@@ -12,7 +12,7 @@ import { readFileSync, rmSync } from "node:fs";
 
 import { ApprovalBox, approvalOptions, type Approval, type ApprovalFlash } from "./approval-box.tsx";
 import { hitIndexAt } from "./hit-targets.ts";
-import { isInteractiveBrowserRequest, runSlashCommand, SLASH } from "./commands.ts";
+import { CONTINUE_PROMPT, isInteractiveBrowserRequest, runSlashCommand, SLASH } from "./commands.ts";
 import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
 import { loadPrefs, savePrefs } from "../adapters/prefs.ts";
 import { feedbackRuntimeDiagnostics, feedbackSessionLog } from "../adapters/feedback.ts";
@@ -735,6 +735,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         model: cfg.model,
         provider: cfg.provider,
         home: cfg.resolvedHome,
+        includeTodos: true,
       }),
       onDelta: (t, kind) => {
         turnGeneratedCharsRef.current += t.length;
@@ -2434,7 +2435,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       // Images travel as inline tokens. Captioning cannot affect capability or skill/workflow routing.
       imgIds.forEach((id) => pastedImagesRef.current.delete(id));
       let imgs = imgPairs;
-      addLine("user", loopGoal ? `/auto ${loopGoal}` : text);
+      // Keep slash-command identity in the transcript for controller resumes (/continue), while the
+      // model still receives the full NL instruction (same pattern as /auto).
+      addLine("user", loopGoal ? `/auto ${loopGoal}` : (internal && text === CONTINUE_PROMPT ? "/continue" : text));
       if (imgPairs.length && !cfg.vision) {
         imgs = [];
         const vm = cfg.visionModel;
@@ -2478,7 +2481,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           });
       const streamed = streamRef.current.trim();
       flushStream();
-      if (result === "[interrupted]") addLine("info", "(interrupted)");
+      if (result === "[interrupted]") {
+        addLine("info", "(interrupted)");
+        // Keep the durable checklist visible across Esc; rehydrate from the trajectory if needed.
+        const live = registryRef.current!.todos;
+        const todosNow = live.length ? live : recoverTodos(agentRef.current!.messages);
+        if (todosNow.length) {
+          registryRef.current!.todos = todosNow;
+          setTodos([...todosNow]);
+        }
+      }
       else {
         if (agentRef.current!.completionStatus.reason === "outcome_unverified" && result.trim()) addLine("error", result);
         else if (result.trim() && !streamed.endsWith(result.trim())) addLine("assistant", result);
@@ -2511,8 +2523,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       // The user's own Esc (an AbortError that threw from compact()/a provider call instead of the loop
       // returning "[interrupted]") isn't an error to alarm them with — show it like a normal interrupt.
       // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
-      if ((error as any)?.name === "AbortError" || /aborted by user/i.test(msg)) addLine("info", "(interrupted)");
-      else addLine("error", msg);
+      if ((error as any)?.name === "AbortError" || /aborted by user/i.test(msg)) {
+        addLine("info", "(interrupted)");
+        const live = registryRef.current!.todos;
+        const todosNow = live.length ? live : recoverTodos(agentRef.current!.messages);
+        if (todosNow.length) {
+          registryRef.current!.todos = todosNow;
+          setTodos([...todosNow]);
+        }
+      } else addLine("error", msg);
     } finally {
       registryRef.current!.setSkillPolicyForTurn(undefined);
       turnLease.close();
@@ -2739,7 +2758,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (estCacheRef.current.len !== messages.length || estCacheRef.current.schemaCount !== schemas.length) {
           estCacheRef.current = { len: messages.length, schemaCount: schemas.length, val: estimateRequestTokens(messages, schemas) };
         }
-        const used = cost.lastPrompt || estCacheRef.current.val;
+        const used = Math.max(cost.lastPrompt || 0, estCacheRef.current.val);
         return ctxPercent(used, cfg.contextWindow);
       })(),
     }),
@@ -3545,7 +3564,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                 if (estCacheRef.current.len !== msgs.length || estCacheRef.current.schemaCount !== schemas.length) {
                   estCacheRef.current = { len: msgs.length, schemaCount: schemas.length, val: estimateRequestTokens(msgs, schemas) };
                 }
-                const used = cost.lastPrompt || estCacheRef.current.val;
+                // Prefer the larger of provider last-prompt and local estimate. A small/wrong
+                // lastPrompt (compat endpoints) used to pin the footer at 0% against a 1M window
+                // even while /cost showed real cumulative usage.
+                const used = Math.max(cost.lastPrompt || 0, estCacheRef.current.val);
                 const pct = ctxPercent(used, cfg.contextWindow);
                 const ctxColor = pct >= 85 ? "red" : pct >= 60 ? "yellow" : "#9a9a9a";
                 return (

@@ -51,6 +51,14 @@ import type { FeedbackReport } from "../shared/feedback-wire.ts";
 
 import { isBool, isText } from "../shared/wire.ts";
 
+/** Model instruction for /continue. Kept as one constant so the TUI can show `/continue` in the
+ * transcript while still sending this full controller prompt (tagged `_neko_internal`). */
+export const CONTINUE_PROMPT =
+  "Continue the task from where it was interrupted. Review your current todo list and the recent " +
+  "tool results above, then resume the FIRST incomplete todo and keep working until every todo is " +
+  "done. If a tool call was cut off, re-run it. Do NOT restart from scratch or re-ask what the task " +
+  "is - it is already established above.";
+
 /** Tips shown in the /help overlay description (not dumped into the transcript). */
 export const HELP_TIPS = [
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
@@ -1307,13 +1315,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return addLine("info", "usage: /handoff [send <target-session-id> <summary>|inbox]");
     }
     case "/continue": {
-      ctx.runText(
-        "Continue the task from where it was interrupted. Review your current todo list and the recent " +
-        "tool results above, then resume the FIRST incomplete todo and keep working until every todo is " +
-        "done. If a tool call was cut off, re-run it. Do NOT restart from scratch or re-ask what the task " +
-        "is - it is already established above.",
-        true,
-      );
+      ctx.runText(CONTINUE_PROMPT, true);
       return;
     }
     case "/retry": {

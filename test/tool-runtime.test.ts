@@ -74,7 +74,34 @@ test("edit falls back to a whitespace-tolerant line match", async () => {
   // old_string has MORE indent than the file -> exact fails, line-trimmed match succeeds.
   const out = await reg.execute("edit", { path: "code.ts", old_string: "    const x = 1;", new_string: "    const x = 2;" });
   expect(out).toContain("Edited");
-  expect(await reg.execute("read_file", { path: "code.ts" })).toContain("const x = 2;");
+  // Soft-match must keep the FILE indent (none), not the model's 4-space new_string.
+  expect(readFileSync(join(root, "code.ts"), "utf8")).toBe("function f() {\nconst x = 2;\n}\n");
+});
+
+test("soft-match rebase preserves sibling indent (primary/fallback drift)", async () => {
+  const { root, reg } = makeReg();
+  writeFileSync(join(root, "config.js"), [
+    "const ENDPOINTS = {",
+    '  primary: "https://old.example/a",',
+    '  fallback: "https://backup.example/b",',
+    "};",
+    "",
+  ].join("\n"));
+  // Model sends 4-space indent; file uses 2. Soft-match must not drift primary to 4 spaces.
+  const out = await reg.execute("edit", {
+    path: "config.js",
+    old_string: '    primary: "https://old.example/a",',
+    new_string: '    primary: "https://new.example/a",',
+  });
+  expect(out).toContain("Edited");
+  const after = readFileSync(join(root, "config.js"), "utf8");
+  expect(after).toBe([
+    "const ENDPOINTS = {",
+    '  primary: "https://new.example/a",',
+    '  fallback: "https://backup.example/b",',
+    "};",
+    "",
+  ].join("\n"));
 });
 
 test("edit returns a unified diff (context, -removed, +added)", async () => {
