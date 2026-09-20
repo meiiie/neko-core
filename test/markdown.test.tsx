@@ -140,6 +140,21 @@ test("tool_result with a summary collapses to one line", () => {
   expect(out).not.toContain("\n0\n"); // not showing the raw lines
 });
 
+test("empty ls/search/glob summaries omit ctrl+o — expand would only show the sentinel", () => {
+  for (const [summary, text] of [
+    ["Listed empty-dir (0 items)", "List(empty-dir)\n(empty)"],
+    ["Searched for missing (0 matches)", "Search(missing)\n(no matches)"],
+    ["Found 0 files for **/*.missing", "Glob(**/*.missing)\n(no files)"],
+  ] as const) {
+    const out = strip(render(<TranscriptLine line={{ id: 1, kind: "tool_result", text, summary }} cfg={{} as any} />).lastFrame());
+    expect(out).toContain(summary);
+    expect(out).not.toContain("ctrl+o to expand");
+  }
+  // Non-empty listing still hints expand.
+  const listed = strip(render(<TranscriptLine line={{ id: 2, kind: "tool_result", text: "List(src)\na.js\nb.js", summary: "Listed src (2 items)" }} cfg={{} as any} />).lastFrame());
+  expect(listed).toContain("ctrl+o to expand");
+});
+
 test("tool_result collapses past 8 lines with a ctrl+o hint", () => {
   const text = Array.from({ length: 12 }, (_, i) => `line${i}`).join("\n");
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.

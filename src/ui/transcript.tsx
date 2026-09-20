@@ -10,6 +10,7 @@ import { highlightLine } from "./highlight.tsx";
 import { fileUri, linkSegments, osc8 } from "./links.ts";
 import { Logo } from "./logo.tsx";
 import { Markdown } from "./markdown.tsx";
+import { collapsedToolResultExpandable } from "./chat-lines.ts";
 
 import { isText } from "../shared/wire.ts";
 
@@ -174,7 +175,9 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
       );
     case "tool_result": {
       if (line.summary) {
-        const more = line.text.split("\n").length > 1;
+        // Summaries are stored as `${toolCall}\n${obs}` — do not hint expand when obs is only an
+        // empty sentinel already covered by e.g. "Listed empty-dir (0 items)" (raise-bar-7).
+        const more = collapsedToolResultExpandable(line.text);
         return <Text dimColor>{`  └ ${line.summary}${more ? " (ctrl+o to expand)" : ""}`}</Text>;
       }
       const all = toolResultDisplayLines(line.text);

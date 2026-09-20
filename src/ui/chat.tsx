@@ -99,6 +99,7 @@ import {
   countNewActivities,
   REPLAY_MAX_LINES,
   RESUME_SUMMARY_AT,
+  collapsedToolResultExpandable,
 } from "./chat-lines.ts";
 import { describeToolCall, toolSchemas } from "../core/tools.ts";
 import { createCompletionSupervisor } from "../adapters/completion-supervisor.ts";
@@ -1380,10 +1381,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     if (key.ctrl && char === "o") { // toggle: expand the most recent collapsed tool output, press again to collapse
-      // Match the collapse logic in TranscriptLine: summarized reads collapse at >1 line, plain
-      // results at >8 — so the "(ctrl+o to expand)" hint and this finder never disagree.
+      // Match TranscriptLine: summarized rows hint/expand only when obs is more than an empty
+      // sentinel; plain results still collapse at >8 lines.
       const last = [...lines].reverse().find(
-        (l) => l.kind === "tool_result" && l.text.split("\n").length > (l.summary ? 1 : 8),
+        (l) => l.kind === "tool_result" && (l.summary ? collapsedToolResultExpandable(l.text) : l.text.split("\n").length > 8),
       );
       if (!last) { addLine("info", "nothing to expand"); return; }
       setExpandedId((cur) => (cur === last.id ? null : last.id)); // second press collapses (no duplicate re-print)
