@@ -161,6 +161,12 @@ test("ACP v1 maps Neko modes, permission gating, tool updates, and streaming", a
     expect(created.modes?.availableModes.map((mode) => mode.id)).toEqual([
       "default", "accept-edits", "plan", "auto",
     ]);
+    const autoMode = created.modes?.availableModes.find((mode) => mode.id === "auto");
+    expect(autoMode?.description).toMatch(/outside writes/i);
+    expect(autoMode?.description).toMatch(/computer/i);
+    expect(autoMode?.description).toMatch(/destructive bash still asks/i);
+    expect(autoMode?.description).not.toMatch(/host-computer consent remain/i);
+
     await expect(ctx.request(acp.methods.agent.session.prompt, {
       sessionId: created.sessionId,
       prompt: [],

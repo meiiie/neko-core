@@ -53,7 +53,7 @@ const MODES: acp.SessionMode[] = [
   { id: "default", name: "Default", description: "Prompt before gated writes and commands." },
   { id: "accept-edits", name: "Accept edits", description: "Approve Neko file edits; other gated actions still prompt." },
   { id: "plan", name: "Plan", description: "Read-only; all gated actions are denied." },
-  { id: "auto", name: "Auto", description: "Approve bounded Neko coding tools; seatbelts and host-computer consent remain active." },
+  { id: "auto", name: "Auto", description: "Approve coding tools, outside writes, and computer; destructive bash still asks; seatbelts remain." },
 ];
 const MODE_IDS = new Set(MODES.map((mode) => mode.id));
 const ALLOW_ONCE = "allow_once";
