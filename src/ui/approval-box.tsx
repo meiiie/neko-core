@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import { destructiveInWorkspace } from "../core/sandbox.ts";
 import { HIT_SENTINEL } from "./frame-diff.ts";
-import { expandTabs, trunc } from "./format.ts";
+import { elideCommonEnds, expandTabs, trunc } from "./format.ts";
 import { highlightLine } from "./highlight.tsx";
 import { Markdown } from "./markdown.tsx";
 
@@ -85,13 +85,25 @@ function pushDiffSide(
 function pushEditDiff(preview: any[], args: { path?: string; old_string?: string; new_string?: string }, keyPrefix = "e"): void {
   preview.push(<Text key={`${keyPrefix}-p`} color="gray">edit {args.path ?? "?"}</Text>);
   const budget = { left: APPROVAL_DIFF_MAX_LINES };
-  pushDiffSide(preview, `${keyPrefix}-o`, "-", "red", String(args.old_string ?? ""), budget);
-  pushDiffSide(preview, `${keyPrefix}-n`, "+", "green", String(args.new_string ?? ""), budget);
+  const { oldText, newText, elidedHead, elidedTail } = elideCommonEnds(
+    String(args.old_string ?? ""),
+    String(args.new_string ?? ""),
+  );
+  if (elidedHead > 0) {
+    preview.push(<Text key={`${keyPrefix}-head`} dimColor>{`  … ${elidedHead} unchanged line${elidedHead === 1 ? "" : "s"} above`}</Text>);
+    budget.left--;
+  }
+  pushDiffSide(preview, `${keyPrefix}-o`, "-", "red", oldText, budget);
+  pushDiffSide(preview, `${keyPrefix}-n`, "+", "green", newText, budget);
+  if (elidedTail > 0 && budget.left > 0) {
+    preview.push(<Text key={`${keyPrefix}-tail`} dimColor>{`  … ${elidedTail} unchanged line${elidedTail === 1 ? "" : "s"} below`}</Text>);
+    budget.left--;
+  }
 }
 
 /** Inline consent box for a gated tool, with a preview (command / write / diff / plan).
  * `hover` = index of the pointer-hovered option zone (null/undefined = none). */
-export function ApprovalBox({ approval, flash, width, hover }: { approval: Approval; flash?: ApprovalFlash | null; width?: number; hover?: number | null }): ReactNode {
+export function ApprovalBox({ approval, flash, width, hover, hint }: { approval: Approval; flash?: ApprovalFlash | null; width?: number; hover?: number | null; hint?: string | null }): ReactNode {
   const { toolName, args } = approval;
   const color = flash?.kind === "no" ? "red" : flash ? "green" : undefined;
   const status = flash ? flashText(flash) : null;
@@ -106,6 +118,7 @@ export function ApprovalBox({ approval, flash, width, hover }: { approval: Appro
         <Text bold color={color ?? "blue"}>{status ?? "Ready to code?"}</Text>
         <Markdown text={String(args.plan ?? "")} width={mdWidth} minWidth={10} />
         {status ? null : <OptionRow options={approvalOptions(toolName)} hover={hover} />}
+        {status || !hint ? null : <Text color="yellow">{hint}</Text>}
       </Box>
     );
   }
@@ -141,8 +154,17 @@ export function ApprovalBox({ approval, flash, width, hover }: { approval: Appro
       const edit = edits[k] ?? {};
       preview.push(<Text key={`e${k}-h`} dimColor>{`#${k + 1}`}</Text>);
       budget.left--;
-      pushDiffSide(preview, `e${k}-o`, "-", "red", String(edit.old_string ?? ""), budget);
-      pushDiffSide(preview, `e${k}-n`, "+", "green", String(edit.new_string ?? ""), budget);
+      const trimmed = elideCommonEnds(String(edit.old_string ?? ""), String(edit.new_string ?? ""));
+      if (trimmed.elidedHead > 0 && budget.left > 0) {
+        preview.push(<Text key={`e${k}-head`} dimColor>{`  … ${trimmed.elidedHead} unchanged line${trimmed.elidedHead === 1 ? "" : "s"} above`}</Text>);
+        budget.left--;
+      }
+      pushDiffSide(preview, `e${k}-o`, "-", "red", trimmed.oldText, budget);
+      pushDiffSide(preview, `e${k}-n`, "+", "green", trimmed.newText, budget);
+      if (trimmed.elidedTail > 0 && budget.left > 0) {
+        preview.push(<Text key={`e${k}-tail`} dimColor>{`  … ${trimmed.elidedTail} unchanged line${trimmed.elidedTail === 1 ? "" : "s"} below`}</Text>);
+        budget.left--;
+      }
     }
   } else {
     preview.push(<Text key="a" color="gray">{trunc(JSON.stringify(args), 200)}</Text>);
@@ -152,6 +174,7 @@ export function ApprovalBox({ approval, flash, width, hover }: { approval: Appro
       <Text bold color={color ?? "yellow"}>{status ?? `Approve ${toolName}?`}</Text>
       {preview}
       {status ? null : <OptionRow options={approvalOptions(toolName)} hover={hover} />}
+      {status || !hint ? null : <Text color="yellow">{hint}</Text>}
     </Box>
   );
 }

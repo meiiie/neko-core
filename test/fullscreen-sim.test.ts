@@ -528,6 +528,51 @@ test("approval decision keys never leak into the prompt", async () => {
   }
 }, 30000);
 
+test("approval non-decision keys flash an in-box hint (not silent)", async () => {
+  const oldSandbox = process.env.NEKO_SANDBOX;
+  const oldSimMode = process.env.NEKO_MODE;
+  process.env.NEKO_SANDBOX = "0";
+  process.env.NEKO_MODE = "default";
+  try {
+    const vt = new VirtualTerminal(80, 24);
+    const out = new FakeTtyOut(80, 24, vt);
+    const stdin = new FakeStdin();
+    const differ = new FrameDiffer();
+    let call = 0;
+    const provider: any = {
+      complete: async () => ++call === 1
+        ? { content: null, tool_calls: [{ id: "hint", name: "bash", arguments: { command: "echo wait" } }] }
+        : { content: "ok after hint", tool_calls: [] },
+    };
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+    const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+    const app = renderFS(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+      React.createElement(ChatApp as any, { yolo: false, provider, sessionId: "approval-hint", frameDiffer: differ, preAltDispose }),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+      { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+    );
+    await tick(300);
+    stdin.push("request approval"); await tick(30); stdin.push("\r");
+    for (let waited = 0; waited < 2000 && !vt.text().includes("Approve bash?"); waited += 25) await tick(25);
+    expect(vt.text()).toContain("Approve bash?");
+    stdin.push("x"); // non-decision key — must flash the real keys, not vanish
+    for (let waited = 0; waited < 2000 && !vt.text().includes("press [y]es"); waited += 25) await tick(25);
+    expect(vt.text()).toContain("press [y]es / [a]lways / [n]o");
+    stdin.push("y");
+    for (let waited = 0; waited < 2000 && !vt.text().includes("ok after hint"); waited += 25) await tick(25);
+    expect(vt.text()).toContain("ok after hint");
+    app.unmount();
+    await tick(50);
+  } finally {
+    if (oldSandbox === undefined) delete process.env.NEKO_SANDBOX;
+    else process.env.NEKO_SANDBOX = oldSandbox;
+    if (oldSimMode === undefined) delete process.env.NEKO_MODE;
+    else process.env.NEKO_MODE = oldSimMode;
+  }
+}, 30000);
+
+
 test("fullscreen picker enables hover motion only while the interactive overlay is visible", async () => {
   const vt = new VirtualTerminal(100, 30);
   const out = new FakeTtyOut(100, 30, vt);
