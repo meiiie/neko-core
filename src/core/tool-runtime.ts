@@ -1750,7 +1750,7 @@ async function toolReadFile(root: string, args: any, opts: ToolOpts): Promise<st
     } catch {
       return `Error: cannot read file: ${raw}`;
     }
-    return formatReadWindow(text.split("\n"), raw, offset, column, limit);
+    return formatReadWindow(splitFileLines(text), raw, offset, column, limit);
   } finally {
     try { closeSync(opened.fd); } catch { /* best effort; never replace a successful bounded read */ }
   }
@@ -1776,6 +1776,17 @@ function openRegularFile(path: string, raw: string): any {
     closeSync(fd);
     throw error;
   }
+}
+
+
+/** Split file text into logical lines. A trailing newline on non-empty text yields an empty final
+ * fragment from `split("\n")` — drop it so read_file does not invent a phantom blank line
+ * (raise-bar-8 lived: `hello\n` showed as `(2 lines)` with a numbered empty line 2). */
+function splitFileLines(text: string): string[] {
+  if (text === "") return [];
+  const lines = String(text).split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  return lines;
 }
 
 /** Format an in-memory line window below the agent observation cap. A rare overlong single line is
@@ -1983,7 +1994,7 @@ async function readPdfFile(
     const offset = Math.max(1, Math.floor(Number(args.offset) || 1));
     const column = Math.max(1, Math.floor(Number(args.column) || 1));
     const limit = Number(args.limit) > 0 ? Math.floor(Number(args.limit)) : undefined;
-    return formatReadWindow(text.split("\n"), raw, offset, column, limit);
+    return formatReadWindow(splitFileLines(text), raw, offset, column, limit);
   } finally {
     await rmAsync(dir, { recursive: true, force: true });
   }
@@ -2144,7 +2155,7 @@ function toolWriteFile(root: string, args: any, opts: ToolOpts): string {
   mkdirSync(dirname(path), { recursive: true });
   assertSingleLinkStructuredTarget(path, raw);
   writeFileSync(path, String(content), "utf-8");
-  const lines = String(content).split("\n");
+  const lines = splitFileLines(String(content));
   const num = (i: number) => String(i + 1).padStart(4);
   return [
     `Wrote ${raw}  (${existed ? "overwrote, " : ""}+${lines.length})`,
