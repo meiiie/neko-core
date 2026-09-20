@@ -67,6 +67,9 @@ function pushDiffSide(
   // `- ` / `+ ` trust-noise line next to dim context after elideCommonEnds.
   if (text === "") return;
   const lines = String(text ?? "").split("\n");
+  // A terminal newline on a non-empty mid yields a trailing "" fragment — skip it so append
+  // approvals do not grow a phantom blank +/- under the last real line (raise-bar-5).
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
   for (let i = 0; i < lines.length; i++) {
     if (budget.left <= 0) {
       const rest = lines.length - i;
