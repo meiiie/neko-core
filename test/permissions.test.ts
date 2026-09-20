@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { decide, nextMode } from "../src/core/permissions.ts";
+import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import { resolveTool } from "../src/core/tools.ts";
 
 const read = resolveTool("read_file");
@@ -89,3 +90,12 @@ test("nextMode cycles default -> accept-edits -> plan -> auto -> default", () =>
   expect(nextMode("plan")).toBe("auto");
   expect(nextMode("auto")).toBe("default");
 });
+
+test("omitted ToolRegistry mode defaults to auto (product default)", () => {
+  const registry = new ToolRegistry(process.cwd());
+  expect(registry.mode).toBe("auto");
+  // default mode remains available when chosen explicitly
+  const asksFirst = new ToolRegistry(process.cwd(), "default");
+  expect(asksFirst.mode).toBe("default");
+});
+

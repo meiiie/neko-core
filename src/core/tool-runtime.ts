@@ -642,7 +642,7 @@ export class ToolRegistry {
 
   constructor(
     public readonly root: string,
-    mode: PermissionMode = "default",
+    mode: PermissionMode = "auto",
     public prompt: ApprovalGate = denyAll,
     public mcp?: McpTools,
     public readonly nativeBackend?: NativeToolBackend,

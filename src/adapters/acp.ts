@@ -783,7 +783,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           model: meta.model,
           provider: meta.provider ?? "",
           profile: meta.profile ?? null,
-          mode: meta.mode ?? "default",
+          mode: meta.mode ?? "auto",
           messageCount: meta.msgCount,
           continuityLevel: meta.turnState?.status === "interrupted" ? "recovered" : "durable",
           revision: meta.revision ?? 0,

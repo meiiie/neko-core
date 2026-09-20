@@ -1151,3 +1151,20 @@ test("multi_edit deny names the path (not redundant multi_edit (multi_edit))", a
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("omitted mode is auto: gated write does not prompt", async () => {
+  let prompts = 0;
+  const root = mkdtempSync(join(tmpdir(), "neko-tr-omitted-"));
+  // Omit the mode argument so the constructor default applies.
+  const reg = new ToolRegistry(root);
+  reg.prompt = () => { prompts++; return true; };
+  try {
+    expect(reg.mode).toBe("auto");
+    expect(await reg.execute("write_file", { path: "omitted-auto.txt", content: "ok" })).toContain("Wrote");
+    expect(prompts).toBe(0);
+    expect(readFileSync(join(root, "omitted-auto.txt"), "utf8")).toBe("ok");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
