@@ -51,6 +51,17 @@ const ALWAYS_EXPANDED_TOOLS = new Set([
 ]);
 const EMPTY_RESULT_SENTINELS = new Set(["(no matches)", "(no files)", "(empty)"]);
 
+/** Collapsed tool rows store `${toolCall}\n${obs}`. Hint Ctrl+O only when expand reveals more than an
+ * empty-result sentinel already covered by the summary (e.g. "Listed empty-dir (0 items)"). */
+export function collapsedToolResultExpandable(text: string): boolean {
+  const lines = String(text ?? "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
+  const obs = lines.length > 1 ? lines.slice(1).join("\n") : String(text ?? "");
+  const trimmed = obs.trim();
+  if (!trimmed) return false;
+  if (EMPTY_RESULT_SENTINELS.has(trimmed)) return false;
+  return true;
+}
+
 /** Count user-visible activity once: folded success is one result; expanded failure is one call. */
 export function countNewActivities(lines: Line[], from = 0): number {
   return lines.slice(Math.max(0, from)).filter((line) =>

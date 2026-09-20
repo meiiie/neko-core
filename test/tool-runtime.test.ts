@@ -1117,3 +1117,18 @@ test("formatRipgrepResult: partial read errors keep the matches; only a matchles
   expect(formatRipgrepResult(1, "", "")).toBe("(no matches)");
   expect(formatRipgrepResult(0, "src\\a.ts:1: x\n", "")).toBe("src/a.ts:1: x");
 });
+
+test("multi_edit deny names the path (not redundant multi_edit (multi_edit))", async () => {
+  const { root, reg } = makeReg("default", async () => false);
+  try {
+    writeFileSync(join(root, "a.js"), "module.exports = {};\n");
+    const out = await reg.execute("multi_edit", {
+      path: "a.js",
+      edits: [{ old_string: "module.exports = {};", new_string: "module.exports = { x: 1 };" }],
+    });
+    expect(out).toContain("Denied by user: multi_edit (multi_edit a.js)");
+    expect(out).not.toMatch(/multi_edit \(multi_edit\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

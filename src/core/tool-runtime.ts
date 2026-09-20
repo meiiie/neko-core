@@ -1433,7 +1433,9 @@ export class ToolRegistry {
       if (mismatch) return mismatch;
     }
     if (decision === "prompt" && !(await this.prompt(name, args))) {
-      return `Denied by user: ${name} (${describe(name, args)})${this.denialNote ? `\n${this.denialNote}` : ""}`;
+      const detail = describe(name, args);
+      const suffix = detail && detail !== name ? ` (${detail})` : "";
+      return `Denied by user: ${name}${suffix}${this.denialNote ? `\n${this.denialNote}` : ""}`;
     }
     // Review auto-approved mutations when an adversarial checker is configured.
     if (decision === "allow" && effectivePermission(spec, args) === GATED && this.checkAction) {
@@ -2720,6 +2722,7 @@ export function todosContextBlock(todos: { content: string; status: string }[]):
 function describe(name: string, args: any): string {
   if (name === "write_file") return `write ${args.path ?? "?"}`;
   if (name === "edit") return `edit ${args.path ?? "?"}`;
+  if (name === "multi_edit") return `multi_edit ${args.path ?? "?"}`;
   if (name === "bash") return `run: ${args.command ?? "?"}`;
   return name;
 }

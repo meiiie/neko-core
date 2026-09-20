@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
 import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
-import { buildReplayLines, clampToRows, contentToText, countNewActivities, recoverTodos, renderTail, replaySessionLines, resultSummary } from "../src/ui/chat-lines.ts";
+import { buildReplayLines, clampToRows, collapsedToolResultExpandable, contentToText, countNewActivities, recoverTodos, renderTail, replaySessionLines, resultSummary } from "../src/ui/chat-lines.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { setModel } from "../src/adapters/project.ts";
 import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "../src/adapters/chatgpt-voice.ts";
@@ -22,6 +22,14 @@ test("multimodal tool observations render as metadata + [image], never object co
   const lines = buildReplayLines([{ role: "tool", tool_call_id: "shot", content }], () => 1);
   expect(lines[0].text).toBe("captured screen\n[image]");
   expect(lines[0].text).not.toContain("[object Object]");
+});
+
+test("collapsedToolResultExpandable: empty sentinels are not expandable; real obs is", () => {
+  expect(collapsedToolResultExpandable("List(empty-dir)\n(empty)")).toBe(false);
+  expect(collapsedToolResultExpandable("Search(x)\n(no matches)")).toBe(false);
+  expect(collapsedToolResultExpandable("Glob(*)\n(no files)")).toBe(false);
+  expect(collapsedToolResultExpandable("List(src)\na.js\nb.js")).toBe(true);
+  expect(collapsedToolResultExpandable("Read(src/util.js)\n" + "line\n".repeat(15))).toBe(true);
 });
 
 test("successful tool activity folds to one past-tense line while preserving full Ctrl+O detail", () => {
