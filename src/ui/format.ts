@@ -197,3 +197,13 @@ export function elideCommonEnds(
     tailContext,
   };
 }
+
+/** Split text into display lines for approval diffs. A trailing newline on non-empty text yields an
+ * empty final fragment from `split("\n")` — drop it so write/edit previews do not paint a phantom
+ * blank `+/-` line (raise-bar-6 lived: write_file showed `2 +` for a one-line file with `\n`). */
+export function splitDiffLines(text: string): string[] {
+  if (text === "") return [];
+  const lines = String(text ?? "").split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}

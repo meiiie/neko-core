@@ -78,3 +78,45 @@ test("plan box shows header, footer and markdown content", () => {
   expect(frame).toContain("Run the test suite");
   c.unmount();
 });
+
+test("write_file create preview omits phantom blank + from trailing newline", () => {
+  const content = 'export function greet(name){ return "hi "+name; }\n';
+  const approval = { toolName: "write_file", args: { path: "src/new-only-xyz.js", content }, resolve: () => {} } as Approval;
+  const c = render(
+    <Box width={80}>
+      <ApprovalBox approval={approval} flash={null} width={80} />
+    </Box>,
+  );
+  const frame = c.lastFrame() ?? "";
+  expect(frame).toContain("write src/new-only-xyz.js (1 line");
+  expect(frame).toContain("greet");
+  // No second blank + line after the code line.
+  const plusLines = frame.split("\n").filter((l) => /\+\s*$/.test(l.replace(/[│╭╰╮╯]/g, "").trimEnd()) || /\+ $/.test(l) || /│\s+\d+\s+\+\s*│/.test(l));
+  // Stronger: frame must not contain a numbered empty addition like "2 +".
+  expect(frame).not.toMatch(/\b2 \+/);
+  c.unmount();
+});
+
+test("write_file overwrite preview shows red removal vs existing workspace file", () => {
+  const dir = "/workspace/research/neko-ux-playground/raise-bar-6";
+  const prev = process.cwd();
+  process.chdir(dir);
+  try {
+    const content = 'export function greet(name){ return "hello "+name; }\n';
+    const approval = { toolName: "write_file", args: { path: "src/greet.js", content }, resolve: () => {} } as Approval;
+    const c = render(
+      <Box width={80}>
+        <ApprovalBox approval={approval} flash={null} width={80} />
+      </Box>,
+    );
+    const frame = c.lastFrame() ?? "";
+    expect(frame).toContain("overwrite src/greet.js");
+    expect(frame).toContain("hi"); // prior content visible as removal
+    expect(frame).toContain("hello");
+    expect(frame).toMatch(/-/); // red side present
+    expect(frame).not.toMatch(/\b2 \+/); // no phantom trailing blank +
+    c.unmount();
+  } finally {
+    process.chdir(prev);
+  }
+});
