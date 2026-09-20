@@ -286,7 +286,9 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
         severity: "warn",
         code: "auto_without_live_sandbox",
         subject: "mode+sandbox",
-        message: "UNCONFINED AUTO: ordinary bash runs without approval and no live OS sandbox contains it; workspace-destructive bash still asks once. The catastrophic-command seatbelt remains, but it is not confinement.",
+        message: explicitYolo
+          ? "UNCONFINED AUTO: ordinary bash runs without approval and no live OS sandbox contains it; explicit --yolo disables remaining approval prompts (including workspace-destructive bash). The catastrophic-command seatbelt remains, but it is not confinement."
+          : "UNCONFINED AUTO: ordinary bash runs without approval and no live OS sandbox contains it; workspace-destructive bash still asks once. The catastrophic-command seatbelt remains, but it is not confinement.",
       });
     } else if (!sandboxLive && transientSrt) {
       findings.push({

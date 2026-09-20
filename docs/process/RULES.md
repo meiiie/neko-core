@@ -21,10 +21,12 @@ Current state lives in [ROADMAP.md](ROADMAP.md), engineering history in
 - **Config-first.** Behaviour lives in config (`DEFAULTS` + profiles + overlays), not code.
   A new model/endpoint is a profile, not a code change.
 - **Provider-agnostic, auto-by-default.** The default mode is `auto`. Ordinary auto
-  still asks for host Computer control; explicit `--yolo` pre-authorizes approval
-  prompts while auto remains active. Hard denials and host-profile restrictions
-  remain independent. `plan` is read-only. Set `"mode": "default"` for prompt-first
-  behavior. Read [SANDBOX.md](SANDBOX.md) before changing these boundaries.
+  allows gated coding tools, outside structured writes, and host computer without
+  prompts; workspace-destructive bash still asks once. Explicit `--yolo` additionally
+  skips remaining approval prompts while auto remains active. Hard denials and
+  host-profile restrictions remain independent. `plan` is read-only. Set
+  `"mode": "default"` for prompt-first behavior. Read [SANDBOX.md](SANDBOX.md)
+  before changing these boundaries.
 - **Bash-first host routing (owner, 2026-09-04).** Ordinary `neko` and `neko --yolo` run Bash on the same host
   and identity as Neko, with hidden Windows child consoles and explicit background-process support. Computer Use
   is GUI-only and never a shell fallback. `sandbox: true` is an explicit fail-closed containment policy; it must

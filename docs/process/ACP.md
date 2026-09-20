@@ -18,9 +18,10 @@ neko acp --yolo
 neko acp --host-profile nekocut
 ```
 
-`--yolo` selects Neko's `auto` permission mode (freer autonomy): ordinary coding tools, outside-project
-structured writes, and host computer proceed without routine prompts. It does not disable catastrophic-command
-checks, credential/system path seatbelts, sandbox policy when configured, or destructive-bash warnings.
+`--yolo` launches with `mode=auto` plus explicit launch authority that additionally skips remaining
+approval prompts (workspace-destructive bash, policy-write, plan-exit). Ordinary coding tools, outside-project
+structured writes, and host computer already proceed without routine prompts under `auto`. It does not disable
+catastrophic-command checks, credential/system path seatbelts, or sandbox policy when configured.
 
 ## Zed custom agent
 
