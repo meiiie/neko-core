@@ -48,6 +48,46 @@ const flashText = (flash: ApprovalFlash) => {
   return "✓ approved";
 };
 
+/** Tall enough to review a typical edit without truncating mid-token; still capped so a huge
+ * multi_edit cannot blow past the terminal. */
+export const APPROVAL_DIFF_MAX_LINES = 48;
+
+/** Render -/+ lines without collapsing whitespace or mid-line `…` truncation. Long lines wrap
+ * naturally (Ink default); only excess LINE count is elided with a clear remainder marker. */
+function pushDiffSide(
+  preview: any[],
+  keyPrefix: string,
+  sign: "-" | "+",
+  color: "red" | "green",
+  text: string,
+  budget: { left: number },
+): void {
+  const lines = String(text ?? "").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (budget.left <= 0) {
+      const rest = lines.length - i;
+      preview.push(<Text key={`${keyPrefix}-more`} dimColor>{`  … +${rest} more ${sign === "-" ? "removed" : "added"} lines`}</Text>);
+      budget.left = 0;
+      return;
+    }
+    const line = lines[i];
+    preview.push(
+      <Text key={`${keyPrefix}-${i}`}>
+        <Text color={color}>{`${sign} `}</Text>
+        {sign === "+" ? highlightLine(line) : line}
+      </Text>,
+    );
+    budget.left--;
+  }
+}
+
+function pushEditDiff(preview: any[], args: { path?: string; old_string?: string; new_string?: string }, keyPrefix = "e"): void {
+  preview.push(<Text key={`${keyPrefix}-p`} color="gray">edit {args.path ?? "?"}</Text>);
+  const budget = { left: APPROVAL_DIFF_MAX_LINES };
+  pushDiffSide(preview, `${keyPrefix}-o`, "-", "red", String(args.old_string ?? ""), budget);
+  pushDiffSide(preview, `${keyPrefix}-n`, "+", "green", String(args.new_string ?? ""), budget);
+}
+
 /** Inline consent box for a gated tool, with a preview (command / write / diff / plan).
  * `hover` = index of the pointer-hovered option zone (null/undefined = none). */
 export function ApprovalBox({ approval, flash, width, hover }: { approval: Approval; flash?: ApprovalFlash | null; width?: number; hover?: number | null }): ReactNode {
@@ -81,19 +121,33 @@ export function ApprovalBox({ approval, flash, width, hover }: { approval: Appro
     const lines = content.split("\n");
     preview.push(<Text key="p" color="gray">write {args.path} ({lines.length} lines, {content.length} chars)</Text>);
     // Line number (dim) + green marker + syntax-highlighted code - same look as the committed diff.
-    lines.slice(0, 8).forEach((l, i) => preview.push(
+    const show = Math.min(lines.length, APPROVAL_DIFF_MAX_LINES);
+    lines.slice(0, show).forEach((l, i) => preview.push(
       <Text key={`l${i}`}><Text dimColor>{String(i + 1).padStart(4)} </Text><Text color="green">{"+ "}</Text>{highlightLine(l)}</Text>,
     ));
-    if (lines.length > 8) preview.push(<Text key="more" dimColor>{`  … +${lines.length - 8} more lines`}</Text>);
+    if (lines.length > show) preview.push(<Text key="more" dimColor>{`  … +${lines.length - show} more lines`}</Text>);
   } else if (toolName === "edit") {
-    preview.push(<Text key="p" color="gray">edit {args.path}</Text>);
-    preview.push(<Text key="o"><Text color="red">{"- "}{trunc(args.old_string, 160)}</Text></Text>);
-    preview.push(<Text key="n"><Text color="green">{"+ "}</Text>{highlightLine(trunc(args.new_string, 160))}</Text>);
+    pushEditDiff(preview, args);
+  } else if (toolName === "multi_edit") {
+    const edits = Array.isArray(args.edits) ? args.edits : [];
+    preview.push(<Text key="p" color="gray">multi_edit {args.path ?? "?"} ({edits.length} edit{edits.length === 1 ? "" : "s"})</Text>);
+    const budget = { left: APPROVAL_DIFF_MAX_LINES };
+    for (let k = 0; k < edits.length; k++) {
+      if (budget.left <= 0) {
+        preview.push(<Text key={`e${k}-skip`} dimColor>{`  … +${edits.length - k} more edits not shown`}</Text>);
+        break;
+      }
+      const edit = edits[k] ?? {};
+      preview.push(<Text key={`e${k}-h`} dimColor>{`#${k + 1}`}</Text>);
+      budget.left--;
+      pushDiffSide(preview, `e${k}-o`, "-", "red", String(edit.old_string ?? ""), budget);
+      pushDiffSide(preview, `e${k}-n`, "+", "green", String(edit.new_string ?? ""), budget);
+    }
   } else {
     preview.push(<Text key="a" color="gray">{trunc(JSON.stringify(args), 200)}</Text>);
   }
   return (
-    <Box borderStyle="round" borderColor={color ?? "yellow"} paddingX={1} flexDirection="column" flexShrink={0}>
+    <Box borderStyle="round" borderColor={color ?? "yellow"} paddingX={1} flexDirection="column" flexShrink={0} width={width}>
       <Text bold color={color ?? "yellow"}>{status ?? `Approve ${toolName}?`}</Text>
       {preview}
       {status ? null : <OptionRow options={approvalOptions(toolName)} hover={hover} />}

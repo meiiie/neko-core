@@ -1422,6 +1422,16 @@ export class ToolRegistry {
     if (decision === "deny") {
       return `Blocked: ${name} is not allowed in '${this.mode}' mode (read-only).`;
     }
+    // Read-only preflight for edit/multi_edit: a known old_string mismatch never reaches the
+    // approval prompt (or burns a yes that then fails with "old_string not found").
+    if ((name === "edit" || name === "multi_edit") && (decision === "prompt" || decision === "allow")) {
+      const mismatch = preflightEditArgs(this.root, name, args, {
+        additionalWriteRoots: this.additionalWriteRoots,
+        allowHostWrites: hostWrite,
+        strictEditMatch: name === "edit" && Boolean(this.turnToolPolicy?.editTarget),
+      });
+      if (mismatch) return mismatch;
+    }
     if (decision === "prompt" && !(await this.prompt(name, args))) {
       return `Denied by user: ${name} (${describe(name, args)})${this.denialNote ? `\n${this.denialNote}` : ""}`;
     }
@@ -2155,6 +2165,180 @@ function editDiff(path: string, origLines: string[], startLine: number, removed:
   return out.join("\n");
 }
 
+/** Count non-overlapping occurrences of `needle` in `haystack` (same semantics as split-length-1). */
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  return haystack.split(needle).length - 1;
+}
+
+/** Normalize EOL for soft matching: strip BOM, CRLF/CR → LF. Does not alter indentation. */
+function normalizeEditEol(s: string): string {
+  return String(s).replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+type EditApplyOk = { ok: true; text: string; startLine: number; removed: string[]; added: string[] };
+type EditApplyErr = { ok: false; error: string };
+type EditApplyResult = EditApplyOk | EditApplyErr;
+
+const EDIT_NOT_FOUND_HINT =
+  "Re-read the file and copy the exact current bytes; check indentation, trailing whitespace, and CRLF vs LF. No change written.";
+
+/** Apply one unique old→new replacement. Exact bytes first; then CRLF-tolerant exact; then
+ * (unless strict) whitespace-tolerant unique line match. Shared by edit + multi_edit. */
+function applyUniqueEdit(
+  text: string,
+  oldStrRaw: unknown,
+  newStrRaw: unknown,
+  opts: { strict?: boolean; label?: string } = {},
+): EditApplyResult {
+  const label = opts.label ? `${opts.label}: ` : "";
+  if (oldStrRaw === undefined || oldStrRaw === null || !isText(oldStrRaw)) {
+    return { ok: false, error: `Error: ${label}needs string old_string (no change written)` };
+  }
+  if (newStrRaw === undefined || newStrRaw === null || !isText(newStrRaw)) {
+    return { ok: false, error: `Error: ${label}needs string new_string (no change written)` };
+  }
+  const oldStr = String(oldStrRaw);
+  const newStr = String(newStrRaw);
+  if (!oldStr) return { ok: false, error: `Error: ${label}missing old_string (no change written)` };
+
+  const tryExact = (haystack: string, needle: string, replacement: string): EditApplyResult | null => {
+    const occ = countOccurrences(haystack, needle);
+    if (occ === 1) {
+      const idx = haystack.indexOf(needle);
+      const startLine = haystack.slice(0, idx).split("\n").length - 1;
+      return {
+        ok: true,
+        text: haystack.slice(0, idx) + replacement + haystack.slice(idx + needle.length),
+        startLine,
+        removed: needle.split("\n"),
+        added: replacement.split("\n"),
+      };
+    }
+    if (occ > 1) {
+      return {
+        ok: false,
+        error: `Error: ${label}old_string occurs ${occ} times, not unique (add more surrounding context; no change written)`,
+      };
+    }
+    return null;
+  };
+
+  const exact = tryExact(text, oldStr, newStr);
+  if (exact) return exact;
+
+  // CRLF drift: model usually sends LF while Windows files keep CRLF (or the reverse).
+  if (!opts.strict) {
+    const fileEol = text.includes("\r\n") ? "\r\n" : text.includes("\r") ? "\r" : "\n";
+    if (fileEol !== "\n" && !oldStr.includes("\r")) {
+      const needleCr = normalizeEditEol(oldStr).split("\n").join(fileEol);
+      const replCr = normalizeEditEol(newStr).split("\n").join(fileEol);
+      const crExact = tryExact(text, needleCr, replCr);
+      if (crExact) return crExact;
+    }
+    // Also try matching on LF-normalized views, then re-apply onto the normalized file text.
+    const normText = normalizeEditEol(text);
+    const normOld = normalizeEditEol(oldStr);
+    const normNew = normalizeEditEol(newStr);
+    if (normText !== text || normOld !== oldStr) {
+      const normExact = tryExact(normText, normOld, normNew);
+      if (normExact) {
+        // Preserve original EOL style when rewriting the whole buffer.
+        if (fileEol !== "\n") {
+          return {
+            ...normExact,
+            text: normExact.text.split("\n").join(fileEol),
+            removed: normExact.removed,
+            added: normExact.added,
+          };
+        }
+        return normExact;
+      }
+      if (normExact === null && countOccurrences(normText, normOld) > 1) {
+        return {
+          ok: false,
+          error: `Error: ${label}old_string occurs ${countOccurrences(normText, normOld)} times, not unique (add more surrounding context; no change written)`,
+        };
+      }
+    }
+  } else {
+    const occ = countOccurrences(text, oldStr);
+    return {
+      ok: false,
+      error: `Error: exact-file edit requires old_string to match current bytes exactly once ` +
+        `(found ${occ}). The file may have changed since read_file; re-read it and use the shortest unique exact substring without line-number padding or unnecessary leading indentation. No change written.`,
+    };
+  }
+
+  // Indentation / trailing-whitespace drift: unique line-trimmed match; keep file's real whitespace
+  // on the removed side and insert new_string lines verbatim (EOL-normalized to the file).
+  const origLines = text.split("\n").map((l, i, arr) => (i < arr.length - 1 && l.endsWith("\r") ? l.slice(0, -1) : l));
+  // Prefer LF-split of normalized old for line matching.
+  const oldLines = normalizeEditEol(oldStr).split("\n");
+  const newLines = normalizeEditEol(newStr).split("\n");
+  const oldTrim = oldLines.map((l) => l.trim());
+  let at = -1;
+  let count = 0;
+  for (let i = 0; i + oldLines.length <= origLines.length; i++) {
+    if (oldLines.every((_, j) => origLines[i + j].trim() === oldTrim[j])) { count++; at = i; }
+  }
+  if (count === 0) {
+    return { ok: false, error: `Error: ${label}old_string not found (${EDIT_NOT_FOUND_HINT})` };
+  }
+  if (count > 1) {
+    return { ok: false, error: `Error: ${label}old_string matches ${count} places (add more surrounding context; no change written)` };
+  }
+  const removed = origLines.slice(at, at + oldLines.length);
+  const next = [...origLines];
+  next.splice(at, oldLines.length, ...newLines);
+  const fileEol = text.includes("\r\n") ? "\r\n" : text.includes("\r") && !text.includes("\n") ? "\r" : "\n";
+  return {
+    ok: true,
+    text: fileEol === "\n" ? next.join("\n") : next.join(fileEol),
+    startLine: at,
+    removed,
+    added: newLines,
+  };
+}
+
+/** Read-only preflight: would edit/multi_edit succeed against current bytes? Used before approval
+ * so a known mismatch never burns a yes/no prompt. Returns an error string or null if OK. */
+export function preflightEditArgs(root: string, name: string, args: any, opts: Pick<ToolOpts, "additionalWriteRoots" | "allowHostWrites" | "strictEditMatch">): string | null {
+  if (name !== "edit" && name !== "multi_edit") return null;
+  const raw = args?.path;
+  if (!isText(raw) || !raw) return `Error: missing required argument: path`;
+  let path: string;
+  try {
+    path = resolveForWrite(root, raw, opts.additionalWriteRoots, opts.allowHostWrites === true);
+  } catch (error) {
+    return `Error: ${messageOf(error)}`;
+  }
+  if (!existsSync(path)) return `Error: no such file: ${raw}`;
+  let text: string;
+  try {
+    text = readFileSync(path, "utf-8");
+  } catch (error) {
+    return `Error: cannot read ${raw}: ${messageOf(error)}`;
+  }
+  if (name === "edit") {
+    const result = applyUniqueEdit(text, args.old_string, args.new_string, { strict: opts.strictEditMatch === true });
+    return result.ok ? null : result.error.includes(raw) ? result.error : result.error.replace("(no change written)", `in ${raw} (no change written)`).replace(`(${EDIT_NOT_FOUND_HINT})`, `in ${raw} (${EDIT_NOT_FOUND_HINT})`);
+  }
+  const edits = args.edits;
+  if (!Array.isArray(edits) || edits.length === 0) return "Error: multi_edit needs a non-empty 'edits' array";
+  if (edits.length > 100) return "Error: multi_edit accepts at most 100 edits (no change written)";
+  for (let k = 0; k < edits.length; k++) {
+    const edit = edits[k];
+    const result = applyUniqueEdit(text, edit?.old_string, edit?.new_string, {
+      strict: opts.strictEditMatch === true,
+      label: `edit ${k + 1}`,
+    });
+    if (!result.ok) return result.error;
+    text = result.text;
+  }
+  return null;
+}
+
 function toolEdit(root: string, args: any, opts: ToolOpts): string {
   const raw = requireArg(args, "path");
   const oldStr = args.old_string;
@@ -2167,48 +2351,29 @@ function toolEdit(root: string, args: any, opts: ToolOpts): string {
   if (opts.exactEditTarget && canonicalRegularFileForWrite(root, raw, opts.additionalWriteRoots) !== opts.exactEditTarget) {
     return `Error: exact-file target identity changed before read: ${raw}`;
   }
-  let text = readFileSync(path, "utf-8");
-  const origLines = text.split("\n");
-  const oldLines = String(oldStr).split("\n");
-  const newLines = String(newStr).split("\n");
-  let startLine: number;
-  let removed = oldLines;
-  const occurrences = text.split(String(oldStr)).length - 1;
-  if (occurrences === 1) {
-    const idx = text.indexOf(String(oldStr));
-    startLine = text.slice(0, idx).split("\n").length - 1;
-    text = text.slice(0, idx) + String(newStr) + text.slice(idx + String(oldStr).length);
-  } else if (opts.strictEditMatch) {
-    return `Error: exact-file edit requires old_string to match current bytes exactly once in ${raw} ` +
-      `(found ${occurrences}). The file may have changed since read_file; re-read it and use the shortest unique exact substring without line-number padding or unnecessary leading indentation. No change written.`;
-  } else if (occurrences > 1) {
-    return `Error: old_string occurs ${occurrences} times in ${raw} (must be unique; add more surrounding context)`;
-  } else {
-    // Exact match failed (often indentation/trailing-whitespace drift): retry by matching lines
-    // ignoring leading/trailing whitespace. Must still be unique. new_string replaces verbatim.
-    const oldTrim = oldLines.map((l) => l.trim());
-    let at = -1;
-    let count = 0;
-    for (let i = 0; i + oldLines.length <= origLines.length; i++) {
-      if (oldLines.every((_, j) => origLines[i + j].trim() === oldTrim[j])) { count++; at = i; }
+  const before = readFileSync(path, "utf-8");
+  const origLines = before.split("\n");
+  const result = applyUniqueEdit(before, oldStr, newStr, { strict: opts.strictEditMatch === true });
+  if (!result.ok) {
+    // Keep path in the message for the classic single-edit UX.
+    if (result.error.includes("not found")) return `Error: old_string not found in ${raw} (${EDIT_NOT_FOUND_HINT})`;
+    if (result.error.includes("exact-file edit")) {
+      return result.error.includes(raw) ? result.error : result.error.replace("exactly once", `exactly once in ${raw}`);
     }
-    if (count === 0) return `Error: old_string not found in ${raw}`;
-    if (count > 1) return `Error: old_string matches ${count} places in ${raw} (add more surrounding context)`;
-    startLine = at;
-    removed = origLines.slice(at, at + oldLines.length); // the actual file lines (real whitespace)
-    const next = [...origLines];
-    next.splice(at, oldLines.length, ...newLines);
-    text = next.join("\n");
+    if (result.error.includes("occurs") || result.error.includes("matches")) {
+      return result.error.includes(raw) ? result.error : result.error.replace("times", `times in ${raw}`).replace("places", `places in ${raw}`);
+    }
+    return result.error;
   }
   assertSingleLinkStructuredTarget(path, raw);
   if (opts.exactEditTarget && canonicalRegularFileForWrite(root, raw, opts.additionalWriteRoots) !== opts.exactEditTarget) {
     return `Error: exact-file target identity changed before write: ${raw}`;
   }
-  writeFileSync(path, text, "utf-8");
-  return editDiff(raw, origLines, startLine, removed, newLines);
+  writeFileSync(path, result.text, "utf-8");
+  return editDiff(raw, origLines, result.startLine, result.removed, result.added);
 }
 
-/** Apply several exact-match edits to one file, in order, atomically (writes only if all succeed). */
+/** Apply several unique-match edits to one file, in order, atomically (writes only if all succeed). */
 function toolMultiEdit(root: string, args: any, opts: ToolOpts): string {
   const raw = requireArg(args, "path");
   const edits = args.edits;
@@ -2222,21 +2387,14 @@ function toolMultiEdit(root: string, args: any, opts: ToolOpts): string {
   let removed = 0;
   for (let k = 0; k < edits.length; k++) {
     const edit = edits[k];
-    if (!isJsonObject(edit) || !isText(edit.old_string)) {
-      return `Error: edit ${k + 1} needs string old_string (no change written)`;
-    }
-    if (!Object.prototype.hasOwnProperty.call(edit, "new_string") || !isText(edit.new_string)) {
-      return `Error: edit ${k + 1} needs string new_string (no change written)`;
-    }
-    const oldStr = edit.old_string;
-    const newStr = edit.new_string;
-    if (!oldStr) return `Error: edit ${k + 1} is missing old_string (no change written)`;
-    const occ = text.split(oldStr).length - 1;
-    if (occ === 0) return `Error: edit ${k + 1}: old_string not found (no change written)`;
-    if (occ > 1) return `Error: edit ${k + 1}: old_string occurs ${occ} times, not unique (no change written)`;
-    text = text.replace(oldStr, () => newStr);
-    removed += oldStr.split("\n").length;
-    added += newStr.split("\n").length;
+    const result = applyUniqueEdit(text, edit?.old_string, edit?.new_string, {
+      strict: opts.strictEditMatch === true,
+      label: `edit ${k + 1}`,
+    });
+    if (!result.ok) return result.error;
+    text = result.text;
+    removed += result.removed.length;
+    added += result.added.length;
   }
   assertSingleLinkStructuredTarget(path, raw);
   writeFileSync(path, text, "utf-8");

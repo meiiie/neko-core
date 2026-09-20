@@ -587,6 +587,37 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
     expect(f).toContain("+ let x = 2");
   });
 
+  test("ApprovalBox keeps long edit diffs readable (no mid-string … truncation)", () => {
+    const old_string = "const " + "a".repeat(200) + " = 1;";
+    const new_string = "const " + "b".repeat(200) + " = 2;\nconst c = 3;";
+    const f = strip(render(<ApprovalBox approval={{ toolName: "edit", args: { path: "long.ts", old_string, new_string }, resolve: () => {} }} width={80} />).lastFrame());
+    // Ink wraps long lines and the round border inserts │ between visual rows.
+    const compact = f.replace(/[^a-z0-9=;_+\-]/gi, "");
+    expect(compact).toContain("a".repeat(200)); // full old payload, not sliced with ...
+    expect(compact).toContain("b".repeat(200));
+    expect(f).toContain("const c = 3;");
+    expect(f).not.toMatch(/a{10}\.\.\./); // format.trunc style
+  });
+
+  test("ApprovalBox renders multi_edit diffs per hunk", () => {
+    const f = strip(render(<ApprovalBox approval={{
+      toolName: "multi_edit",
+      args: {
+        path: "m.ts",
+        edits: [
+          { old_string: "a = 1", new_string: "a = 10" },
+          { old_string: "b = 2", new_string: "b = 20" },
+        ],
+      },
+      resolve: () => {},
+    }} />).lastFrame());
+    expect(f).toContain("multi_edit m.ts");
+    expect(f).toContain("- a = 1");
+    expect(f).toContain("+ a = 10");
+    expect(f).toContain("- b = 2");
+    expect(f).toContain("+ b = 20");
+  });
+
   test("ApprovalBox shows an approval confirmation state when flash is set (micro-feedback)", () => {
     const approval = { toolName: "bash", args: { command: "ls" }, resolve: () => {} };
     // No flash -> the prompt question is shown
@@ -661,14 +692,22 @@ test("slash menu autocompletes as you type", async () => {
   c.unmount();
 });
 
-test("/help lists the command set", async () => {
+test("/help opens an ephemeral command overlay (not a permanent transcript dump)", async () => {
   const c = render(<ChatApp fullscreen={false} yolo provider={new Echo()} />);
   try {
     await tick();
     c.stdin.write("/help");
     await tick(20);
     c.stdin.write("\r");
-    expect(await until(c, (f) => f.includes("Commands:"))).toBe(true);
+    // Overlay title + a real slash entry (searchable picker), not the old multi-line dump.
+    expect(await until(c, (f) => f.includes("Commands") && f.includes("/model"))).toBe(true);
+    const open = strip(c.lastFrame() ?? "");
+    expect(open).toContain("show help"); // detail from SLASH
+    // Esc closes without dumping the catalog into the task trail.
+    c.stdin.write("\x1b");
+    await tick(50);
+    const after = strip(c.lastFrame() ?? "");
+    expect(after).not.toContain("/mcp-prompt"); // overlay gone; catalog not burned into transcript
   } finally {
     c.unmount();
   }
@@ -726,10 +765,11 @@ test("tool results remove extractor blank gutters without changing content", () 
 });
 
 test("write_file approval previews size + a '+N more lines' hint", () => {
-  const content = Array.from({ length: 20 }, (_, i) => `line${i}`).join("\n");
+  const content = Array.from({ length: 60 }, (_, i) => `line${i}`).join("\n");
   const f = strip(render(<ApprovalBox approval={{ toolName: "write_file", args: { path: "x.html", content }, resolve: () => {} }} />).lastFrame());
-  expect(f).toContain("20 lines");
-  expect(f).toContain("+12 more lines");
+  expect(f).toContain("60 lines");
+  expect(f).toContain("+12 more lines"); // beyond APPROVAL_DIFF_MAX_LINES (48)
+  expect(f).toContain("line0");
 });
 
 test("typing '/' caps the command list with a '+N more' hint", async () => {

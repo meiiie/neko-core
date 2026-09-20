@@ -1,5 +1,5 @@
 /**
- * Scroll-latency bench through a REAL ConPTY (manual tool): long transcript via /help (no model
+ * Scroll-latency bench through a REAL ConPTY (manual tool): long transcript via slash info commands (no model
  * call), a 15-event wheel flick, then sample the screen. Reports first-response latency, settle
  * time after the flick, and bytes moved. Compare paths:
  *   bun scripts/bench-scroll-conpty.ts label [binary]   (worktree dist/neko by default)
@@ -63,7 +63,7 @@ const submitSeed = async (command: string, marker: string): Promise<boolean> => 
 
 const startupOk = await until(() => vt.text().includes("shift+tab to cycle"), 8000);
 const seedOk = startupOk
-  && await submitSeed("/help", "Commands:")
+  && await submitSeed("/cost", "tokens")
   && await submitSeed("/tools", "tools:")
   && await submitSeed("/skills", "skills:")
   && await submitSeed("/memory", "save an explicit preference:")
