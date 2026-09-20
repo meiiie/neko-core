@@ -34,7 +34,11 @@ function OptionRow({ options, hover }: { options: string[]; hover?: number | nul
 /** Zone labels for a pending approval, in hit-zone order (chat's pointer handler uses the same
  * order to settle: index 0 approves, last denies, middle - when present - is "always"). */
 export function approvalOptions(toolName: string, args?: any): string[] {
-  if (toolName === "exit_plan_mode") return ["[y] proceed (accept-edits)", "[n] keep planning / Esc"];
+  // Claude-shaped plan exit: auto (product default) / accept-edits / keep planning.
+  // Zone order: 0 = auto, middle = accept-edits, last = deny (chat pointer handler special-cases this).
+  if (toolName === "exit_plan_mode") {
+    return ["[y] auto", "[e] accept-edits", "[n] keep planning / Esc"];
+  }
   // Session-scoped tool-name allowlist (matches ACP "Always allow … in this session"); not path-scoped.
   // When the box is already warning about irreversible bash, say that [a] covers those too.
   const destructive = toolName === "bash" && args && destructiveInWorkspace(String(args.command ?? ""));
@@ -52,11 +56,19 @@ export interface Approval {
   queueRemaining?: number;
 }
 
-export type ApprovalFlash = { kind: "ok" | "no" | "always"; tool: string };
+export type PlanExitMode = "auto" | "accept-edits";
+
+export type ApprovalFlash = {
+  kind: "ok" | "no" | "always";
+  tool: string;
+  /** Plan-exit only: which permission mode to enter after approve. */
+  planExitMode?: PlanExitMode;
+};
 
 const flashText = (flash: ApprovalFlash) => {
   if (flash.kind === "no") return `${chromeDenyPrefix().trimEnd()} denied`;
   if (flash.kind === "always") return `${chromeOkPrefix().trimEnd()} always ${flash.tool} (this session)`;
+  if (flash.planExitMode) return `${chromeOkPrefix().trimEnd()} approved → ${flash.planExitMode}`;
   return `${chromeOkPrefix().trimEnd()} approved`;
 };
 

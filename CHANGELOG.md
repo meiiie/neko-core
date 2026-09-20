@@ -8,6 +8,12 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **Plan-exit mode choice (CONT-2).** `exit_plan_mode` ApprovalBox offers Claude-shaped
+  `[y] auto` / `[e] accept-edits` / `[n] keep planning` instead of forcing
+  accept-edits. Flash shows `approved → auto|accept-edits`. Pointer zones match. Remote/ACP
+  allow without a choice still defaults to accept-edits. `[a]` is not session-always on plan exit.
+  Ctrl+O expand and Shift+Tab-while-approval policy (C) unchanged.
+
 - **Quieter Shift+Tab mode flash.** Mode-cycle contract feedback uses the reserved ephemeral
   status row (~1.8s) instead of appending durable transcript `mode:` lines (CONT-1). Footer
   chip still updates immediately. Shift+Tab remains disabled while an approval is open.

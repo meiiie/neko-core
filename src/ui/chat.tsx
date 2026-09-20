@@ -10,7 +10,7 @@ import { Box, measureElement, render, Static, Text, useApp, useInput, useStdout 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readFileSync, rmSync } from "node:fs";
 
-import { ApprovalBox, approvalOptions, type Approval, type ApprovalFlash } from "./approval-box.tsx";
+import { ApprovalBox, approvalOptions, type Approval, type ApprovalFlash, type PlanExitMode } from "./approval-box.tsx";
 import { hitIndexAt } from "./hit-targets.ts";
 import { CONTINUE_PROMPT, isInteractiveBrowserRequest, runSlashCommand, SLASH } from "./commands.ts";
 import { ctxPercent, fmtAge, fmtDuration, fmtTok, trunc } from "./format.ts";
@@ -1033,11 +1033,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (selectedText.current || selAnchor.current) { selectedText.current = ""; selAnchor.current = null; frameDiffer?.setSelection(null); }
   };
   const copySelection = () => { if (selectedText.current) { copyBoth(selectedText.current); flashCopyNote(`copied ${selectedText.current.length} chars to clipboard`); } };
-  const settleApproval = (kind: ApprovalFlash["kind"], expectedId?: string): boolean => {
+  const settleApproval = (kind: ApprovalFlash["kind"], expectedId?: string, planExitMode?: PlanExitMode): boolean => {
     const waiting = remoteApprovalRef.current;
     if (!waiting || (expectedId && waiting.id !== expectedId) || approvalFlashRef.current) return false;
     const current = waiting.approval;
-    const flash = { kind, tool: current.toolName };
+    // Plan-exit: UI keys/zones set planExitMode; remote/ACP allow without a choice keeps
+    // accept-edits (pre-CONT-2 behavior) so hosts without the new options stay predictable.
+    const exitMode: PlanExitMode | undefined = current.toolName === "exit_plan_mode" && kind !== "no"
+      ? (planExitMode ?? "accept-edits")
+      : undefined;
+    const flash: ApprovalFlash = { kind, tool: current.toolName, ...(exitMode ? { planExitMode: exitMode } : {}) };
     approvalFlashRef.current = flash;
     setApprovalFlash(flash);
     setApprovalHint(null);
@@ -1047,8 +1052,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (kind === "always") alwaysApproved.current.add(current.toolName);
       const ok = kind !== "no";
       if (ok && current.toolName === "exit_plan_mode" && registryRef.current!.mode === "plan") {
-        registryRef.current!.mode = "accept-edits";
-        setMode("accept-edits");
+        const next = exitMode ?? "accept-edits";
+        registryRef.current!.mode = next;
+        setMode(next);
       }
       current.resolve(ok);
       if (remoteApprovalRef.current?.id === waiting.id) remoteApprovalRef.current = null;
@@ -1380,13 +1386,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setApprovalHover(zone >= 0 ? zone : null);
         if (ptr.kind === "press" && ptr.left && zone >= 0) {
           const opts = approvalOptions(approval.toolName, approval.args);
-          settleApproval(zone === 0 ? "ok" : zone === opts.length - 1 ? "no" : "always");
+          if (approval.toolName === "exit_plan_mode") {
+            // Zones: 0=auto, middle=accept-edits, last=deny (not session-always).
+            if (zone === opts.length - 1) settleApproval("no");
+            else settleApproval("ok", undefined, zone === 0 ? "auto" : "accept-edits");
+          } else {
+            settleApproval(zone === 0 ? "ok" : zone === opts.length - 1 ? "no" : "always");
+          }
         }
         return;
       }
       const c = char.toLowerCase();
-      const hintMsg = approval.toolName === "exit_plan_mode"
-        ? "press [y] proceed / [n] keep planning"
+      const planExit = approval.toolName === "exit_plan_mode";
+      const hintMsg = planExit
+        ? "press [y] auto / [e] accept-edits / [n] keep planning"
         : "press [y]es / [a]lways this session / [n]o";
       const disarmApproval = () => {
         approvalArmedRef.current = false;
@@ -1398,9 +1411,15 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         flashApprovalHint(hintMsg);
       };
       let kind: ApprovalFlash["kind"] | null = null;
+      let planExitMode: PlanExitMode | undefined;
       // Esc always denies, even while disarmed (composing junk must still be escapable).
       if (key.escape) {
         kind = "no";
+      } else if (planExit) {
+        // Claude-shaped: y→auto, e→accept-edits, n→keep planning. [a] is not session-always here.
+        if (c === "y") { kind = "ok"; planExitMode = "auto"; }
+        else if (c === "e") { kind = "ok"; planExitMode = "accept-edits"; }
+        else if (c === "n") { kind = "no"; }
       } else if (c === "y") {
         kind = "ok";
       } else if (c === "a") {
@@ -1415,7 +1434,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           return;
         }
         const draftBeforeDecision = promptRef.current;
-        settleApproval(kind);
+        settleApproval(kind, undefined, planExitMode);
         // The approval hook is always mounted so it cannot miss a fast key, while the previous TextInput
         // listener is removed in a passive effect. During that tiny overlap the same y/a/n can reach both.
         // Restore the pre-decision draft after all listeners for this input chunk have run: the decision

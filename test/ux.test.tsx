@@ -1137,3 +1137,52 @@ test("interrupted turn is PERSISTED incrementally - resume shows the work, not n
     rmSync(home, { recursive: true, force: true });
   }
 }, 15000);
+
+
+test("plan exit [y] lands in auto; [e] lands in accept-edits", async () => {
+  const prevMode = process.env.NEKO_MODE;
+  process.env.NEKO_MODE = "plan";
+  try {
+    class PlanExitOnce implements Provider {
+      n = 0;
+      async complete(): Promise<ProviderResponse> {
+        this.n++;
+        if (this.n === 1) {
+          return {
+            content: null,
+            tool_calls: [{ id: "p", name: "exit_plan_mode", arguments: { plan: "## Plan\n1. ship it" } }],
+          };
+        }
+        return { content: "done-after-plan", tool_calls: [] };
+      }
+    }
+    // --- y → auto ---
+    const pY = new PlanExitOnce();
+    const cY = render(<ChatApp fullscreen={false} yolo={false} provider={pY} />);
+    cY.stdin.write("go");
+    await tick(30);
+    cY.stdin.write("\r");
+    expect(await until(cY, (f) => f.includes("Ready to code?") && f.includes("[y] auto"), 4000)).toBe(true);
+    expect(strip(cY.lastFrame())).toContain("[e] accept-edits");
+    cY.stdin.write("y");
+    expect(await until(cY, (f) => /approved\s*→\s*auto|>>\s*auto|mode:\s*auto/i.test(f) || f.includes("done-after-plan"), 5000)).toBe(true);
+    // Footer chip should show auto after settle (flash may have cleared).
+    expect(await until(cY, (f) => />>\s*auto/.test(f) || /⏵⏵\s*auto/.test(f), 3000)).toBe(true);
+    cY.unmount();
+
+    // --- e → accept-edits ---
+    const pE = new PlanExitOnce();
+    const cE = render(<ChatApp fullscreen={false} yolo={false} provider={pE} />);
+    cE.stdin.write("go");
+    await tick(30);
+    cE.stdin.write("\r");
+    expect(await until(cE, (f) => f.includes("Ready to code?"), 4000)).toBe(true);
+    cE.stdin.write("e");
+    expect(await until(cE, (f) => /accept-edits/.test(f) && (f.includes("done-after-plan") || /approved\s*→\s*accept-edits/.test(f)), 5000)).toBe(true);
+    expect(await until(cE, (f) => /accept-edits/.test(f), 3000)).toBe(true);
+    cE.unmount();
+  } finally {
+    if (prevMode === undefined) delete process.env.NEKO_MODE;
+    else process.env.NEKO_MODE = prevMode;
+  }
+}, 25_000);
