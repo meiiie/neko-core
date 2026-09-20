@@ -131,8 +131,8 @@ pasted anywhere.
 Then composite at exactly **1200×630** and screenshot:
 
 - `assets/neko-icon.png` at 64 px, top left, with `NEKO CORE` beside it in the monospace face
-- headline, one line — EN: **It runs on your computer. It asks before it acts.**
-- the same card in Vietnamese as `og-vi.png` — **Nó chạy trên máy bạn. Và hỏi trước khi ra tay.**
+- headline, one line — EN: **It runs on your computer. Coding tools run free — destructive still asks.**
+- the same card in Vietnamese as `og-vi.png` — **Nó chạy trên máy bạn. Coding chạy tự do — destructive vẫn hỏi.**
 - footer strip: `neko.holilihu.online` · `AGPL core · Apache SDK` · `Windows · macOS · Linux`
 - optional: the A2 cut-out at the right edge, bottom-aligned, about 38% of the height
 

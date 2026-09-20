@@ -114,6 +114,7 @@ neko login cline api <key>
 ```bash
 neko                         # interactive TUI
 neko --yolo                  # no approval waits; hard seatbelts still apply
+neko --always-approve        # synonym of --yolo (Grok Always-approve map; Ctrl+O stays expand)
 neko --resume                # resume the latest session in this folder
 neko run "fix the failing tests"
 neko run --loop "finish the migration and verify it"
@@ -138,11 +139,20 @@ Neko plays its short Bubble completion sound after successful background work. S
 
 ## Permissions and sandboxing
 
-The default `auto` mode is freer autonomy (Grok Build–style): ordinary coding tools, outside-project
-structured writes, and host computer control proceed without routine prompts. Workspace-destructive
-bash (rm -rf, force-push, sudo, curl|sh, …) still asks once with a warning. `--yolo` removes remaining
-approval waits for the current launch, but does not disable project trust, credential/system path
-protection, catastrophic-shell refusal, or validation.
+The default `auto` mode is freer autonomy: ordinary coding tools, outside-project structured writes, and
+host computer control proceed without routine prompts. Workspace-destructive bash (rm -rf, force-push,
+sudo, curl|sh, …) still asks once with a warning. **Neko `auto` is an allow-list plus surgical seatbelts —
+not a Claude or Grok Build LLM classifier.** Optional `adversarial_check` is off by default; OS sandbox is
+opt-in (`"sandbox": true`). Seatbelts are not confinement.
+
+| Competitor surface | Neko equivalent | Notes |
+| --- | --- | --- |
+| Grok **Always-approve** / `grok --always-approve` | `neko --yolo` or `neko --always-approve` | Launch-scoped; forces `auto` and skips remaining prompts while mode stays `auto`. Shift+Tab away from `auto` suspends it until you return. Hard credential/system/catastrophic seatbelts remain. |
+| Session “always allow this tool” | Approval box `[a]` | Per-tool remember for the session; not a global mode. |
+| Grok Ctrl+O = always-approve | **Not mapped** | Neko `Ctrl+O` expands tool output. Do not remap. |
+
+`--yolo` / `--always-approve` remove remaining approval waits for the current launch, but do not disable
+project trust, credential/system path protection, catastrophic-shell refusal, or validation.
 
 Shell and CLI work runs directly through the current host Bash by default; on Windows its child console stays
 hidden. Neko never drives a terminal through Computer Use as a shell fallback. The permission gate, secret

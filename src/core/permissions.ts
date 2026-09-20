@@ -6,7 +6,7 @@
  *   plan          read-only: block all writes/commands (propose a plan)
  *   auto          auto-approve gated coding tools, ordinary outside structured writes, and host computer;
  *                 workspace-destructive bash still asks once; plan denies; hard seatbelts remain
- *   --yolo        explicit startup authority: no approval prompts while mode remains auto
+ *   --yolo / --always-approve  explicit startup authority: no approval prompts while mode remains auto (Grok Always-approve synonym; Ctrl+O stays expand)
  *
  * Safe tools (read_file/search/glob/ls) are always allowed in every mode.
  */
