@@ -74,6 +74,13 @@ export interface Line {
   kind: LineKind;
   text: string;
   summary?: string; // 1-line collapse for read-type tool results (full is under Ctrl+O)
+  /** Expanded failure header (deny / error / interrupt) — red ● instead of success-green. */
+  failed?: boolean;
+}
+
+/** Success-green vs deny/error/interrupt red for the tool_call ●. */
+export function toolCallBulletColor(failed?: boolean): "red" | "green" {
+  return failed ? "red" : "green";
 }
 
 /** Display-only cleanup for tool output. Extractors often return a block with many blank rows at the
@@ -168,9 +175,10 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
       );
     case "tool_call":
       // A blank line above each tool call groups it with its result and separates it from the prompt.
+      // failed=true: deny / Error / (interrupted) — green ● lied that the call succeeded (raise-bar-10).
       return (
         <Box marginTop={1}>
-          <Text><Text color="green">● </Text><ToolCallText text={line.text} /></Text>
+          <Text><Text color={toolCallBulletColor(line.failed)}>● </Text><ToolCallText text={line.text} /></Text>
         </Box>
       );
     case "tool_result": {

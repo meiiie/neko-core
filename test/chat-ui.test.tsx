@@ -46,6 +46,18 @@ test("successful tool activity folds to one past-tense line while preserving ful
   expect(resultSummary("search", "(no matches)", { pattern: "missing" })).toBe("Searched for missing (0 matches)");
   expect(resultSummary("glob", "(no files)", { pattern: "**/*.missing" })).toBe("Found 0 files for **/*.missing");
   expect(resultSummary("ls", "(empty)", { path: "empty-dir" })).toBe("Listed empty-dir (0 items)");
+  // raise-bar-10: web_fetch / web_search / write / generic collapse name how much is under Ctrl+O
+  const fetchBody = Array.from({ length: 12 }, (_, i) => `p${i}`).join("\n");
+  expect(resultSummary("web_fetch", fetchBody, { url: "https://example.com" }))
+    .toBe("Fetched https://example.com (12 lines)");
+  expect(resultSummary("web_search", "hit a\nhit b", { query: "cats" }))
+    .toBe("Searched web for cats (2 lines)");
+  expect(resultSummary("write_file", "Wrote notes/a.txt  (+2)\n   1 + hello\n   2 + world", { path: "notes/a.txt" }))
+    .toBe("Wrote notes/a.txt (2 lines)");
+  expect(resultSummary("write_file", "Wrote big.txt  (+100)\n   1 + x", { path: "big.txt" }))
+    .toBe("Wrote big.txt (100 lines)");
+  expect(resultSummary("some_mcp_tool", "a\nb\nc", { foo: 1 }))
+    .toBe("Completed some_mcp_tool (3 lines)");
   const longSummary = resultSummary("bash", "(exit 0)\nok", { command: "x".repeat(200) }) ?? "";
   expect(longSummary).not.toContain("…"); // supported legacy Windows consoles need an ASCII-only suffix
   expect(longSummary).toContain("...");
@@ -64,6 +76,21 @@ test("successful tool activity folds to one past-tense line while preserving ful
   expect(lines[0].summary).toBe("Ran shell command: bun test (1 line)");
   expect(lines[0].text).toContain("Bash(bun test)");
   expect(lines[0].text).toContain("27 pass");
+});
+
+test("buildReplayLines marks denied tool_call failed for red bullet", () => {
+  let id = 1;
+  const lines = buildReplayLines([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "d1", type: "function", function: { name: "edit", arguments: JSON.stringify({ path: "notes/x.txt" }) } }],
+    },
+    { role: "tool", tool_call_id: "d1", content: "Denied by user: edit (edit notes/x.txt)" },
+  ], () => id++);
+  const call = lines.find((l) => l.kind === "tool_call");
+  expect(call?.failed).toBe(true);
+  expect(lines.some((l) => l.kind === "tool_result" && /Denied by user/.test(l.text))).toBe(true);
 });
 
 test("background job summary preserves running state and job id", () => {
