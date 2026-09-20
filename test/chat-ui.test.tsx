@@ -33,7 +33,12 @@ test("collapsedToolResultExpandable: empty sentinels are not expandable; real ob
 });
 
 test("successful tool activity folds to one past-tense line while preserving full Ctrl+O detail", () => {
-  expect(resultSummary("bash", "(exit 0)\nok", { command: "bun test" })).toBe("Ran shell command: bun test");
+  expect(resultSummary("bash", "(exit 0)\nok", { command: "bun test" })).toBe("Ran shell command: bun test (1 line)");
+  // Exit tag is not an output line — 80 stdout lines stay honest under collapse (raise-bar-9).
+  const eighty = Array.from({ length: 80 }, (_, i) => `line-${i + 1}`).join("\n");
+  expect(resultSummary("bash", `(exit 0)\n${eighty}`, { command: "bash src/long.sh" }))
+    .toBe("Ran shell command: bash src/long.sh (80 lines)");
+  expect(resultSummary("bash", "(exit 0)", { command: "true" })).toBe("Ran shell command: true (0 lines)");
   expect(resultSummary("search", "one match", { path: "src", pattern: "needle" })).toBe("Searched for needle (1 match)");
   expect(resultSummary("glob", "a.ts\nb.ts", { path: "src", pattern: "**/*.ts" })).toBe("Found 2 files for **/*.ts");
   // Trailing newline in file -> one numbered read line (raise-bar-8); summary must not say 2.
@@ -56,7 +61,7 @@ test("successful tool activity folds to one past-tense line while preserving ful
   ], () => id++, { mode: "resume" });
   expect(lines).toHaveLength(1);
   expect(lines[0].kind).toBe("tool_result");
-  expect(lines[0].summary).toBe("Ran shell command: bun test");
+  expect(lines[0].summary).toBe("Ran shell command: bun test (1 line)");
   expect(lines[0].text).toContain("Bash(bun test)");
   expect(lines[0].text).toContain("27 pass");
 });

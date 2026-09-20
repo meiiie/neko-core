@@ -360,25 +360,10 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     return cfg;
   };
 
-  const usageSnapshot = (session: AcpSession) => {
-    const cost = session.runtime.agent.cost;
-    return {
-      promptTokens: cost.promptTokens,
-      completionTokens: cost.completionTokens,
-      totalTokens: cost.totalTokens,
-      cachedTokens: cost.cachedTokens,
-      cacheWriteTokens: cost.cacheWriteTokens,
-      calls: cost.calls,
-      lastPrompt: cost.lastPrompt,
-      lastCompletion: cost.lastCompletion,
-      lastCached: cost.lastCached,
-      lastCacheWrite: cost.lastCacheWrite,
-    };
-  };
+  const usageSnapshot = (session: AcpSession) => session.runtime.agent.cost.snapshot();
 
   const restoreUsage = (session: AcpSession) => {
-    if (!session.record.usage) return;
-    Object.assign(session.runtime.agent.cost, session.record.usage);
+    session.runtime.agent.cost.restore(session.record.usage);
   };
 
   const storedMessages = async (session: AcpSession): Promise<any[]> => {

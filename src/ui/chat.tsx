@@ -818,6 +818,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (resumedRef.current) {
       agentRef.current.messages = [...resumedRef.current.messages];
       agentRef.current.restoreCompletionContract(resumedRef.current.completionContract);
+      agentRef.current.cost.restore(resumedRef.current.usage);
       agentRef.current.refreshSystemPrompt();
     }
   }
@@ -846,6 +847,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       title: pinnedTitleRef.current || undefined,
       messages: agentRef.current!.messages,
       completionContract: agentRef.current!.completionContract,
+      // ACP already persisted usage; TUI left /cost at 0 after --continue (raise-bar-9 lived).
+      usage: agentRef.current!.cost.snapshot(),
     });
   persistRef.current = persist;
 
@@ -885,6 +888,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const doResume = async (target: Session, mode: "summary" | "full") => {
     agentRef.current!.messages = [...target.messages];
     agentRef.current!.restoreCompletionContract(target.completionContract);
+    agentRef.current!.cost.restore(target.usage);
     agentRef.current!.refreshSystemPrompt();
     sessionIdRef.current = target.id;
     createdAtRef.current = target.createdAt;

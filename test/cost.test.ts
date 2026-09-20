@@ -118,3 +118,19 @@ test("CostTracker.summary surfaces live context estimate when provider under-rep
   expect(text).toContain("live context estimate: ~18000 tokens");
   expect(t.summary()).not.toContain("live context estimate");
 });
+
+test("CostTracker snapshot round-trips through restore for session resume", () => {
+  const t = new CostTracker();
+  t.add({ prompt_tokens: 1000, completion_tokens: 40, cached_tokens: 100, model_calls: 2 });
+  t.add({ prompt_tokens: 1100, completion_tokens: 20, context_tokens: 900 });
+  const snap = t.snapshot();
+  expect(snap.calls).toBe(3);
+  expect(snap.promptTokens).toBe(2100);
+  const fresh = new CostTracker();
+  fresh.restore(snap);
+  expect(fresh.snapshot()).toEqual(snap);
+  fresh.restore({ ...snap, promptTokens: -1 } as any); // malformed: ignored
+  expect(fresh.promptTokens).toBe(2100);
+  fresh.restore(null);
+  expect(fresh.totalTokens).toBe(snap.totalTokens);
+});
