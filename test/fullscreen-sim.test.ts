@@ -559,9 +559,64 @@ test("approval non-decision keys flash an in-box hint (not silent)", async () =>
     stdin.push("x"); // non-decision key — must flash the real keys, not vanish
     for (let waited = 0; waited < 2000 && !vt.text().includes("press [y]es"); waited += 25) await tick(25);
     expect(vt.text()).toContain("press [y]es / [a]lways this session / [n]o");
+    // Mid-burst y must NOT settle (raise-bar-11 composing guard). Still on the approval box.
+    stdin.push("y");
+    await tick(100);
+    expect(vt.text()).toContain("Approve bash?");
+    expect(vt.text()).not.toContain("ok after hint");
+    // Idle re-arm (~750ms), then a deliberate lone y settles.
+    await tick(800);
     stdin.push("y");
     for (let waited = 0; waited < 2000 && !vt.text().includes("ok after hint"); waited += 25) await tick(25);
     expect(vt.text()).toContain("ok after hint");
+    app.unmount();
+    await tick(50);
+  } finally {
+    if (oldSandbox === undefined) delete process.env.NEKO_SANDBOX;
+    else process.env.NEKO_SANDBOX = oldSandbox;
+    if (oldSimMode === undefined) delete process.env.NEKO_MODE;
+    else process.env.NEKO_MODE = oldSimMode;
+  }
+}, 30000);
+
+
+test("approval mid-word junk xyz does not settle on embedded y", async () => {
+  const oldSandbox = process.env.NEKO_SANDBOX;
+  const oldSimMode = process.env.NEKO_MODE;
+  process.env.NEKO_SANDBOX = "0";
+  process.env.NEKO_MODE = "default";
+  try {
+    const vt = new VirtualTerminal(80, 24);
+    const out = new FakeTtyOut(80, 24, vt);
+    const stdin = new FakeStdin();
+    const differ = new FrameDiffer();
+    let call = 0;
+    const provider: any = {
+      complete: async () => ++call === 1
+        ? { content: null, tool_calls: [{ id: "junk", name: "bash", arguments: { command: "echo should-wait" } }] }
+        : { content: "approved after pause", tool_calls: [] },
+    };
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+    const preAltDispose = installAltScreenGuard(out as any, { mouse: false });
+    const app = renderFS(
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+      React.createElement(ChatApp as any, { yolo: false, provider, sessionId: "approval-xyz", frameDiffer: differ, preAltDispose }),
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+      { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
+    );
+    await tick(300);
+    stdin.push("request approval"); await tick(30); stdin.push("\r");
+    for (let waited = 0; waited < 2000 && !vt.text().includes("Approve bash?"); waited += 25) await tick(25);
+    expect(vt.text()).toContain("Approve bash?");
+    stdin.push("x"); await tick(30);
+    stdin.push("y"); await tick(30);
+    stdin.push("z"); await tick(100);
+    expect(vt.text()).toContain("Approve bash?");
+    expect(vt.text()).not.toContain("approved after pause");
+    await tick(800);
+    stdin.push("y");
+    for (let waited = 0; waited < 2000 && !vt.text().includes("approved after pause"); waited += 25) await tick(25);
+    expect(vt.text()).toContain("approved after pause");
     app.unmount();
     await tick(50);
   } finally {

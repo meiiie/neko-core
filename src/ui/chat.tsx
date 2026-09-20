@@ -356,9 +356,19 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     return () => setApprovalCursorHidden(stdout, false);
   }, [approval !== null, stdout]);
   const [approvalHover, setApprovalHover] = useState<number | null>(null);
-  useEffect(() => { setApprovalHover(null); }, [approval]);
   const approvalFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const approvalFlashRef = useRef<ApprovalFlash | null>(null);
+  // Decision keys only settle when "armed". A non-y/a/n printable disarms briefly so mid-word junk
+  // like typing `xyz` cannot fire on the embedded `y` (raise-bar-11 lived). Idle re-arms.
+  const approvalArmedRef = useRef(true);
+  const approvalArmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tool results that already paint `(interrupted)` — skip the turn-level duplicate banner.
+  const interruptedBannerShownRef = useRef(false);
+  useEffect(() => {
+    setApprovalHover(null);
+    approvalArmedRef.current = true;
+    if (approvalArmTimer.current) { clearTimeout(approvalArmTimer.current); approvalArmTimer.current = null; }
+  }, [approval]);
   const approvalSeqRef = useRef(0);
   const remoteApprovalRef = useRef<{ id: string; approval: Approval } | null>(null);
   const overlaySeqRef = useRef(0);
@@ -786,6 +796,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           const done = idx >= 0 ? inflightRef.current.splice(idx, 1)[0] : { text: describeToolCall(data.call?.name, data.call?.arguments) };
           syncInflight();
           const obs = contentToText(data.observation).split("\n").slice(0, 400).join("\n");
+          if (isToolFailure(obs) && /^\(interrupted\)/i.test(obs.trim())) {
+            interruptedBannerShownRef.current = true;
+          }
           const summary = resultSummary(data.call?.name, obs, data.call?.arguments);
           if (summary) addLine("tool_result", `${done.text}\n${obs}`, summary);
           else {
@@ -1282,6 +1295,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useEffect(() => () => {
     if (approvalFlashTimer.current) clearTimeout(approvalFlashTimer.current);
     if (approvalHintTimer.current) clearTimeout(approvalHintTimer.current);
+    if (approvalArmTimer.current) clearTimeout(approvalArmTimer.current);
     approvalFlashRef.current = null;
   }, []);
 
@@ -1332,15 +1346,35 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         return;
       }
       const c = char.toLowerCase();
+      const hintMsg = approval.toolName === "exit_plan_mode"
+        ? "press [y] proceed / [n] keep planning"
+        : "press [y]es / [a]lways this session / [n]o";
+      const disarmApproval = () => {
+        approvalArmedRef.current = false;
+        if (approvalArmTimer.current) clearTimeout(approvalArmTimer.current);
+        approvalArmTimer.current = setTimeout(() => {
+          approvalArmTimer.current = null;
+          approvalArmedRef.current = true;
+        }, 750);
+        flashApprovalHint(hintMsg);
+      };
       let kind: ApprovalFlash["kind"] | null = null;
-      if (c === "y") {
+      // Esc always denies, even while disarmed (composing junk must still be escapable).
+      if (key.escape) {
+        kind = "no";
+      } else if (c === "y") {
         kind = "ok";
       } else if (c === "a") {
         kind = "always";
-      } else if (c === "n" || key.escape) {
+      } else if (c === "n") {
         kind = "no";
       }
       if (kind) {
+        if (!key.escape && !approvalArmedRef.current) {
+          // Mid-word / burst: ignore y/a/n until idle re-arm (raise-bar-11: `xyz` must not approve).
+          disarmApproval();
+          return;
+        }
         const draftBeforeDecision = promptRef.current;
         settleApproval(kind);
         // The approval hook is always mounted so it cannot miss a fast key, while the previous TextInput
@@ -1353,18 +1387,11 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         !key.ctrl &&
         !key.meta &&
         char.length === 1 &&
-        char >= " " &&
-        c !== "y" &&
-        c !== "a" &&
-        c !== "n"
+        char >= " "
       ) {
         // Non-decision keys used to vanish silently — users thought focus was broken. Flash the
-        // real keys in-box (copyNote row is hidden while ApprovalBox owns the chrome).
-        flashApprovalHint(
-          approval.toolName === "exit_plan_mode"
-            ? "press [y] proceed / [n] keep planning"
-            : "press [y]es / [a]lways this session / [n]o",
-        );
+        // real keys in-box and disarm so a following mid-word y/a/n cannot settle.
+        disarmApproval();
       }
       return;
     }
@@ -2435,6 +2462,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       // the terminal, phone, or side panel now joins the FIFO and is classified only after cleanup.
       busyRef.current = true;
       setBusy(true);
+      interruptedBannerShownRef.current = false;
       turnStartedAtRef.current = turnStart;
       relayRef.current?.refresh();
       const controller = new AbortController();
@@ -2516,7 +2544,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       const streamed = streamRef.current.trim();
       flushStream();
       if (result === "[interrupted]") {
-        addLine("info", "(interrupted)");
+        // Tool body already painted `(interrupted)` — do not stack a second banner (raise-bar-11).
+        if (!interruptedBannerShownRef.current) addLine("info", "(interrupted)");
+        interruptedBannerShownRef.current = true;
         // Keep the durable checklist visible across Esc; rehydrate from the trajectory if needed.
         const live = registryRef.current!.todos;
         const todosNow = live.length ? live : recoverTodos(agentRef.current!.messages);
@@ -2564,7 +2594,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       // returning "[interrupted]") isn't an error to alarm them with — show it like a normal interrupt.
       // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
       if ((error as any)?.name === "AbortError" || /aborted by user/i.test(msg)) {
-        addLine("info", "(interrupted)");
+        if (!interruptedBannerShownRef.current) addLine("info", "(interrupted)");
+        interruptedBannerShownRef.current = true;
         const live = registryRef.current!.todos;
         const todosNow = live.length ? live : recoverTodos(agentRef.current!.messages);
         if (todosNow.length) {
