@@ -1,7 +1,7 @@
 ---
 name: clean-writing
 description: Write or edit prose that doesn't read as AI slop - kill the tell-tale patterns; keep it plain, active, specific.
-match: (write|rewrite|edit|polish|proofread|improve).{0,30}(copy|prose|blog|post|readme|docs|documentation|landing|headline|tagline|email|announcement|description)|remove ai slop|de-slop|no.?ai.?slop|sound less ai|less robotic|make it human
+match: (?:remove ai slop|de-slop|no.?ai.?slop|sound less ai|less robotic|make it human|(?:polish|proofread).{0,40}(?:copy|prose|blog|landing|headline|tagline|email|announcement)|(?:write|rewrite|edit|improve).{0,40}(?:prose|copy|blog\s*post|landing\s*(?:page|copy)|headline|tagline|marketing\s+email|announcement))
 ---
 
 # Clean writing — kill the AI-slop tells

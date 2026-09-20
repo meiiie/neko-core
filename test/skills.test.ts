@@ -451,3 +451,20 @@ test("sql skill does not false-positive on plain JS edit prompts", () => {
   expect(matchesSkill("sql", "add a database migration for users")).toBe(true);
   expect(matchesSkill("sql", "create index on users.email")).toBe(true);
 });
+
+test("clean-writing skill does not false-positive on normal coding prompts", () => {
+  const coding = [
+    "Create a small notes app in notes.js with a README.md and selftest",
+    "edit src/app.js and fix the bug",
+    "write a README for this TypeScript package",
+    "improve the documentation comments in agent.ts",
+    "update the description field in package.json",
+  ];
+  for (const prompt of coding) {
+    expect(matchesSkill("clean-writing", prompt)).toBe(false);
+  }
+  expect(matchesSkill("clean-writing", "polish this landing page copy so it sounds less AI")).toBe(true);
+  expect(matchesSkill("clean-writing", "rewrite this prose to remove AI slop")).toBe(true);
+  expect(matchesSkill("clean-writing", "make it human - kill the robotic blog post tone")).toBe(true);
+});
+

@@ -2183,6 +2183,28 @@ type EditApplyResult = EditApplyOk | EditApplyErr;
 const EDIT_NOT_FOUND_HINT =
   "Re-read the file and copy the exact current bytes; check indentation, trailing whitespace, and CRLF vs LF. No change written.";
 
+
+function leadingEditWs(line: string): string {
+  const match = String(line).match(/^[ \t]*/);
+  return match ? match[0] : "";
+}
+
+/** Soft-match only: rewrite new_string lines onto the matched file region's indentation so a
+ * whitespace-tolerant hit cannot silently drift indent (e.g. 2-space file → 4-space primary). */
+function rebaseSoftMatchIndent(fileLines: string[], newLines: string[]): string[] {
+  const fileBaseLine = fileLines.find((line) => line.trim().length > 0) ?? fileLines[0] ?? "";
+  const newBaseLine = newLines.find((line) => line.trim().length > 0) ?? newLines[0] ?? "";
+  const fileBase = leadingEditWs(fileBaseLine);
+  const newBase = leadingEditWs(newBaseLine);
+  if (fileBase === newBase) return newLines;
+  return newLines.map((line) => {
+    if (!line.trim()) return line;
+    const lead = leadingEditWs(line);
+    const relative = newBase && lead.startsWith(newBase) ? lead.slice(newBase.length) : lead.replace(/^[ \t]+/, "");
+    return fileBase + relative + line.slice(lead.length);
+  });
+}
+
 /** Apply one unique old→new replacement. Exact bytes first; then CRLF-tolerant exact; then
  * (unless strict) whitespace-tolerant unique line match. Shared by edit + multi_edit. */
 function applyUniqueEdit(
@@ -2271,7 +2293,7 @@ function applyUniqueEdit(
   }
 
   // Indentation / trailing-whitespace drift: unique line-trimmed match; keep file's real whitespace
-  // on the removed side and insert new_string lines verbatim (EOL-normalized to the file).
+  // on the removed side and rebase new_string lines onto that indent (EOL-normalized to the file).
   const origLines = text.split("\n").map((l, i, arr) => (i < arr.length - 1 && l.endsWith("\r") ? l.slice(0, -1) : l));
   // Prefer LF-split of normalized old for line matching.
   const oldLines = normalizeEditEol(oldStr).split("\n");
@@ -2289,15 +2311,16 @@ function applyUniqueEdit(
     return { ok: false, error: `Error: ${label}old_string matches ${count} places (add more surrounding context; no change written)` };
   }
   const removed = origLines.slice(at, at + oldLines.length);
+  const rebased = rebaseSoftMatchIndent(removed, newLines);
   const next = [...origLines];
-  next.splice(at, oldLines.length, ...newLines);
+  next.splice(at, oldLines.length, ...rebased);
   const fileEol = text.includes("\r\n") ? "\r\n" : text.includes("\r") && !text.includes("\n") ? "\r" : "\n";
   return {
     ok: true,
     text: fileEol === "\n" ? next.join("\n") : next.join(fileEol),
     startLine: at,
     removed,
-    added: newLines,
+    added: rebased,
   };
 }
 

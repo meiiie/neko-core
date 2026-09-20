@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { Agent } from "../src/core/agent.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
-import { runSlashCommand } from "../src/ui/commands.ts";
+import { CONTINUE_PROMPT, runSlashCommand } from "../src/ui/commands.ts";
 
 function makeAgent(
   provider: any = { complete: async () => ({ content: "ok", tool_calls: [] }) },
@@ -128,7 +128,7 @@ test("/continue identifies its generated instruction as a controller turn", asyn
 
   expect(runs).toHaveLength(1);
   expect(runs[0].internal).toBe(true);
-  expect(runs[0].text).toStartWith("Continue the task from where it was interrupted.");
+  expect(runs[0].text).toBe(CONTINUE_PROMPT);
 });
 
 test("/contract renders durable criteria and /reset clears them", async () => {
