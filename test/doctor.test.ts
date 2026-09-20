@@ -166,6 +166,18 @@ test("doctor labels auto mode without a live sandbox as unconfined", () => {
   expect(sandbox.detail).toMatch(/ordinary bash runs without approval/i);
 });
 
+test("doctor under explicit --yolo does not claim destructive bash still asks", () => {
+  const checks = collectChecks(new NekoConfig({ mode: "auto", sandbox: false }, null, {}, ""), undefined, undefined, undefined, true);
+  const mode = checks.find((check) => check.name === "mode")!;
+  const sandbox = checks.find((check) => check.name === "bash_sandbox")!;
+  expect(mode.detail).toContain("yolo (explicit --yolo)");
+  expect(mode.detail).toContain("UNCONFINED AUTO");
+  expect(mode.detail).toMatch(/approval prompts disabled/i);
+  expect(mode.detail).not.toMatch(/destructive bash still asks/i);
+  expect(sandbox.detail).toMatch(/explicit --yolo disables remaining prompts/i);
+  expect(sandbox.detail).not.toMatch(/workspace-destructive bash still asks/i);
+});
+
 test("doctor reports present-but-unhealthy SRT as fail-closed rather than unconfined", () => {
   const checks = collectChecks(
     new NekoConfig({ mode: "auto", sandbox: true }, null, {}, ""),

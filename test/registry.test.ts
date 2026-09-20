@@ -20,6 +20,16 @@ test("policy warns on auto mode (bounded autonomy)", () => {
   expect(unconfined?.message).toMatch(/destructive/i);
 });
 
+test("policy under explicit --yolo does not claim destructive bash still asks", () => {
+  const report = evaluatePolicy(cfg("auto"), { kind: "none", live: false }, true);
+  const bounded = report.findings.find((f) => f.code === "bounded_autonomy_on");
+  const unconfined = report.findings.find((f) => f.code === "auto_without_live_sandbox");
+  expect(bounded?.message).toMatch(/approval prompts are disabled/i);
+  expect(unconfined?.message).toContain("UNCONFINED AUTO");
+  expect(unconfined?.message).toMatch(/explicit --yolo disables remaining approval prompts/i);
+  expect(unconfined?.message).not.toMatch(/still asks once/i);
+});
+
 test("policy distinguishes an unavailable sandbox from an unhealthy fail-closed sandbox", () => {
   const unavailable = evaluatePolicy(
     new NekoConfig({ mode: "auto", sandbox: true }, null, {}, ""),

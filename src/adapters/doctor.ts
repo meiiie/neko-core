@@ -203,11 +203,17 @@ export function collectChecks(
       status: config.mode === "auto" ? "warn" : "ok",
       name: "mode",
       detail: unconfinedAuto
-        ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - UNCONFINED AUTO: gated coding tools, outside structured writes, and host computer run without approval; bash has no live OS sandbox; destructive bash still asks`
+        ? explicitYolo
+          ? "yolo (explicit --yolo) - UNCONFINED AUTO: approval prompts disabled (including destructive bash); bash has no live OS sandbox; hard credential/system/catastrophic seatbelts remain"
+          : "auto - UNCONFINED AUTO: gated coding tools, outside structured writes, and host computer run without approval; bash has no live OS sandbox; destructive bash still asks"
         : failClosedAuto
-          ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - gated coding tools, outside structured writes, and host computer run without approval; bash FAILS CLOSED because the configured ${sandboxKind} sandbox is unusable; destructive bash still asks when bash can run`
+          ? explicitYolo
+            ? `yolo (explicit --yolo) - gated coding tools, outside structured writes, and host computer run without approval; bash FAILS CLOSED because the configured ${sandboxKind} sandbox is unusable; hard seatbelts remain when bash can run`
+            : `auto - gated coding tools, outside structured writes, and host computer run without approval; bash FAILS CLOSED because the configured ${sandboxKind} sandbox is unusable; destructive bash still asks when bash can run`
         : config.mode === "auto"
-          ? `${explicitYolo ? "yolo (explicit --yolo)" : "auto"} - gated coding tools, outside structured writes, and host computer run without approval; destructive bash still asks`
+          ? explicitYolo
+            ? "yolo (explicit --yolo) - approval prompts disabled (including destructive bash); hard credential/system/catastrophic seatbelts remain"
+            : "auto - gated coding tools, outside structured writes, and host computer run without approval; destructive bash still asks"
           : config.mode,
     },
     {
@@ -221,7 +227,9 @@ export function collectChecks(
       status: unconfinedAuto || (config.sandbox && !sandboxLive) ? "warn" : "ok",
       name: "bash_sandbox",
       detail: unconfinedAuto
-        ? `UNCONFINED AUTO: ${config.sandbox ? "sandbox requested but not live" : "sandbox disabled"}; ordinary bash runs without approval; workspace-destructive bash still asks. The seatbelt is not confinement.`
+        ? explicitYolo
+          ? `UNCONFINED AUTO: ${config.sandbox ? "sandbox requested but not live" : "sandbox disabled"}; ordinary bash runs without approval; explicit --yolo disables remaining prompts (including workspace-destructive). The catastrophic-command seatbelt remains; it is not confinement.`
+          : `UNCONFINED AUTO: ${config.sandbox ? "sandbox requested but not live" : "sandbox disabled"}; ordinary bash runs without approval; workspace-destructive bash still asks. The seatbelt is not confinement.`
         : config.sandbox
         ? sandboxKind === "none"
           ? "requested but unavailable on this OS - seatbelt + approval gate still apply"

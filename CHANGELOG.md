@@ -8,6 +8,15 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **Doctor/policy `--yolo` honesty (CONT-7).** `neko --yolo doctor` and `auto_without_live_sandbox`
+  no longer claim workspace-destructive bash still asks. Explicit `--yolo` disables remaining approval
+  prompts (including destructive bash); hard credential/system/catastrophic seatbelts remain.
+  Ordinary `auto` doctor/policy copy is unchanged.
+
+- **RULES + ACP freer/`--yolo` residual (CONT-7).** Working Rules no longer say ordinary auto still
+  asks for host Computer. ACP `--yolo` docs mirror Architecture: additive skips on top of freer
+  `auto`, not "keeps destructive-bash warnings."
+
 - **Architecture freer-auto residual (CONT-6).** Outside-workspace Architecture copy no longer claims
   structured mutations are confirmation-gated for every mode. Product-default `auto` allows ordinary
   outside writes + host computer; `default`/`accept-edits` keep the exact-path prompt; `--yolo` only

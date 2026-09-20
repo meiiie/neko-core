@@ -39,6 +39,8 @@ test("--yolo policy reports effective auto mode and missing confinement", () => 
   expect(result.output).toContain("pre-authorized by explicit --yolo");
   expect(result.output).toContain("auto_without_live_sandbox");
   expect(result.output).toContain("UNCONFINED AUTO");
+  expect(result.output).toMatch(/explicit --yolo disables remaining approval prompts/i);
+  expect(result.output).not.toMatch(/auto_without_live_sandbox.*still asks once/s);
 });
 
 test("--yolo doctor reports effective auto mode and missing confinement", () => {
@@ -46,6 +48,9 @@ test("--yolo doctor reports effective auto mode and missing confinement", () => 
   expect(result.status).toBe(0);
   expect(result.output).toContain("mode: yolo (explicit --yolo) - UNCONFINED AUTO");
   expect(result.output).toContain("bash_sandbox: UNCONFINED AUTO");
+  expect(result.output).toMatch(/approval prompts disabled/i);
+  expect(result.output).not.toMatch(/mode: yolo.*destructive bash still asks/i);
+  expect(result.output).toMatch(/explicit --yolo disables remaining prompts/i);
 });
 
 test("policy reports auto-authorized outside writes without implying Bash authority", () => {
