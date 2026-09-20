@@ -8,6 +8,7 @@
  * This module is the declarative source of truth (contracts + JSON schema for the model);
  * tool-runtime.ts attaches the executable callables + the approval gate.
  */
+import { honestTruncate } from "../shared/terminal-text.ts";
 import { isText } from "../shared/wire.ts";
 
 export const SAFE = "safe";
@@ -353,7 +354,8 @@ export function describeToolCall(name: string, args: any): string {
     ? (a.name ?? "")
     : (a.path ?? a.command ?? a.query ?? a.url ?? a.target ?? a.pattern ?? a.description ?? "");
   const s = String(primary).replace(/\s+/g, " ").trim();
-  const shown = s.length > 80 ? s.slice(0, 80) + "…" : s;
+  // Head…tail: mid-arg-only cuts hid distinctive path/command ends (raise-bar-13).
+  const shown = honestTruncate(s, 80, "…");
   return shown ? `${label}(${shown})` : label;
 }
 

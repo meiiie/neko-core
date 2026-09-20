@@ -607,16 +607,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   // Serialized so concurrent (parallel sub-agent) tool calls prompt one at a time, not at once.
   const gateChain = useRef<Promise<unknown>>(Promise.resolve());
+  const gatePending = useRef(0);
   const gate = (toolName: string, args: any): boolean | Promise<boolean> => {
     if (alwaysApproved.current.has(toolName)) return true;
+    gatePending.current += 1;
     const next = gateChain.current.then(() => new Promise<boolean>((resolve) => {
-      const request = { toolName, args, resolve };
+      const request = { toolName, args, resolve, queueRemaining: gatePending.current };
       remoteApprovalRef.current = { id: `a${++approvalSeqRef.current}`, approval: request };
       // Completion is pleasant feedback even while watched; approval is an attention request, so it
       // sounds only after the terminal has reported that the user switched away.
       if (cfg.completionSound && !terminalFocusedRef.current) ringCompletion();
       setApproval(request);
-    }));
+    })).finally(() => {
+      gatePending.current = Math.max(0, gatePending.current - 1);
+    });
     gateChain.current = next.catch(() => undefined);
     return next;
   };
