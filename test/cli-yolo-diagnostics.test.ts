@@ -84,3 +84,28 @@ test("a non-interactive agent process cannot grant project trust", () => {
     rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("--always-approve is a synonym of --yolo for doctor/policy", () => {
+  const home = mkdtempSync(join(tmpdir(), "neko-always-approve-"));
+  try {
+    const result = Bun.spawnSync([process.execPath, entry, "--always-approve", "doctor"], {
+      cwd: home,
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        NEKO_SANDBOX: "0",
+        NEKO_READ_OUTSIDE_ROOT: "false",
+        NEKO_AUTO_UPDATE: "0",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output = result.stdout.toString() + result.stderr.toString();
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain("mode: yolo (explicit --yolo) - UNCONFINED AUTO");
+    expect(output).toMatch(/approval prompts disabled/i);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

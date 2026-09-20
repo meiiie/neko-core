@@ -229,6 +229,9 @@ SDK result materialization before it reaches adapter-side formatting remains ope
 
 ## Cross-session handoff boundary
 
+This is **not** Claude Code `ListAgents` / `SendMessage` (agent-callable cross-session messaging) and
+not a Grok Agent Dashboard peer channel. User/CLI spool only — no agent tool, no transcript inject, no poll.
+
 `adapters/session-handoff.ts` provides an immutable, summary-only pending spool for saved local sessions:
 
 ```text

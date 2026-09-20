@@ -101,8 +101,10 @@ workflow should use `additional_write_roots`. Bash remains confined to its sandb
 when `sandbox: true`; direct-host Bash is governed by the command gate and seatbelts instead.
 
 Host `computer` control is likewise **allowed under ordinary `auto`** (not only `--yolo`); `plan`
-denies it. This is not Claude's LLM classifier — Neko keeps surgical seatbelts (destructive bash ⚠
-ask, catastrophic/credential refusals) instead.
+denies it. This is not Claude's LLM classifier and not Grok Build's classifier auto-approve — Neko
+keeps surgical seatbelts (destructive bash ⚠ ask, catastrophic/credential refusals) instead. The
+destructive-bash gate is a **heuristic** (`destructiveInWorkspace()`), not model-judged risk; `--yolo`
+/ `--always-approve` / session “always allow bash” skip it. Seatbelts ≠ OS confinement.
 
 Shell work uses Bash; Computer Use is for visible GUI interaction, never a shell fallback. Claude's
 official [sandboxing](https://code.claude.com/docs/en/sandboxing) documentation separates approval

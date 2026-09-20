@@ -8,6 +8,15 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **Harness/docs honesty + Always-approve map (CONT-PIVOT / REF-NEXT-GAPS).** README Permissions
+  states product-default `auto` is an allow-list plus surgical seatbelts — **not** a Claude or Grok
+  Build LLM classifier. SANDBOX clarifies heuristic destructive-bash vs classifier; seatbelts ≠
+  confinement. `--always-approve` is a documented synonym of `--yolo` (Grok Always-approve); Ctrl+O
+  stays expand-output. Architecture handoff boundary: not Claude `ListAgents`/`SendMessage`.
+
+- **Marketing freer-auto truth.** OG/banner cards and IMAGE-BRIEFS no longer claim "asks before it
+  acts" as the default; copy keeps destructive-bash honesty.
+
 - **Doctor/policy `--yolo` honesty (CONT-7).** `neko --yolo doctor` and `auto_without_live_sandbox`
   no longer claim workspace-destructive bash still asks. Explicit `--yolo` disables remaining approval
   prompts (including destructive bash); hard credential/system/catastrophic seatbelts remain.

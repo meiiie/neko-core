@@ -108,7 +108,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--domain") { const domain = argv[++i]; if (domain) (args.procurementDomains ??= []).push(domain); }
     else if (a === "--force") args.force = true;
     else if (a === "--diarize") args.diarize = true;
-    else if (a === "--yolo") args.yolo = true;
+    else if (a === "--yolo" || a === "--always-approve") args.yolo = true; // Grok Always-approve synonym; Ctrl+O stays expand
     else if (a === "--loop") args.loop = true;
     else if (a === "--once" || a === "--no-loop") args.once = true;
     else if (a === "--no-tools") args.noTools = true;
@@ -272,7 +272,7 @@ Commands:
 Options:
   --profile <name>   named runtime profile (see 'neko profiles')
   --host-profile <id> (acp) exclusive embedding-host tool profile; currently: nekocut
-  --yolo             disable approval prompts; hard credential/system/catastrophic seatbelts remain
+  --yolo, --always-approve  disable approval prompts while mode stays auto (Grok Always-approve synonym); hard seatbelts remain; Ctrl+O stays expand-output
   --loop             closed loop until done; exits like --once when idle/verified/no pending tools
   --once             force a single-shot run (overrides config "auto_loop": true)
   --trials <n>       (bench) repeated independent trials per fixed task
