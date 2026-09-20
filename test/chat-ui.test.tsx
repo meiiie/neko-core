@@ -7,7 +7,10 @@ import { join } from "node:path";
 import type { Provider, ProviderResponse } from "../src/adapters/providers.ts";
 import { VERSION } from "../src/shared/version.ts";
 import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
-import { buildReplayLines, clampToRows, collapsedToolResultExpandable, contentToText, countNewActivities, recoverTodos, renderTail, replaySessionLines, resultSummary } from "../src/ui/chat-lines.ts";
+import { buildReplayLines, clampToRows, collapsedToolResultExpandable, contentToText, countNewActivities, recoverTodos, renderTail, replaySessionLines, resultSummary,
+  isTodoWriteResultText,
+  summarizeTodoWriteResult,
+} from "../src/ui/chat-lines.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { setModel } from "../src/adapters/project.ts";
 import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "../src/adapters/chatgpt-voice.ts";
@@ -61,7 +64,17 @@ test("successful tool activity folds to one past-tense line while preserving ful
   const longSummary = resultSummary("bash", "(exit 0)\nok", { command: "x".repeat(200) }) ?? "";
   expect(longSummary).not.toContain("…"); // supported legacy Windows consoles need an ASCII-only suffix
   expect(longSummary).toContain("...");
-  expect(resultSummary("todo_write", "plan updated", {})).toBeUndefined(); // stateful plan stays visible
+  expect(resultSummary("todo_write", "Todos:\n[x] one\n[ ] two", {})).toBe("Updated todos (1/2 done)"); // raise-bar-12: fold checklist
+  expect(isTodoWriteResultText("Todos:\n[x] one\n[ ] two")).toBe(true);
+  expect(isTodoWriteResultText("Update Todos\nTodos:\n[x] one")).toBe(true);
+  expect(isTodoWriteResultText("Ran shell command: ls\nok")).toBe(false);
+  expect(summarizeTodoWriteResult("Todos:\n[x] one\n[~] two\n[ ] three")).toBe("Updated todos (1/3 done, 1 in progress)");
+  expect(summarizeTodoWriteResult("Todos:\n[x] one\n[x] two")).toBe("Updated todos (2/2 done)");
+  expect(summarizeTodoWriteResult("", { todos: [
+    { content: "a", status: "completed" },
+    { content: "b", status: "pending" },
+  ]})).toBe("Updated todos (1/2 done)");
+
   let id = 1;
   const lines = buildReplayLines([
     {
