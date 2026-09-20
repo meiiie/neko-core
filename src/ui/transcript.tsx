@@ -13,6 +13,7 @@ import { Markdown } from "./markdown.tsx";
 import { collapsedToolResultExpandable } from "./chat-lines.ts";
 
 import { isText } from "../shared/wire.ts";
+import { chromeDenyPrefix, chromeTreePrefix } from "./chrome-glyphs.ts";
 
 /** Parse one diff result line into its parts. Two formats are produced by tool-runtime.ts:
  *  Write: "+ <code>" / "- <code>"; Edit: "NNNN <sign> <code>" (right-padded line number, then +/-/space).
@@ -186,7 +187,7 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
         // Summaries are stored as `${toolCall}\n${obs}` — do not hint expand when obs is only an
         // empty sentinel already covered by e.g. "Listed empty-dir (0 items)" (raise-bar-7).
         const more = collapsedToolResultExpandable(line.text);
-        return <Text dimColor>{`  └ ${line.summary}${more ? " (ctrl+o to expand)" : ""}`}</Text>;
+        return <Text dimColor>{`${chromeTreePrefix()}${line.summary}${more ? " (ctrl+o to expand)" : ""}`}</Text>;
       }
       const all = toolResultDisplayLines(line.text);
       // Failed bash often opens with a stack frame, not "Error:" — also honor FAILED markers /
@@ -201,7 +202,7 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
       return (
         <Box flexDirection="column">
           {shown.map((l, i) => {
-            const indent = i === 0 ? "  └ " : "     ";
+            const indent = i === 0 ? chromeTreePrefix() : "     ";
             if (i === 0 && !isError && /\([^)]*[+-]\d+[^)]*\)/.test(l)) {
               // Edit/write header: dim, but color the +N green and -M red (Claude-style).
               return <Text key={i} dimColor>{indent}<HeaderCounts text={l.length > 200 ? l.slice(0, 200) + "…" : l} /></Text>;
@@ -216,12 +217,12 @@ export function TranscriptLine({ line, cfg, cols }: { line: Line; cfg: NekoConfi
       return (
         <Box flexDirection="column">
           {toolResultDisplayLines(line.text).map((l, i) => (
-            <DiffLine key={i} raw={l} indent={i === 0 ? "  └ " : "     "} isError={false} />
+            <DiffLine key={i} raw={l} indent={i === 0 ? chromeTreePrefix() : "     "} isError={false} />
           ))}
         </Box>
       );
     case "error":
-      return <Text color="red">{"✗ "}{line.text}</Text>;
+      return <Text color="red">{chromeDenyPrefix()}{line.text}</Text>;
     default:
       // info lines carry actionable URLs (relay pairing, release notes) - make them Ctrl+Click-able.
       return <Text color="gray"><LinkedText text={line.text} /></Text>;

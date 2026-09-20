@@ -368,6 +368,7 @@ const BOOLEAN_ENV_KEYS = new Set([
   "adaptive_effort",
   "adversarial_check",
   "allow_dangerous_bash",
+  "ascii_chrome",
   "auto_loop",
   "auto_update",
   "auto_update_check",
@@ -543,6 +544,26 @@ export class NekoConfig {
       if (v === "bar" || v === "block" || v === "underline") return v;
       return "thin-block";
     }
+  /** ASCII-safe TUI chrome glyphs (ApprovalBox/footer/tree/error only). Precedence: NEKO_ASCII_CHROME
+   * env > `ascii_chrome` config > auto (non-UTF-8 locale / TERM=dumb). Body text is never forced ASCII. */
+  get asciiChrome(): boolean {
+    const env = process.env.NEKO_ASCII_CHROME;
+    if (env != null && String(env).trim() !== "") {
+      const v = String(env).trim().toLowerCase();
+      if (["1", "true", "yes", "on"].includes(v)) return true;
+      if (["0", "false", "no", "off"].includes(v)) return false;
+    }
+    if (this.data.ascii_chrome === true) return true;
+    if (this.data.ascii_chrome === false) return false;
+    // Mirror chrome-glyphs auto-detect without importing the UI module.
+    for (const key of ["LC_ALL", "LC_CTYPE", "LANG"] as const) {
+      const loc = process.env[key];
+      if (!loc) continue;
+      if (/utf-?8/i.test(loc)) return false;
+      return true;
+    }
+    return false;
+  }
   /** Internal fullscreen escape hatch for unsupported terminals and tests. */
   get fullscreen(): boolean {
     const env = process.env.NEKO_FULLSCREEN;

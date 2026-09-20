@@ -11,6 +11,7 @@ import { Box, Text } from "ink";
 import { useEffect, useRef, useState } from "react";
 
 import type { Line, LineKind } from "./transcript.tsx";
+import { chromeDenyPrefix, chromeTreePrefix } from "./chrome-glyphs.ts";
 
 /** Per-kind glyph + color, mirroring the live transcript so a review reads the same as the session. */
 export function styleFor(kind: LineKind) {
@@ -18,8 +19,8 @@ export function styleFor(kind: LineKind) {
     case "user": return { glyph: "> ", color: "white", background: "#303030", dim: false };
     case "assistant": return { glyph: "  ", color: "white", dim: false };
     case "tool_call": return { glyph: "● ", color: "green", dim: false };
-    case "tool_result": return { glyph: "  └ ", dim: true };
-    case "error": return { glyph: "✗ ", color: "red", dim: false };
+    case "tool_result": return { glyph: chromeTreePrefix(), dim: true };
+    case "error": return { glyph: chromeDenyPrefix(), color: "red", dim: false };
     default: return { glyph: "  ", color: "gray", dim: true }; // info
   }
 }

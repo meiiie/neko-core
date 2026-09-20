@@ -4,7 +4,8 @@
  *   default       prompt before write/edit/bash
  *   accept-edits  auto-approve file edits; still prompt for bash
  *   plan          read-only: block all writes/commands (propose a plan)
- *   auto          auto-approve bounded tools; host desktop control still requires consent
+ *   auto          auto-approve gated coding tools, ordinary outside structured writes, and host computer;
+ *                 workspace-destructive bash still asks once; plan denies; hard seatbelts remain
  *   --yolo        explicit startup authority: no approval prompts while mode remains auto
  *
  * Safe tools (read_file/search/glob/ls) are always allowed in every mode.
@@ -18,7 +19,7 @@ export const MODES: { mode: PermissionMode; label: string; detail: string }[] = 
   { mode: "default", label: "default", detail: "prompt before write/edit/bash" },
   { mode: "accept-edits", label: "accept-edits", detail: "auto-approve file edits; prompt for bash" },
   { mode: "plan", label: "plan", detail: "read-only; block all writes/commands" },
-  { mode: "auto", label: "auto", detail: "auto-approve bounded tools; prompt for host computer control" },
+  { mode: "auto", label: "auto", detail: "auto-approve coding tools, outside writes, and computer; destructive bash still asks" },
 ];
 
 const MODE_ORDER: PermissionMode[] = ["default", "accept-edits", "plan", "auto"];
@@ -36,12 +37,11 @@ export function decide(
   opts: { sandboxedBash?: boolean; yolo?: boolean } = {},
 ): Decision {
   const permission = effectivePermission(spec, args);
-  // Desktop control crosses out of the workspace/sandbox and acts as the logged-in user. Ordinary
-  // `auto` grants bounded coding autonomy, not ambient host-GUI authority. Explicit `--yolo` is the
-  // up-front session consent; plan mode remains a hard deny after the user cycles away from auto.
-  // A semantic host port may mark status/observe/release safe; those calls do not control the seat.
+  // Product-default `auto` matches Grok Build freer posture: host computer is allowed under ordinary
+  // auto (not only `--yolo`). Plan remains a hard deny. Credential/catastrophic seatbelts live in the
+  // run path, not here. A semantic host port may mark status/observe/release safe; those stay SAFE.
   if (spec.name === "computer" && permission === GATED) {
-    return mode === "plan" ? "deny" : mode === "auto" && opts.yolo ? "allow" : "prompt";
+    return mode === "plan" ? "deny" : mode === "auto" ? "allow" : "prompt";
   }
   if (permission !== GATED) return "allow";
   switch (mode) {

@@ -14,7 +14,7 @@ function strip(s: string | undefined) {
   return (s ?? "").replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-test("lived product default: omitted mode is auto; write_file silent; computer prompts; TUI shows auto", async () => {
+test("lived product default: omitted mode is auto; write_file silent; computer allows; TUI shows auto", async () => {
   const prev = process.env.NEKO_MODE;
   delete process.env.NEKO_MODE;
   const home = mkdtempSync(join(tmpdir(), "neko-auto-home-"));
@@ -35,7 +35,7 @@ test("lived product default: omitted mode is auto; write_file silent; computer p
     expect(prompts).toBe(0);
     expect(readFileSync(join(root, "smoke.txt"), "utf8")).toBe("auto-default-ok");
 
-    expect(decide("auto", resolveTool("computer"))).toBe("prompt");
+    expect(decide("auto", resolveTool("computer"))).toBe("allow");
 
     class Echo {
       async complete() {

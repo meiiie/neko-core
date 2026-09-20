@@ -3,7 +3,7 @@
  *
  * read_file / search : safe  -> run immediately.
  * write_file / bash  : gated -> require approval unless mode=auto.
- * computer           : host boundary -> prompts in ordinary auto; explicit --yolo pre-authorizes it.
+ * computer           : host GUI — allowed under ordinary auto (Grok-free); plan denies; --yolo still skips other prompts.
  *
  * Each tool returns a STRING observation (errors + denials included) so a failed or denied
  * tool never crashes the agent loop. Mutations stay inside the project or explicit additional roots.
@@ -1418,10 +1418,14 @@ export class ToolRegistry {
       decision = "prompt";
       if (!callNote) callNote = "~/.neko-core/config.json is Neko's policy file: this exact change needs your confirmation and a Neko restart to take effect.";
     }
-    // Auto mode does not grant ambient host-write authority.
-    if (hostWrite && !explicitYolo) {
+    // Grok-free auto: ordinary outside structured writes are allowed under mode=auto (and --yolo).
+    // default/accept-edits still force one exact-path confirmation. Credential/system paths refuse earlier.
+    // Always attach the outside-workspace reason when we will prompt (UX-2 denialNote contract — never empty ??).
+    if (hostWrite && !explicitYolo && this.mode !== "auto") {
       if (decision === "allow") decision = "prompt";
-      if (!callNote) callNote = "This target is outside the workspace and configured write roots; only this exact structured change is being requested.";
+      if (decision === "prompt" && !callNote) {
+        callNote = "This target is outside the workspace and configured write roots; only this exact structured change is being requested.";
+      }
     }
     // Product-default auto still withholds the no-prompt path for irreversible workspace destruction
     // (docs/SANDBOX.md). The approval box paints ⚠; --yolo / session "always allow bash" skip this.

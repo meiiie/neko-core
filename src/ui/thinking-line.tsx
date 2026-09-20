@@ -5,6 +5,7 @@ import { terminalSafeText } from "../shared/terminal-text.ts";
 import { fmtTok } from "./format.ts";
 
 import { isJsonNumber } from "../shared/wire.ts";
+import { chromeTreePrefix } from "./chrome-glyphs.ts";
 
 /** Playful "thinking" verbs (one picked per turn), Claude-style. */
 export const VERBS = [
@@ -91,7 +92,7 @@ export function CompactingLine({ start, expectedMs = 15000 }: { start: number; e
         <Text color="#4a4a4a">{BAR_EMPTY.repeat(WIDTH - fill)}</Text>
         <Text color="#9a9a9a"> {pct}%</Text>
       </Text>
-      <Text color="#9a9a9a">{"  └ tip: "}{tip}</Text>
+      <Text color="#9a9a9a">{chromeTreePrefix()}tip: {tip}</Text>
     </Box>
   );
 }

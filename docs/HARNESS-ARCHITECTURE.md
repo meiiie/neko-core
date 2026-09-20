@@ -110,7 +110,7 @@ authority:
 4. explicit launch authority such as `--yolo`.
 
 The intersection can narrow authority but cannot expand beyond the host policy. Project trust, credential
-denials, system paths, catastrophic shell refusal, exact outside-root consent, and sandbox health remain
+denials, system paths, catastrophic shell refusal, outside-root write policy (allowed under auto; exact consent in default/accept-edits), and sandbox health remain
 independent checks. Hooks run after deterministic preflight and before the effect; they cannot make a denied
 tool available.
 

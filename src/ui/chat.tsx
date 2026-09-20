@@ -106,6 +106,7 @@ import { describeToolCall, toolSchemas } from "../core/tools.ts";
 import { createCompletionSupervisor } from "../adapters/completion-supervisor.ts";
 
 import { isText } from "../shared/wire.ts";
+import { chromeModeChip } from "./chrome-glyphs.ts";
 
 export { ApprovalBox, type Approval }; // re-exported for tests
 
@@ -515,6 +516,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     addLine(
       "info",
       "launched with --yolo: approval prompts off while mode is auto; hard credential/system/catastrophic seatbelts remain. Shift+Tab cycles modes and suspends yolo until you return to auto.",
+    );
+  }, []);
+
+  // Ordinary auto is freer (Grok Build–style): disclose once so outside-write + computer are not silent authority.
+  useEffect(() => {
+    if (yolo) return;
+    if (mode !== "auto") return;
+    addLine(
+      "info",
+      "mode auto: coding tools, outside structured writes, and host computer run without prompts; workspace-destructive bash still asks once; credential/system/catastrophic seatbelts remain.",
     );
   }, []);
 
@@ -3658,7 +3669,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
                   (image #79 - Claude Code truncates) and every chrome-height change churns the band
                   geometry, the ConPTY ghost's habitat. */}
               <Text wrap="truncate-end">
-                <Text color={yolo && mode === "auto" ? "magenta" : MODE_COLOR[mode]}>{" ⏵⏵ "}{yolo && mode === "auto" ? "yolo" : mode}</Text>
+                <Text color={yolo && mode === "auto" ? "magenta" : MODE_COLOR[mode]}>{chromeModeChip()}{yolo && mode === "auto" ? "yolo" : mode}</Text>
                 <Text dimColor> · shift+tab to cycle</Text>
                 {rcOn ? <Text color="magenta"> · /rc active</Text> : null}
               </Text>

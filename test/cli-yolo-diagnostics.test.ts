@@ -48,10 +48,10 @@ test("--yolo doctor reports effective auto mode and missing confinement", () => 
   expect(result.output).toContain("bash_sandbox: UNCONFINED AUTO");
 });
 
-test("policy reports exact-consent host writes without implying Bash authority", () => {
+test("policy reports auto-authorized outside writes without implying Bash authority", () => {
   const result = runDiagnostic("policy", "true", false);
   expect(result.status).toBe(0);
-  expect(result.output).toContain("requires one human confirmation for that exact change");
+  expect(result.output).toContain("pre-authorized under mode=auto");
   expect(result.output).toContain("never reaches sandboxed Bash");
   expect(result.output).toContain("System and credential paths");
   expect(result.output).not.toContain("the one consent-gated exception");

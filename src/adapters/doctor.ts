@@ -66,6 +66,22 @@ export function srtToolchainCheck(
   };
 }
 
+
+/** Warn when the process locale is not UTF-8 so TUI chrome symbols may tofu (REF fonts note). */
+export function localeUtf8Check(env: NodeJS.ProcessEnv = process.env): Check | null {
+  for (const key of ["LC_ALL", "LC_CTYPE", "LANG"] as const) {
+    const v = env[key];
+    if (!v) continue;
+    if (/utf-?8/i.test(v)) return null;
+    return {
+      status: "warn",
+      name: "locale",
+      detail: `${key}=${v} is not UTF-8; TUI chrome symbols may show as boxes. Set a UTF-8 locale, or NEKO_ASCII_CHROME=1 for ASCII-safe ApprovalBox/footer glyphs.`,
+    };
+  }
+  return null;
+}
+
 /** Name the hosting terminal from the env (best-effort - WT/ConPTY doesn't export TERM_PROGRAM). */
 export function terminalName(env: NodeJS.ProcessEnv = process.env): string {
   if (env.TERM_PROGRAM) return env.TERM_PROGRAM;
@@ -151,8 +167,10 @@ export function collectChecks(
         : browserStage === "bridge_online"
           ? { status: "warn", name: "browser_bridge", detail: "online, but the Chrome extension is not connected - run `/browser setup`" }
           : { status: "warn", name: "browser_bridge", detail: "configured but offline - start Neko, then run `/browser status`" };
+  const localeCheck = localeUtf8Check();
   return [
     { status: "ok", name: "version", detail: `neko-core ${VERSION}` },
+    ...(localeCheck ? [localeCheck] : []),
     { status: "ok", name: "provider", detail: config.provider },
     { status: "ok", name: "profile", detail: config.profile ?? "none" },
     {

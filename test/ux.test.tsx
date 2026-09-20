@@ -739,7 +739,7 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
       args: { command: "rm -rf build" },
       resolve: () => {},
     }} />).lastFrame());
-    expect(f).toContain("⚠");
+    expect(f).toMatch(/⚠|!/);
     expect(f).toContain("recursive/force/wildcard delete (rm)");
     expect(f).toContain("[a]lways allow bash (this session — incl. destructive)");
   });

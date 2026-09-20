@@ -69,9 +69,10 @@ networking. A failed capability is not retried through Computer Use.
 ### Outside-workspace autonomy is path-scoped
 
 Neko reads ordinary host files outside the project by default (`read_outside_root: true`), while its
-credential/device deny policy remains active. `auto`/`--yolo` removes routine in-scope approval prompts;
-it does not silently turn that read reach into a machine-wide write grant. Structured file tools and
-all three optional Bash sandbox backends share an explicit write-capability list:
+credential/device deny policy remains active. Under `auto`/`--yolo`, ordinary structured writes outside
+the project are allowed (credential/system paths stay refused); sandboxed Bash never inherits that
+authority. Structured file tools and all three optional Bash sandbox backends share an explicit
+write-capability list:
 
 ```json
 {
@@ -89,18 +90,22 @@ state are refused. Neko always provisions one narrow built-in capability:
 write access to the rest of the user profile. Direct-host Bash is outside this structured-file
 boundary; its authority is disclosed as `UNCONFINED AUTO` by the runtime, doctor, and policy audit.
 
-When the user explicitly asks for an ordinary file elsewhere on the host, `write_file`, `edit`, and
-`multi_edit` may request one confirmation for that exact target and operation. This is a transient
-capability: it is not inherited by another path or later turn. `plan` still denies it. System locations,
-credential/browser stores, symlink or junction escapes, and multiply-linked files refuse before the
-prompt. A durable directory workflow should use `additional_write_roots` instead. Bash remains confined
-to its sandbox write roots only when `sandbox: true`; direct-host Bash is governed by the command gate
-and seatbelts instead.
+Under product-default `auto` (Grok Build–style freer posture), ordinary `write_file` / `edit` /
+`multi_edit` targets **outside** the project are allowed without a prompt — the same way Grok Build
+with sandbox off treats unrestricted FS writes once permissions allow. `default` and `accept-edits`
+still request one confirmation for that exact outside target. `plan` denies it. System locations,
+credential/browser stores, symlink or junction escapes, and multiply-linked files refuse before any
+write. `~/.neko-core/config.json` still needs confirmation unless `--yolo`. A durable multi-dir
+workflow should use `additional_write_roots`. Bash remains confined to its sandbox write roots only
+when `sandbox: true`; direct-host Bash is governed by the command gate and seatbelts instead.
 
-This follows Claude's tool routing: shell work uses Bash and broad Computer Use is last-resort GUI
-automation. Claude's official [sandboxing](https://code.claude.com/docs/en/sandboxing) documentation
-also separates approval automation from containment and currently directs native Windows users to
-WSL2 for its supported sandbox. Neko retains SRT as an explicit native-Windows isolation option.
+Host `computer` control is likewise **allowed under ordinary `auto`** (not only `--yolo`); `plan`
+denies it. This is not Claude's LLM classifier — Neko keeps surgical seatbelts (destructive bash ⚠
+ask, catastrophic/credential refusals) instead.
+
+Shell work uses Bash; Computer Use is for visible GUI interaction, never a shell fallback. Claude's
+official [sandboxing](https://code.claude.com/docs/en/sandboxing) documentation separates approval
+automation from containment. Neko retains SRT as an explicit native-Windows isolation option.
 
 ### Permission behavior
 
