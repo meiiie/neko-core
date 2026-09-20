@@ -599,6 +599,34 @@ test("resize triggers a debounced full wipe + Static re-emit (ghost-frame regres
     expect(f).not.toMatch(/a{10}\.\.\./); // format.trunc style
   });
 
+  test("ApprovalBox expands hard tabs in edit diffs (no raw \\t / no glyph holes)", () => {
+    // Lived P1 after PR #33: tab-indented CRLF files painted as `owconst` / `peconsole` because
+    // string-width treats \\t as width 0 while the TTY advances to the next tab stop and leaves
+    // stale cells in the gap. Expand to spaces before Ink measures/paints.
+    const old_string = "\tconst msg = \"hello, \" + name + \"!\";\r\n\tconsole.log(msg);";
+    const new_string = "\tconst msg = \"hi, \" + name + \"!\";\r\n\tconsole.log(msg);";
+    const f = strip(render(<ApprovalBox approval={{ toolName: "edit", args: { path: "greet_crlf.js", old_string, new_string }, resolve: () => {} }} width={80} />).lastFrame());
+    expect(f).not.toContain("\t");
+    expect(f).toContain("-     const msg = \"hello, \" + name + \"!\";");
+    expect(f).toContain("+     const msg = \"hi, \" + name + \"!\";");
+    expect(f).toContain("    console.log(msg);");
+    expect(f).not.toMatch(/owconst|peconsole|—const/);
+  });
+
+  test("ApprovalBox expands hard tabs in multi_edit diffs", () => {
+    const f = strip(render(<ApprovalBox approval={{
+      toolName: "multi_edit",
+      args: {
+        path: "tabs.js",
+        edits: [{ old_string: "\tfoo()", new_string: "\tbar()" }],
+      },
+      resolve: () => {},
+    }} width={60} />).lastFrame());
+    expect(f).not.toContain("\t");
+    expect(f).toContain("-     foo()");
+    expect(f).toContain("+     bar()");
+  });
+
   test("ApprovalBox renders multi_edit diffs per hunk", () => {
     const f = strip(render(<ApprovalBox approval={{
       toolName: "multi_edit",

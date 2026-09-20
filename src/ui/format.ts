@@ -5,6 +5,35 @@ export function trunc(s: string, n = 120): string {
   return one.length > n ? one.slice(0, n) + "..." : one;
 }
 
+
+/** Expand hard tabs to spaces so TTY paint cannot leave tab-stop holes. `string-width` (and Ink's
+ * yoga measure) treat `\t` as width 0, while a real terminal advances to the next stop without
+ * overwriting the skipped cells — FrameDiffer then leaves stale glyphs in those holes (`owconst`,
+ * `peconsole`). Approval/code diffs must never emit raw tabs. */
+export function expandTabs(s: string, tabWidth = 4): string {
+  const w = Math.max(1, Math.floor(tabWidth) || 4);
+  let out = "";
+  let col = 0;
+  for (const ch of String(s ?? "")) {
+    if (ch === "\t") {
+      const n = w - (col % w);
+      out += " ".repeat(n);
+      col += n;
+      continue;
+    }
+    if (ch === "\n") {
+      out += ch;
+      col = 0;
+      continue;
+    }
+    if (ch === "\r") continue; // drop CR so CRLF source lines cannot rewind the cursor mid-paint
+    out += ch;
+    col += 1;
+  }
+  return out;
+}
+
+
 export function fmtTok(n: number): string {
   return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
 }
