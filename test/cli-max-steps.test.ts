@@ -62,7 +62,8 @@ test("neko --help documents --max-steps for run|bench", () => {
 test("README documents wired --max-steps for neko run --loop", async () => {
   const readme = await Bun.file(join(import.meta.dir, "..", "README.md")).text();
   expect(readme).toMatch(/neko run --loop --max-steps 80/);
-  expect(readme).toMatch(/honored through the same `load\(\)` path/);
+  expect(readme).toMatch(/honored through `load\(\)`/);
+  expect(readme).toMatch(/bench gui/);
   // Lived HardMix A/B honesty: runners passed 80 but effective cap was still 40 pre-#62.
   expect(readme).toMatch(/effective cap \*\*40\*\*|config default \*\*40\*\*/);
 });

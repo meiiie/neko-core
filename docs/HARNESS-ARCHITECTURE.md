@@ -91,8 +91,10 @@ The loop includes:
 - bounded checkpoint continuation for committed partial streams;
 - closed-loop self-review through `runUntilDone`, with a hard step ceiling.
   CLI `--max-steps <n>` (1..512) overrides config `max_steps` (default 40) for `neko run` / `doctor` /
-  `config` via `load()`. Under `--loop` / `exitWhenIdle`, a max_steps wrap-up is not treated as verified
-  idle merely because a required artifact file already exists — at least one closed-loop review runs.
+  `config` via `load()`. The same CLI flag also overrides per-task horizons in `neko bench gui` when
+  present (omit to keep task caps). Under `--loop` / `exitWhenIdle`, a max_steps wrap-up is not treated
+  as verified idle merely because a required artifact file already exists — at least one closed-loop
+  review runs.
 
 A provider error is not success, an interrupted mutation is not automatically replayable, and a confident
 final sentence cannot clear missing verification evidence.
