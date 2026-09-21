@@ -146,11 +146,13 @@ test("empty ls/search/glob summaries omit ctrl+o — expand would only show the 
     ["Searched for missing (0 matches)", "Search(missing)\n(no matches)"],
     ["Found 0 files for **/*.missing", "Glob(**/*.missing)\n(no files)"],
   ] as const) {
+    // SAFETY: empty cfg stub; TranscriptLine only needs a config object reference for this render.
     const out = strip(render(<TranscriptLine line={{ id: 1, kind: "tool_result", text, summary }} cfg={{} as any} />).lastFrame());
     expect(out).toContain(summary);
     expect(out).not.toContain("ctrl+o to expand");
   }
   // Non-empty listing still hints expand.
+  // SAFETY: empty cfg stub; TranscriptLine only needs a config object reference for this render.
   const listed = strip(render(<TranscriptLine line={{ id: 2, kind: "tool_result", text: "List(src)\na.js\nb.js", summary: "Listed src (2 items)" }} cfg={{} as any} />).lastFrame());
   expect(listed).toContain("ctrl+o to expand");
 });

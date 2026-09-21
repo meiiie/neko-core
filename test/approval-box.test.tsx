@@ -82,6 +82,7 @@ test("plan box shows header, footer and markdown content", () => {
 
 test("write_file create preview omits phantom blank + from trailing newline", () => {
   const content = 'export function greet(name){ return "hi "+name; }\n';
+  // SAFETY: fixture literal built by this test; omitted Approval members are unused by the preview.
   const approval = { toolName: "write_file", args: { path: "src/new-only-xyz.js", content }, resolve: () => {} } as Approval;
   const c = render(
     <Box width={80}>
@@ -104,6 +105,7 @@ test("write_file overwrite preview shows red removal vs existing workspace file"
   process.chdir(dir);
   try {
     const content = 'export function greet(name){ return "hello "+name; }\n';
+    // SAFETY: fixture literal built by this test; omitted Approval members are unused by the preview.
     const approval = { toolName: "write_file", args: { path: "src/greet.js", content }, resolve: () => {} } as Approval;
     const c = render(
       <Box width={80}>
@@ -125,6 +127,7 @@ test("write_file overwrite preview shows red removal vs existing workspace file"
 test("edit reorder preview keeps shared middle as context (not delete+re-add)", () => {
   const old_string = ["line1 anchor-AAA", "line2 middle", "line3 anchor-BBB"].join("\n");
   const new_string = ["line3 anchor-BBB", "line2 middle", "line1 anchor-AAA"].join("\n");
+  // SAFETY: fixture literal built by this test; omitted Approval members are unused by the preview.
   const approval = {
     toolName: "edit",
     args: { path: "notes/order.txt", old_string, new_string },

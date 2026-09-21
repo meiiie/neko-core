@@ -135,6 +135,7 @@ test("scroll-away pill baseline arms on rising edge and ignores sticky-bottom gr
   let st = { armed: false, baseline: 0 };
   st = scrollAwayBaselineOnEdge(true, 40, st); // first scroll-away
   expect(st).toEqual({ armed: true, baseline: 40 });
+  // SAFETY: test-built activity stubs; countNewActivities only reads kind for this assertion.
   expect(countNewActivities([{ kind: "user" } as any, { kind: "assistant" } as any], st.baseline)).toBe(0);
   st = scrollAwayBaselineOnEdge(true, 55, st); // still scrolled; transcript grew below viewport
   expect(st.baseline).toBe(40); // baseline frozen so "N new" can count from 40

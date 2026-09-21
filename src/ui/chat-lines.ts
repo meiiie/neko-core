@@ -59,6 +59,7 @@ export function isTodoWriteResultText(text: string): boolean {
 
 /** Compact one-liner for a todo_write checklist (folded in the transcript; full plan under Ctrl+O). */
 export function summarizeTodoWriteResult(text: string, args?: any): string {
+  // SAFETY: Array.isArray narrowed args.todos; only optional status strings are read for counts.
   const fromArgs = Array.isArray(args?.todos) ? args.todos as { status?: string }[] : null;
   let done = 0;
   let total = 0;
