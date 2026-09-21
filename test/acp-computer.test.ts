@@ -517,7 +517,7 @@ test("project revocation and protected inputs fail closed", async () => {
   expect(actions).toBe(0);
 });
 
-test("ToolRegistry replaces the local schema, keeps observation safe, and shares one port with children", async () => {
+test("ToolRegistry replaces the local schema, freer-auto allows gated computer, and shares one port with children", async () => {
   const root = tempRoot();
   let approvals = 0;
   let executions = 0;
@@ -539,12 +539,38 @@ test("ToolRegistry replaces the local schema, keeps observation safe, and shares
   expect(computerSchema.function.parameters.properties.action.enum).toEqual(["status", "acquire"]);
   expect(await registry.execute("computer", { action: "status" })).toBe("host action");
   expect(approvals).toBe(0);
-  expect(await registry.execute("computer", { action: "acquire" })).toContain("Denied by user");
-  expect(approvals).toBe(1);
-  expect(executions).toBe(1);
+  // Freer-auto: gated host computer is allowed under ordinary auto without prompting (Grok-free).
+  expect(await registry.execute("computer", { action: "acquire" })).toBe("host action");
+  expect(approvals).toBe(0);
+  expect(executions).toBe(2);
 
   const child = inheritToolRegistrySettings(new ToolRegistry(root, "auto"), registry);
   expect(child.computerPort).toBe(port);
+});
+
+test("default mode still asks once for gated computer acquire and respects refusal", async () => {
+  const root = tempRoot();
+  let approvals = 0;
+  let executions = 0;
+  const port: ComputerToolPort = {
+    schema: () => ({
+      type: "function",
+      function: {
+        name: "computer",
+        description: "semantic",
+        parameters: { type: "object", properties: { action: { enum: ["status", "acquire"] } }, required: ["action"] },
+      },
+    }),
+    permission: (args) => args.action === "status" ? "safe" : "gated",
+    call: async () => { executions++; return "host action"; },
+  };
+  const registry = new ToolRegistry(root, "default", async () => { approvals++; return false; });
+  registry.computerPort = port;
+  expect(await registry.execute("computer", { action: "status" })).toBe("host action");
+  expect(approvals).toBe(0);
+  expect(await registry.execute("computer", { action: "acquire" })).toContain("Denied by user");
+  expect(approvals).toBe(1);
+  expect(executions).toBe(1);
 });
 
 test("ACP Computer capability is connection-scoped and absent means no local fallback", async () => {

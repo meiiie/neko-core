@@ -8,6 +8,11 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Fixed
 
+- **Stale freer-auto ACP computer fixture.** Residual `acp-computer` test still expected
+  `Denied by user` for gated `computer` `acquire` under product-default `auto`. Freer-auto
+  allows host computer without prompting; `default` still asks once. Aligned the port/schema
+  inheritance test and added an explicit default-mode consent refusal case.
+
 - **Stale freer-auto outside-write tests.** Residual fixtures still expected `Denied by user` for ordinary
   outside `write_file`/`edit` under product-default `auto` (and treated additional-root siblings as denied
   when the gate returned false). Freer-auto allows those host writes without prompting; `default` still
