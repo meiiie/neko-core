@@ -534,7 +534,7 @@ test("TUI --continue restores session.mode (not silent reboot to config auto)", 
       mode: "plan",
       messages: [{ role: "user", content: "stay in plan" }, { role: "assistant", content: "ok" }],
     };
-    const c = render(<ChatApp fullscreen={false} provider={new EchoP() as any} resumedSession={resumed} />);
+    const c = render(<ChatApp fullscreen={false} yolo={false} provider={new EchoP() as any} resumedSession={resumed} />);
     await Bun.sleep(120);
     const frame = strip(c.lastFrame());
     expect(frame).toMatch(/mode restored:\s*plan/i);

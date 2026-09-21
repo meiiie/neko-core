@@ -42,7 +42,7 @@ test("lived product default: omitted mode is auto; write_file silent; computer a
         return { content: "hi", tool_calls: [] };
       }
     }
-    const c = render(<ChatApp fullscreen={false} provider={new Echo() as any} />);
+    const c = render(<ChatApp fullscreen={false} yolo={false} provider={new Echo() as any} />);
     await Bun.sleep(80);
     const frame = strip(c.lastFrame());
     expect(frame).toContain("auto");

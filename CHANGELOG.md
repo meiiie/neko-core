@@ -8,6 +8,12 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Fixed
 
+- **Typecheck P0: edit EOL soft-match + ChatProps `yolo`.** CRLF-normalized `applyUniqueEdit` treated a
+  truthy `EditApplyErr` (ambiguous old_string) as success and then read `.text` — typecheck failed and
+  multi-match under CRLF could throw. Narrow on `ok` before rewriting EOL. Tests that assert product-
+  default `auto` (not explicit `--yolo`) pass `yolo={false}`; not-found edit assert stringifies
+  `execute` output (`string | any[]`).
+
 - **`neko bench gui` ignored CLI `--max-steps`.** Coding/eval benches already took the flag, but the GUI
   long-horizon path called `runGuiTrial` without an override so each task silently kept its built-in
   horizon (16–32). Same honesty class as the HardMix `neko run --max-steps` silent no-op (#62): operators
