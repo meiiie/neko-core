@@ -8,6 +8,13 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Fixed
 
+- **`neko bench gui` ignored CLI `--max-steps`.** Coding/eval benches already took the flag, but the GUI
+  long-horizon path called `runGuiTrial` without an override so each task silently kept its built-in
+  horizon (16–32). Same honesty class as the HardMix `neko run --max-steps` silent no-op (#62): operators
+  who budgeted a higher cap paid for a different run than they asked for. `runGuiBench` now forwards an
+  explicit CLI override; omit the flag to keep per-task horizons (do not silently substitute config
+  `max_steps`).
+
 - **`neko run --max-steps` was a silent no-op.** The flag was parsed and honored by `bench/*`, but
   `neko run` always used config `max_steps` (default **40**). HardMix runners and docs that passed
   `--max-steps 80` never raised the per-round cap. `load()` now applies a bounded CLI override

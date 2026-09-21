@@ -1458,7 +1458,14 @@ async function cmdBench(args: Args): Promise<number> {
     const hard = args.positionals[1] === "hard";
     const suite = hard ? "gui-hard" : "gui";
     console.log(`Running Neko GUI eval${hard ? " (HARD tier)" : ""} against ${cfg.model} (${trials} trial(s)/task, simulated desktop)...`);
-    const report = await runGuiBench(cfg, hard ? { trials, tasks: GUI_HARD_TASKS, suite } : { trials, suite }, (m) => console.log(m));
+    // Honor CLI --max-steps (same class as HardMix `neko run` silent no-op fixed in #62). Per-task
+    // horizons remain when the flag is omitted — do not silently substitute config max_steps.
+    const report = await runGuiBench(cfg, {
+      trials,
+      suite,
+      ...(args.maxSteps !== undefined ? { maxSteps: args.maxSteps } : {}),
+      ...(hard ? { tasks: GUI_HARD_TASKS } : {}),
+    }, (m) => console.log(m));
     console.log("\n" + renderGuiReport(report, suite));
     return 0;
   }

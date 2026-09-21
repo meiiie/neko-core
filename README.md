@@ -134,8 +134,9 @@ neko update <version>        # exact rollback/pin; pauses auto-updates
 ```
 
 `--max-steps <n>` (1..512; config default **40**) raises the per-round agent step cap for `neko run` and
-`neko bench`. It is honored through the same `load()` path as `doctor`/`config` — not a silent no-op on
-`run`. Under `--loop`, hitting the step cap forces at least one closed-loop review even when a required
+`neko bench` (including `bench gui`). For `run`/`doctor`/`config` it is honored through `load()`; for
+`bench gui` an explicit CLI value overrides each task's built-in horizon (omit the flag to keep per-task
+caps). Under `--loop`, hitting the step cap forces at least one closed-loop review even when a required
 artifact file already exists.
 
 Inside the TUI:

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { GUI_HARD_TASKS, GUI_TASKS, GuiWorld, guiTask, renderGuiReport, runGuiTrial } from "../src/adapters/gui-eval.ts";
+import { GUI_HARD_TASKS, GUI_TASKS, GuiWorld, guiTask, renderGuiReport, runGuiBench, runGuiTrial } from "../src/adapters/gui-eval.ts";
 
 // A provider that replays a fixed script of responses (no model, no network, no cost) - the same
 // pattern as test/agent.test.ts. Each entry is one agent step; end with an empty-tool-call final.
@@ -458,4 +458,48 @@ test("renderGuiReport: the hard suite is named in the header and the log line", 
   }, "gui-hard");
   expect(out).toContain("HARD tier");
   expect(out).toContain('suite "gui-hard"');
+});
+
+test("runGuiBench honors opts.maxSteps over per-task horizon (HardMix-class CLI honesty)", async () => {
+  // settings-selective built-in cap is 22. Agent may spend one extra complete() on max_steps wrap-up,
+  // so assert the CLI override keeps turns near the override — not near the task horizon.
+  const makeLoop = () => {
+    let turns = 0;
+    return {
+      turns: () => turns,
+      provider: {
+        async complete() {
+          turns++;
+          return computer({ action: "read" });
+        },
+      },
+    };
+  };
+  const capped = makeLoop();
+  const report = await runGuiBench(
+    { model: "scripted", effort: "off" } as any,
+    {
+      trials: 1,
+      tasks: [guiTask("settings-selective")],
+      maxSteps: 3,
+      provider: capped.provider as any,
+      suite: "gui-test",
+    },
+  );
+  expect(report.results).toHaveLength(1);
+  expect(capped.turns()).toBeLessThanOrEqual(4); // 3 + optional wrap
+  expect(report.results[0].steps).toBeLessThanOrEqual(4);
+
+  const uncapped = makeLoop();
+  await runGuiBench(
+    { model: "scripted", effort: "off" } as any,
+    {
+      trials: 1,
+      tasks: [guiTask("settings-selective")],
+      provider: uncapped.provider as any,
+      suite: "gui-test",
+    },
+  );
+  expect(uncapped.turns()).toBeGreaterThan(20); // near task maxSteps 22 (+ wrap)
+  expect(capped.turns()).toBeLessThan(uncapped.turns());
 });

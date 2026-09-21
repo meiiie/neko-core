@@ -541,12 +541,14 @@ export async function runGuiTrial(task: GuiTask, provider: Provider, maxSteps?: 
   }
 }
 
-/** Run the whole GUI eval against the configured model. Each task runs `trials` times (pass@1 is noisy). */
-export async function runGuiBench(cfg: NekoConfig, opts: { trials?: number; tasks?: GuiTask[]; suite?: string } = {}, onProgress?: (msg: string) => void): Promise<GuiReport> {
+/** Run the whole GUI eval against the configured model. Each task runs `trials` times (pass@1 is noisy).
+ * Optional `maxSteps` (CLI `--max-steps`) overrides each task's built-in horizon — same honesty class as
+ * `neko run` after #62. Omit to keep per-task caps. Optional `provider` is a test seam. */
+export async function runGuiBench(cfg: NekoConfig, opts: { trials?: number; tasks?: GuiTask[]; suite?: string; maxSteps?: number; provider?: Provider } = {}, onProgress?: (msg: string) => void): Promise<GuiReport> {
   const trials = Math.max(1, opts.trials ?? 1);
   const tasks = opts.tasks ?? GUI_TASKS;
   const suite = opts.suite ?? "gui";
-  const provider = getProvider(cfg);
+  const provider = opts.provider ?? getProvider(cfg);
   const t0 = Date.now();
   const results: GuiTaskResult[] = [];
   for (const task of tasks) {
@@ -554,7 +556,7 @@ export async function runGuiBench(cfg: NekoConfig, opts: { trials?: number; task
     for (let t = 0; t < trials; t++) {
       onProgress?.(`  ${task.id}${trials > 1 ? ` [${t + 1}/${trials}]` : ""} ...`);
       const ts = Date.now();
-      const r = await runGuiTrial(task, provider);
+      const r = await runGuiTrial(task, provider, opts.maxSteps);
       ms += Date.now() - ts;
       if (r.pass) passes++;
       steps += r.steps; actions += r.actions; misses += r.misses; if (r.violation) violations++;
