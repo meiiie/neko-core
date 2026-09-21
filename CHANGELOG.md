@@ -20,6 +20,12 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **Docs: `--max-steps` now wired for `neko run` (CONT-11).** README Everyday use shows
+  `neko run --loop --max-steps 80`; prose notes the CLI override (1..512; default 40) is honored on
+  `run`/`doctor`/`config` (not a silent no-op). HardMix lived note records that git `a9276e6` A/B still
+  ran under effective cap **40**. Harness architecture documents the step ceiling + `--loop` max_steps
+  review guard shipped in #62.
+
 - **README freer-auto HardMix get-started (CONT-POST-ARTICLE).** Install/get-started points at product-default
   `auto` before `--yolo`; Everyday use comments mark headless freer-auto seatbelt denials. Permissions adds
   lived HardMix-12 same-SHA A/B (auto **12/12** vs yolo **11/12**, glm-5.3, git `a9276e6`) with recovery /

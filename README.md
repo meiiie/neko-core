@@ -124,7 +124,7 @@ neko --yolo                  # skip remaining approval waits; hard seatbelts sti
 neko --always-approve        # synonym of --yolo (Grok Always-approve map; Ctrl+O stays expand)
 neko --resume                # resume the latest session in this folder
 neko run "fix the failing tests"          # headless freer-auto; destructive bash still seatbelt-denies
-neko run --loop "finish the migration and verify it"
+neko run --loop --max-steps 80 "finish the migration and verify it"
 neko bench contract hard --trials 3 --call-budget 24
 neko bench campaign frontier --profiles zai,bai --trials 3 --call-budget 24
 neko acp                     # ACP v1 server for Zed, JetBrains, and other clients
@@ -132,6 +132,11 @@ neko acp --host-profile nekocut # exclusive six-tool embedding profile for NekoC
 neko update                  # install latest and resume auto-updates
 neko update <version>        # exact rollback/pin; pauses auto-updates
 ```
+
+`--max-steps <n>` (1..512; config default **40**) raises the per-round agent step cap for `neko run` and
+`neko bench`. It is honored through the same `load()` path as `doctor`/`config` — not a silent no-op on
+`run`. Under `--loop`, hitting the step cap forces at least one closed-loop review even when a required
+artifact file already exists.
 
 Inside the TUI:
 
@@ -165,8 +170,9 @@ project trust, credential/system path protection, catastrophic-shell refusal, or
 git `a9276e6`: product-default **auto** (no `--yolo`) scored **12/12** pass@1; same-SHA `--yolo` scored
 **11/12** (sole miss `regex-chess`, model/task correctness — not a seatbelt deny). Under freer auto,
 destructive-bash seatbelts denied some `rm`/`rm -rf` batches on 9/12 tasks; the agent recovered
-(rewrite without delete / split steps) and still passed. Single trial; not a Claude/Grok classifier claim;
-prior 7/12 yolo used an older eval binary and is historical only. Write-up:
+(rewrite without delete / split steps) and still passed. Runners passed `--max-steps 80`, but at that SHA
+`neko run` still used config default **40** (silent no-op; fixed on main). Single trial; not a
+Claude/Grok classifier claim; prior 7/12 yolo used an older eval binary and is historical only. Write-up:
 [Freer Auto 12, YOLO 11. Same Binary.](https://x.com/MeiiieAI/status/2101865385167372288)
 
 Shell and CLI work runs directly through the current host Bash by default; on Windows its child console stays
