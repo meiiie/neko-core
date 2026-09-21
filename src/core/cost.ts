@@ -83,8 +83,8 @@ export class CostTracker {
 
   /** Restore counters after --continue / /resume (ACP + TUI). Rejects malformed snapshots. */
   restore(snap: CostSnapshot | undefined | null): void {
-    if (!snap || typeof snap !== "object") return;
-    const n = (value: unknown): number | null => {
+    if (snap == null) return;
+    const n = (value: number): number | null => {
       const v = Number(value);
       return Number.isSafeInteger(v) && v >= 0 ? v : null;
     };

@@ -48,7 +48,7 @@ import { isForegroundValidatorOnlyCommand, isProtectedDifferentialValidator, isV
 import { runDiskCleanupScan } from "./disk-cleanup.ts";
 import { runNetworkProbe } from "./network-probe.ts";
 
-import { isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
+import { isJsonObject, isObjectValue, isText, type WireValue } from "../shared/wire.ts";
 
 export { deniedCredentialPath as deniedOutsideRoot } from "./read-policy.ts";
 
@@ -2249,8 +2249,8 @@ function rebaseSoftMatchIndent(fileLines: string[], newLines: string[]): string[
  * (unless strict) whitespace-tolerant unique line match. Shared by edit + multi_edit. */
 function applyUniqueEdit(
   text: string,
-  oldStrRaw: unknown,
-  newStrRaw: unknown,
+  oldStrRaw: WireValue,
+  newStrRaw: WireValue,
   opts: { strict?: boolean; label?: string } = {},
 ): EditApplyResult {
   const label = opts.label ? `${opts.label}: ` : "";

@@ -92,6 +92,9 @@ export function isTrivialContextLine(line: string): boolean {
   return t === "" || t === "{" || t === "}" || t === "};" || t === ");" || t === "]" || t === "],";
 }
 
+/** Inclusive [from, to) span into a shared diff context region. */
+type ContextSpan = { from: number; to: number };
+
 /** Widen a kept context window into the shared region until it includes a non-trivial line. */
 function widenContext(
   lines: string[],
@@ -99,7 +102,7 @@ function widenContext(
   to: number,
   toward: "head" | "tail",
   maxExtra = 6,
-): { from: number; to: number } {
+): ContextSpan {
   let a = from;
   let b = to;
   const trivial = () => {
@@ -128,18 +131,21 @@ function widenContext(
  * fully dropped beyond that kept context. When the naive kept window is only trivial braces /
  * blanks, widen into the shared region so append approvals show a meaningful anchor (e.g.
  * `return n;` above `}`, not `}` alone). */
-export function elideCommonEnds(
-  oldText: string,
-  newText: string,
-  ctx = 1,
-): {
+/** Result of collapsing shared head/tail lines out of an approval diff. */
+export type ElidedDiff = {
   oldText: string;
   newText: string;
   elidedHead: number;
   elidedTail: number;
   headContext: string;
   tailContext: string;
-} {
+};
+
+export function elideCommonEnds(
+  oldText: string,
+  newText: string,
+  ctx = 1,
+): ElidedDiff {
   const empty = {
     oldText: String(oldText ?? ""),
     newText: String(newText ?? ""),

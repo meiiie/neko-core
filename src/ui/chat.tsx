@@ -261,7 +261,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           })));
       out.push({ id: idRef.current++, kind: "info", text: `(resumed ${resumedRef.current.id} - ${resumedRef.current.messages.length} messages)` });
       const savedMode = resumedRef.current.mode;
-      if (typeof savedMode === "string" && isMode(savedMode) && savedMode !== cfg.mode && !yolo) {
+      if (isMode(savedMode) && savedMode !== cfg.mode && !yolo) {
         out.push({ id: idRef.current++, kind: "info", text: `mode restored: ${savedMode} — ${modeDetail(savedMode)} (session; config default is ${cfg.mode})` });
       }
       const left = recoverTodos(resumedRef.current.messages).filter((t) => t.status !== "completed").length;
@@ -385,7 +385,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Shift+Tab to plan/default silently vanished under --continue (lived UX-3 trust/clarity).
   const resumedMode = resumedRef.current?.mode;
   const [mode, setMode] = useState<PermissionMode>(
-    yolo ? "auto" : (typeof resumedMode === "string" && isMode(resumedMode) ? resumedMode : cfg.mode),
+    yolo ? "auto" : (isMode(resumedMode) ? resumedMode : cfg.mode),
   );
   const modeRef = useRef<PermissionMode>(mode);
   useEffect(() => {
@@ -500,7 +500,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   }, [approval, busy, compacting, inflight, overlay, queued, step, todos]);
 
   const addLine = (kind: LineKind, text: string, summary?: string, mirror = true, failed = false) => {
-    const line: Line = { id: idRef.current++, kind, text, summary, ...(failed ? { failed: true } : {}) };
+    const line: Line = { id: idRef.current++, kind, text, summary };
+    if (failed) line.failed = true;
     // A streamed answer is rich Markdown before commit. Prime its final rows now so fullscreen never
     // flashes the cheap raw-markdown fallback while the asynchronous cache warmer catches up.
     if (fullscreenRef.current && (kind === "assistant" || kind === "user")) primeAnsiCache(line, contentColsRef.current, cfg);
@@ -658,7 +659,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   const registryRef = useRef<ToolRegistry | null>(null);
   if (!registryRef.current) {
-    const baseRegistry = new ToolRegistry(process.cwd(), yolo ? "auto" : (typeof resumedRef.current?.mode === "string" && isMode(resumedRef.current.mode) ? resumedRef.current.mode : cfg.mode), gate, mcpHub);
+    const baseRegistry = new ToolRegistry(process.cwd(), yolo ? "auto" : (isMode(resumedRef.current?.mode) ? resumedRef.current.mode : cfg.mode), gate, mcpHub);
     baseRegistry.explicitYolo = yolo;
     registryRef.current = configureToolRegistry(
       baseRegistry,
@@ -1044,7 +1045,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const exitMode: PlanExitMode | undefined = current.toolName === "exit_plan_mode" && kind !== "no"
       ? (planExitMode ?? "accept-edits")
       : undefined;
-    const flash: ApprovalFlash = { kind, tool: current.toolName, ...(exitMode ? { planExitMode: exitMode } : {}) };
+    const flash: ApprovalFlash = { kind, tool: current.toolName };
+    if (exitMode) flash.planExitMode = exitMode;
     approvalFlashRef.current = flash;
     setApprovalFlash(flash);
     setApprovalHint(null);
