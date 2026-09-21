@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { Box } from "ink";
 
@@ -100,10 +103,14 @@ test("write_file create preview omits phantom blank + from trailing newline", ()
 });
 
 test("write_file overwrite preview shows red removal vs existing workspace file", () => {
-  const dir = "/workspace/research/neko-ux-playground/raise-bar-6";
+  // Lived raise-bar-6: overwrite must paint prior bytes as removal. Fixture is self-contained —
+  // never chdir into a host playground path (CI runners do not have /workspace/research/...).
+  const dir = mkdtempSync(join(tmpdir(), "neko-approval-ow-"));
   const prev = process.cwd();
-  process.chdir(dir);
   try {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/greet.js"), 'export function greet(name){ return "hi "+name; }\n');
+    process.chdir(dir);
     const content = 'export function greet(name){ return "hello "+name; }\n';
     // SAFETY: fixture literal built by this test; omitted Approval members are unused by the preview.
     const approval = { toolName: "write_file", args: { path: "src/greet.js", content }, resolve: () => {} } as Approval;
@@ -121,6 +128,7 @@ test("write_file overwrite preview shows red removal vs existing workspace file"
     c.unmount();
   } finally {
     process.chdir(prev);
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
