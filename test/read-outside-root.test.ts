@@ -42,7 +42,7 @@ test("the same read is refused when the host closes the wall", async () => {
   }
 });
 
-test("writing outside the root asks once and respects refusal, allowed reads or not", async () => {
+test("auto freer-auto allows outside writes without prompting while reads stay open", async () => {
   const { root, outside, clean } = workspace();
   try {
     let prompts = 0;
@@ -54,7 +54,28 @@ test("writing outside the root asks once and respects refusal, allowed reads or 
     ] as const) {
       // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
       const result = await registry.execute(call[0], call[1] as any);
-      expect(String(result)).toContain("Denied by user"); // ...and writes need exact consent
+      expect(String(result)).toMatch(/Wrote|Edited/); // ...and freer-auto allows ordinary outside writes
+    }
+    expect(prompts).toBe(0);
+    expect(readFileSync(join(outside, "SKILL.md"), "utf8")).toContain("a no living somewhere else");
+  } finally {
+    clean();
+  }
+});
+
+test("default mode still asks once for outside writes and respects refusal", async () => {
+  const { root, outside, clean } = workspace();
+  try {
+    let prompts = 0;
+    const registry = new ToolRegistry(root, "default", () => { prompts++; return false; });
+    expect(registry.readOutsideRoot).toBe(true);
+    for (const call of [
+      ["write_file", { path: join(outside, "new.txt"), content: "no" }],
+      ["edit", { path: join(outside, "SKILL.md"), old_string: "skill", new_string: "no" }],
+    ] as const) {
+      // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
+      const result = await registry.execute(call[0], call[1] as any);
+      expect(String(result)).toContain("Denied by user");
     }
     expect(prompts).toBe(2);
     expect(readFileSync(join(outside, "SKILL.md"), "utf8")).toContain("a skill living somewhere else");
@@ -63,7 +84,7 @@ test("writing outside the root asks once and respects refusal, allowed reads or 
   }
 });
 
-test("an explicit additional root allows structured writes without granting its siblings or aliases", async () => {
+test("an explicit additional root admits structured writes; freer-auto also allows ordinary sibling host writes; aliases still refuse", async () => {
   const { root, outside, clean } = workspace();
   const sibling = join(dirname(outside), "not-granted");
   try {
@@ -82,10 +103,13 @@ test("an explicit additional root allows structured writes without granting its 
     })).toContain("Edited");
     expect(readFileSync(join(outside, "notes.md"), "utf8")).toBe("three\n");
 
+    // Freer-auto also allows ordinary sibling host writes (grant is not a deny-list).
+    // The grant still matters for sandbox / default-mode capability; sibling succeeds via hostWrite.
     expect(String(await registry.execute("write_file", {
-      path: join(sibling, "blocked.txt"), content: "no",
-    }))).toContain("Denied by user");
-    expect(prompts).toBe(1);
+      path: join(sibling, "sibling-ok.txt"), content: "yes",
+    }))).toContain("Wrote");
+    expect(prompts).toBe(0);
+    expect(readFileSync(join(sibling, "sibling-ok.txt"), "utf8")).toBe("yes");
     expect(String(await registry.execute("write_file", {
       path: join(outside, ".env"), content: "SECRET=no",
     }))).toContain("refused");
