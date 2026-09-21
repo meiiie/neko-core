@@ -25,9 +25,8 @@ export const MODES: { mode: PermissionMode; label: string; detail: string }[] = 
 const MODE_ORDER: PermissionMode[] = ["default", "accept-edits", "plan", "auto"];
 const EDIT_TOOLS = new Set(["write_file", "edit", "multi_edit"]);
 
-export function isMode(value: string): value is PermissionMode {
-  // SAFETY: value was just membership-checked against the mode list.
-  return MODE_ORDER.includes(value as PermissionMode);
+export function isMode(value: any): value is PermissionMode {
+  return value === "default" || value === "accept-edits" || value === "plan" || value === "auto";
 }
 
 export function decide(

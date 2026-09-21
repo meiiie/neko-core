@@ -858,7 +858,7 @@ test("runUntilDone exitWhenIdle keeps reviewing after a max_steps wrap-up even w
         async complete(messages: any[]) {
           calls++;
           const last = messages[messages.length - 1];
-          const text = typeof last?.content === "string" ? last.content : "";
+          const text = isText(last?.content) ? last.content : "";
           // Wrap-up prompt + later review rounds: claim DONE (artifact already on disk).
           if (/Step limit/i.test(text) || calls > 3) {
             return { content: "DONE", tool_calls: [] };

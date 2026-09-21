@@ -11,21 +11,21 @@
  */
 export type ChromeKind = "warn" | "ok" | "deny" | "mode" | "tree";
 
-const UNICODE: Record<ChromeKind, string> = {
+const UNICODE = {
   warn: "⚠",
   ok: "✓",
   deny: "✗",
   mode: ">>", // was U+23F5 ⏵⏵ — missing on thin Linux CSR fonts → literal ??
   tree: "└",
-};
+} satisfies Record<ChromeKind, string>;
 
-const ASCII: Record<ChromeKind, string> = {
+const ASCII = {
   warn: "!",
   ok: "+",
   deny: "X",
   mode: ">>",
   tree: "|-",
-};
+} satisfies Record<ChromeKind, string>;
 
 /** True when chrome should use the ASCII map. Pure env/locale — no Config import (UI leaf). */
 export function useAsciiChrome(env: NodeJS.ProcessEnv = process.env): boolean {

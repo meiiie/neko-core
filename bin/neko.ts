@@ -1463,8 +1463,8 @@ async function cmdBench(args: Args): Promise<number> {
     const report = await runGuiBench(cfg, {
       trials,
       suite,
-      ...(args.maxSteps !== undefined ? { maxSteps: args.maxSteps } : {}),
-      ...(hard ? { tasks: GUI_HARD_TASKS } : {}),
+      ...(args.maxSteps !== undefined ? { maxSteps: args.maxSteps } : undefined),
+      ...(hard ? { tasks: GUI_HARD_TASKS } : undefined),
     }, (m) => console.log(m));
     console.log("\n" + renderGuiReport(report, suite));
     return 0;

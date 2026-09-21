@@ -111,11 +111,13 @@ export function countNewActivities(lines: Line[], from = 0): number {
  * Capture lines.length synchronously when reading mode engages so the first painted frame never
  * counts the whole transcript (or activity that landed while sticky-bottom) as "new". A useEffect
  * baseline runs after paint and flashed a phantom count. */
+export type ScrollAwayBaseline = { armed: boolean; baseline: number };
+
 export function scrollAwayBaselineOnEdge(
   scrolled: boolean,
   linesLength: number,
-  prev: { armed: boolean; baseline: number },
-): { armed: boolean; baseline: number } {
+  prev: ScrollAwayBaseline,
+): ScrollAwayBaseline {
   if (!scrolled) return { armed: false, baseline: prev.baseline };
   if (prev.armed) return prev;
   return { armed: true, baseline: linesLength };

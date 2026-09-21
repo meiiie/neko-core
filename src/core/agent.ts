@@ -661,7 +661,7 @@ export class Agent {
     if (name !== "bash") return;
     const command = String(call.arguments?.command ?? "").trim().replace(/\s+/g, " ");
     if (!command) return;
-    const textObs = typeof observation === "string" ? observation : "";
+    const textObs = isText(observation) ? observation : "";
     const failed = /^\(exit [1-9]\d* -- command FAILED\)/m.test(textObs)
       || /\(exit [1-9]\d* -- command FAILED\)/.test(textObs)
       || Agent.isFailedRunResult(observation);
