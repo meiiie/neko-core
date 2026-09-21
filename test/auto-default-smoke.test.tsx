@@ -42,6 +42,7 @@ test("lived product default: omitted mode is auto; write_file silent; computer a
         return { content: "hi", tool_calls: [] };
       }
     }
+    // SAFETY: test-built Echo provider; complete() returns the fixed shape this smoke needs.
     const c = render(<ChatApp fullscreen={false} yolo={false} provider={new Echo() as any} />);
     await Bun.sleep(80);
     const frame = strip(c.lastFrame());

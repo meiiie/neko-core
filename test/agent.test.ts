@@ -804,6 +804,7 @@ test("rewind drops the last user turn from context", () => {
 test("run continues after provider truncated=true instead of treating empty/partial as final", async () => {
   let calls = 0;
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: {
       async complete() {
         calls++;
@@ -823,6 +824,7 @@ test("run continues after provider truncated=true instead of treating empty/part
 test("runUntilDone exitWhenIdle stops like --once when idle, verified, and no pending tools", async () => {
   let calls = 0;
   const agent = new Agent({
+    // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: {
       async complete() {
         calls++;
@@ -851,6 +853,7 @@ test("runUntilDone exitWhenIdle keeps reviewing after a max_steps wrap-up even w
     writeFileSync(join(root, "re.json"), "[]");
     let calls = 0;
     const agent = new Agent({
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       provider: {
         async complete(messages: any[]) {
           calls++;
@@ -886,6 +889,7 @@ test("runUntilDone exitWhenIdle keeps reviewing while required artifacts are mis
     let calls = 0;
     const registry = new ToolRegistry(root, "auto", () => true);
     const agent = new Agent({
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       provider: {
         async complete() {
           calls++;
@@ -918,6 +922,7 @@ test("runUntilDone exitWhenIdle keeps reviewing after failed bash until checks c
       return original(name, args, signal);
     };
     const agent = new Agent({
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       provider: {
         async complete() {
           calls++;
@@ -950,6 +955,7 @@ test("runUntilDone exitWhenIdle keeps reviewing while verification debt remains"
     let calls = 0;
     const registry = new ToolRegistry(root, "auto", () => true);
     const agent = new Agent({
+      // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
       provider: {
         async complete() {
           calls++;

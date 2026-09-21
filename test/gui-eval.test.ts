@@ -477,11 +477,13 @@ test("runGuiBench honors opts.maxSteps over per-task horizon (HardMix-class CLI 
   };
   const capped = makeLoop();
   const report = await runGuiBench(
+    // SAFETY: test-built bench model stub; only model/effort fields are read by runGuiBench.
     { model: "scripted", effort: "off" } as any,
     {
       trials: 1,
       tasks: [guiTask("settings-selective")],
       maxSteps: 3,
+      // SAFETY: test-built scripted provider; complete() loop is fully controlled by this test.
       provider: capped.provider as any,
       suite: "gui-test",
     },
@@ -492,10 +494,12 @@ test("runGuiBench honors opts.maxSteps over per-task horizon (HardMix-class CLI 
 
   const uncapped = makeLoop();
   await runGuiBench(
+    // SAFETY: test-built bench model stub; only model/effort fields are read by runGuiBench.
     { model: "scripted", effort: "off" } as any,
     {
       trials: 1,
       tasks: [guiTask("settings-selective")],
+      // SAFETY: test-built scripted provider; complete() loop is fully controlled by this test.
       provider: uncapped.provider as any,
       suite: "gui-test",
     },

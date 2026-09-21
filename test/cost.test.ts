@@ -108,6 +108,7 @@ test("effectiveContextTokens prefers the larger of provider last-prompt and loca
   expect(effectiveContextTokens(53, 12_000)).toBe(12_000);
   expect(effectiveContextTokens(20_000, 12_000)).toBe(20_000);
   expect(effectiveContextTokens(0, 0)).toBe(0);
+  // SAFETY: deliberately invalid numeric wire input; NaN must fall through to the estimate.
   expect(effectiveContextTokens(Number.NaN as any, 100)).toBe(100);
 });
 
@@ -130,6 +131,7 @@ test("CostTracker snapshot round-trips through restore for session resume", () =
   const fresh = new CostTracker();
   fresh.restore(snap);
   expect(fresh.snapshot()).toEqual(snap);
+  // SAFETY: deliberately malformed snapshot; restore must ignore negative promptTokens.
   fresh.restore({ ...snap, promptTokens: -1 } as any); // malformed: ignored
   expect(fresh.promptTokens).toBe(2100);
   fresh.restore(null);
