@@ -1446,7 +1446,8 @@ export class ToolRegistry {
     }
     // Read-only preflight for edit/multi_edit: a known old_string mismatch never reaches the
     // approval prompt (or burns a yes that then fails with "old_string not found").
-    if ((name === "edit" || name === "multi_edit") && (decision === "prompt" || decision === "allow")) {
+    // Skip when a native backend owns the tool — the file lives remotely; host mkdtemp has nothing.
+    if (!nativeBackend && (name === "edit" || name === "multi_edit") && (decision === "prompt" || decision === "allow")) {
       const mismatch = preflightEditArgs(this.root, name, args, {
         additionalWriteRoots: this.additionalWriteRoots,
         allowHostWrites: hostWrite,

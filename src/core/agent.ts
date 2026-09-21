@@ -344,7 +344,11 @@ export class Agent {
       };
     }
     
-    const artifactDebt = this.missingClosedLoopArtifacts();
+    // A passing independent contract review already verified criteria; do not fail closed on a
+    // host-path artifact scan (same authority that clears outcome_unverified in runUntilDone).
+    const artifactDebt = this.completionContractState?.lastReview?.verdict === "pass"
+      ? []
+      : this.missingClosedLoopArtifacts();
     if (artifactDebt.length) {
       return {
         ok: false,
@@ -845,14 +849,18 @@ export class Agent {
             this.emit("completion_recheck", { revision: contract.revision, reason: "inconclusive_measurement" });
           }
           if (!review) throw new Error("completion validator produced no review");
+          // Independent supervisor pass resolves outcome_unverified without replaying mutations.
+          // Do this before completionStatus: HardMix host artifact scans must not block a
+          // criterion-level pass (fixtures / remote workspaces may lack the host path).
           const independentlyVerified = this.unverifiedState && review.verdict === "pass";
-          if (independentlyVerified) this.unverifiedState = false;
+          if (independentlyVerified) {
+            this.unverifiedState = false;
+            this.emit("completion_phase", { phase: "finalization" });
+            return this.recordFinal("Independent verification passed for the current artifact revision; all completion criteria are satisfied.");
+          }
           const validation = this.completionStatus;
           if (review.verdict === "pass" && validation.ok) {
             this.emit("completion_phase", { phase: "finalization" });
-            if (independentlyVerified) {
-              return this.recordFinal("Independent verification passed for the current artifact revision; all completion criteria are satisfied.");
-            }
             return out;
           }
           if (review.verdict === "blocked" || i === maxIters - 1
