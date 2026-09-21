@@ -8,6 +8,12 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Fixed
 
+- **Stale freer-auto outside-write tests.** Residual fixtures still expected `Denied by user` for ordinary
+  outside `write_file`/`edit` under product-default `auto` (and treated additional-root siblings as denied
+  when the gate returned false). Freer-auto allows those host writes without prompting; `default` still
+  asks once; policy `~/.neko-core/config.json` stays consent-gated. Aligned `tool-runtime`,
+  `read-outside-root`, and `policy-config-write` tests + file header.
+
 - **Typecheck P0: edit EOL soft-match + ChatProps `yolo`.** CRLF-normalized `applyUniqueEdit` treated a
   truthy `EditApplyErr` (ambiguous old_string) as success and then read `.text` — typecheck failed and
   multi-match under CRLF could throw. Narrow on `ok` before rewriting EOL. Tests that assert product-

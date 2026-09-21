@@ -223,14 +223,15 @@ test("edit unique / not found / ambiguous", async () => {
   expect(await reg.execute("edit", { path: "a.ts", old_string: "const ", new_string: "let " })).toContain("times");
 });
 
-test("outside writes need consent while reads remain the host's call", async () => {
+test("auto freer-auto allows outside writes without prompting; reads remain the host's call", async () => {
   let prompts = 0;
   const { reg } = makeReg("auto", () => { prompts++; return false; });
-  expect(await reg.execute("write_file", { path: "../neko-no-consent-outside", content: "no" })).toContain("Denied by user");
-  expect(prompts).toBe(1);
+  // Product-default auto (Grok-free): ordinary outside structured writes do not consult the gate.
+  expect(await reg.execute("write_file", { path: "../neko-no-consent-outside", content: "no" })).toContain("Wrote");
+  expect(prompts).toBe(0);
   // Reads do by default — the wall around them stopped ordinary work (a skill file one directory over)
   // without bounding any damage. Full coverage in test/read-outside-root.test.ts.
-  expect(await reg.execute("read_file", { path: "../neko-no-consent-outside" })).toContain("no such file");
+  expect(await reg.execute("read_file", { path: "../neko-no-consent-outside" })).toContain("no");
   reg.readOutsideRoot = false;
   expect(await reg.execute("read_file", { path: "../neko-no-consent-outside" })).toContain("escapes project root");
 });
