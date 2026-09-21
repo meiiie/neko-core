@@ -187,7 +187,7 @@ test("edit not-found error tells the model to re-read exact bytes", async () => 
   const out = await reg.execute("edit", { path: "miss.ts", old_string: "nope", new_string: "x" });
   expect(out).toContain("old_string not found");
   expect(out).toContain("Re-read the file");
-  expect(out.toLowerCase()).toContain("no change written");
+  expect(String(out).toLowerCase()).toContain("no change written");
 });
 
 test("edit reports an ambiguous whitespace match instead of guessing", async () => {

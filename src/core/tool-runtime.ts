@@ -2305,22 +2305,19 @@ function applyUniqueEdit(
     if (normText !== text || normOld !== oldStr) {
       const normExact = tryExact(normText, normOld, normNew);
       if (normExact) {
+        // tryExact returns a truthy EditApplyErr on multi-match; do not treat that as success.
+        if (!normExact.ok) return normExact;
         // Preserve original EOL style when rewriting the whole buffer.
         if (fileEol !== "\n") {
           return {
-            ...normExact,
+            ok: true,
             text: normExact.text.split("\n").join(fileEol),
+            startLine: normExact.startLine,
             removed: normExact.removed,
             added: normExact.added,
           };
         }
         return normExact;
-      }
-      if (normExact === null && countOccurrences(normText, normOld) > 1) {
-        return {
-          ok: false,
-          error: `Error: ${label}old_string occurs ${countOccurrences(normText, normOld)} times, not unique (add more surrounding context; no change written)`,
-        };
       }
     }
   } else {
