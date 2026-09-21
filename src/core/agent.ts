@@ -291,6 +291,9 @@ export class Agent {
   private closedLoopGoal = "";
   /** Recent non-zero bash/test command summaries; cleared on an authoritative passing validator. */
   private recentFailedChecks: string[] = [];
+  /** Set when the active implementer round hit max_steps. Consumed by exitWhenIdle so a step-cap
+   * wrap-up cannot look "idle + verified" merely because a required artifact file already exists. */
+  private hitMaxSteps = false;
 
   constructor(opts: AgentOptions) {
     this.provider = opts.provider;
@@ -620,6 +623,12 @@ export class Agent {
   /** Headless `--loop` should match `--once` once the turn is idle, verified, and free of pending tools. */
   private shouldExitClosedLoopWhenIdle(out: string): boolean {
     if (!out.trim()) return false;
+    // A max_steps wrap-up is not a verified finish — keep reviewing under --loop / exitWhenIdle
+    // even when an artifact file already exists (HardMix regex-chess yolo A/B: broken re.json).
+    if (this.hitMaxSteps) {
+      this.hitMaxSteps = false;
+      return false;
+    }
     if (!this.completionStatus.ok) return false;
     if (this.hasPendingClosedLoopWork()) return false;
     // Artifact gate + unresolved failed checks are folded into completionStatus.ok above
@@ -708,6 +717,7 @@ export class Agent {
     const exitWhenIdle = Boolean(opts.exitWhenIdle);
     this.closedLoopGoal = goal;
     this.recentFailedChecks = [];
+    this.hitMaxSteps = false;
     const outerTurnSystemContext = this.turnSystemContext;
     const projectContract = (contract: CompletionContract) => {
       this.turnSystemContext = [
@@ -1773,6 +1783,7 @@ export class Agent {
 
     // Request one tool-less wrap-up after the step limit.
     if (this.runUntilDoneActive) this.emit("completion_phase", { phase: "finalization" });
+    this.hitMaxSteps = true;
     this.emit("max_steps", runStepLimit);
     let final: string;
     try {

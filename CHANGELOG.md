@@ -6,6 +6,18 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`neko run --max-steps` was a silent no-op.** The flag was parsed and honored by `bench/*`, but
+  `neko run` always used config `max_steps` (default **40**). HardMix runners and docs that passed
+  `--max-steps 80` never raised the per-round cap. `load()` now applies a bounded CLI override
+  (1..512) so `run` and `doctor`/`config` see the same value. Surfaced by HardMix same-SHA yolo A/B
+  `regex-chess` (`NEKO-REGEX-CHESS-AB-2026-09-21`).
+
+- **`--loop` / exitWhenIdle no longer treats a max_steps wrap-up as verified idle.** Hitting the
+  step cap now forces at least one closed-loop review even when a required artifact file already
+  exists (avoids stopping on a broken `re.json` that merely satisfied the non-empty artifact gate).
+
 ### Changed
 
 - **README freer-auto HardMix get-started (CONT-POST-ARTICLE).** Install/get-started points at product-default

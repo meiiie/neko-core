@@ -845,6 +845,40 @@ test("runUntilDone exitWhenIdle stops like --once when idle, verified, and no pe
   expect(agent.completionStatus.ok).toBe(true);
 });
 
+test("runUntilDone exitWhenIdle keeps reviewing after a max_steps wrap-up even when artifacts exist", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-exit-idle-maxsteps-"));
+  try {
+    writeFileSync(join(root, "re.json"), "[]");
+    let calls = 0;
+    const agent = new Agent({
+      provider: {
+        async complete(messages: any[]) {
+          calls++;
+          const last = messages[messages.length - 1];
+          const text = typeof last?.content === "string" ? last.content : "";
+          // Wrap-up prompt + later review rounds: claim DONE (artifact already on disk).
+          if (/Step limit/i.test(text) || calls > 3) {
+            return { content: "DONE", tool_calls: [] };
+          }
+          return {
+            content: null,
+            tool_calls: [{ id: `c${calls}`, name: "read_file", arguments: { path: "re.json" } }],
+          };
+        },
+      } as any,
+      tools: new ToolRegistry(root, "auto", () => true),
+      maxSteps: 2,
+    });
+    await agent.runUntilDone("Write re.json with a JSON array and reply DONE when finished.", {
+      maxIters: 3,
+      exitWhenIdle: true,
+    });
+    // Must not stop after the first max_steps wrap-up solely because re.json exists.
+    expect(calls).toBeGreaterThan(3);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("runUntilDone exitWhenIdle keeps reviewing while required artifacts are missing", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-exit-idle-artifacts-"));
