@@ -144,6 +144,13 @@ function parseArgs(argv: string[]): Args {
 function load(args: Args): NekoConfig {
   const cfg = loadConfig({ profile: args.profile });
   if (args.yolo) cfg.data.mode = "auto";
+  // Honor CLI --max-steps for `neko run` (and any other load() path). Previously the flag was
+  // parsed and used by bench/* only; run always fell through to config default max_steps=40,
+  // so HardMix `neko run --loop --max-steps 80` was a silent no-op.
+  if (args.maxSteps !== undefined) {
+    const n = Math.floor(Number(args.maxSteps));
+    if (Number.isSafeInteger(n) && n >= 1 && n <= 512) cfg.data.max_steps = n;
+  }
   return cfg;
 }
 
@@ -275,6 +282,7 @@ Options:
   --yolo, --always-approve  disable approval prompts while mode stays auto (Grok Always-approve synonym); hard seatbelts remain; Ctrl+O stays expand-output
   --loop             closed loop until done; exits like --once when idle/verified/no pending tools
   --once             force a single-shot run (overrides config "auto_loop": true)
+  --max-steps <n>    (run|bench) per-round agent step cap; overrides config max_steps (default 40; 1..512)
   --trials <n>       (bench) repeated independent trials per fixed task
   --call-budget <n>  (bench contract) equal provider-call cap per task trial in both variants
   --profiles <a,b>   (bench campaign) comma-separated named provider profiles
