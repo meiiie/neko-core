@@ -70,6 +70,13 @@ neko
 Then use `/login`, choose a provider and an authentication route, and use `/model` to select from the
 catalog available to that account. `neko doctor` performs read-only setup diagnostics.
 
+**Get started under freer auto.** Product-default `auto` is the path to try first: coding tools, outside
+writes, and computer run without routine prompts; workspace-destructive bash still asks (interactive) or
+seatbelt-denies with a recoverable observation (`neko run`). Reach for `--yolo` / `--always-approve` only
+when you intentionally want remaining prompts skipped for that launch — HardMix evidence shows freer auto
+can finish hard headless work with seatbelts on. See [Permissions](#permissions-and-sandboxing) and the
+[freer-auto HardMix write-up](https://x.com/MeiiieAI/status/2101865385167372288).
+
 ## Provider routes
 
 Neko keeps account subscriptions and pay-as-you-go API billing visibly separate.
@@ -112,11 +119,11 @@ neko login cline api <key>
 ## Everyday use
 
 ```bash
-neko                         # interactive TUI
-neko --yolo                  # no approval waits; hard seatbelts still apply
+neko                         # interactive TUI (product-default auto)
+neko --yolo                  # skip remaining approval waits; hard seatbelts still apply
 neko --always-approve        # synonym of --yolo (Grok Always-approve map; Ctrl+O stays expand)
 neko --resume                # resume the latest session in this folder
-neko run "fix the failing tests"
+neko run "fix the failing tests"          # headless freer-auto; destructive bash still seatbelt-denies
 neko run --loop "finish the migration and verify it"
 neko bench contract hard --trials 3 --call-budget 24
 neko bench campaign frontier --profiles zai,bai --trials 3 --call-budget 24
@@ -153,6 +160,14 @@ opt-in (`"sandbox": true`). Seatbelts are not confinement.
 
 `--yolo` / `--always-approve` remove remaining approval waits for the current launch, but do not disable
 project trust, credential/system path protection, catastrophic-shell refusal, or validation.
+
+**HardMix freer-auto (lived).** On Terminal-Bench 2.1 HardMix-12 with glm-5.3 (z.ai), same binary /
+git `a9276e6`: product-default **auto** (no `--yolo`) scored **12/12** pass@1; same-SHA `--yolo` scored
+**11/12** (sole miss `regex-chess`, model/task correctness — not a seatbelt deny). Under freer auto,
+destructive-bash seatbelts denied some `rm`/`rm -rf` batches on 9/12 tasks; the agent recovered
+(rewrite without delete / split steps) and still passed. Single trial; not a Claude/Grok classifier claim;
+prior 7/12 yolo used an older eval binary and is historical only. Write-up:
+[Freer Auto 12, YOLO 11. Same Binary.](https://x.com/MeiiieAI/status/2101865385167372288)
 
 Shell and CLI work runs directly through the current host Bash by default; on Windows its child console stays
 hidden. Neko never drives a terminal through Computer Use as a shell fallback. The permission gate, secret

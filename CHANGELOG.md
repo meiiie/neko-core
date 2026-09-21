@@ -8,6 +8,12 @@ All notable changes to Neko Core are documented here. The format follows
 
 ### Changed
 
+- **README freer-auto HardMix get-started (CONT-POST-ARTICLE).** Install/get-started points at product-default
+  `auto` before `--yolo`; Everyday use comments mark headless freer-auto seatbelt denials. Permissions adds
+  lived HardMix-12 same-SHA A/B (auto **12/12** vs yolo **11/12**, glm-5.3, git `a9276e6`) with recovery /
+  non-classifier honesty and link to the published write-up
+  https://x.com/MeiiieAI/status/2101865385167372288.
+
 - **Harness/docs honesty + Always-approve map (CONT-PIVOT / REF-NEXT-GAPS).** README Permissions
   states product-default `auto` is an allow-list plus surgical seatbelts — **not** a Claude or Grok
   Build LLM classifier. SANDBOX clarifies heuristic destructive-bash vs classifier; seatbelts ≠
