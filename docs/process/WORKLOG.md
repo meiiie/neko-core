@@ -5,6 +5,15 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-09-22 - v1.7.0 release candidate
+
+Version bump to **1.7.0** (minor: product-default freer-auto / permission mode `auto`
+is user-facing behavior change vs 1.6.x asks-first posture). Includes merged main work
+since v1.6.2 (#33–#73): UX raise-bar, auto UX trust/clarity, freer-auto docs honesty,
+`--max-steps` wiring, anti-slop, CI flake quarantine. Tags after typecheck/lint/policy
+and green tip CI; release.yml builds the 17-asset set. Semver choice recorded in
+`/workspace/research/wiii-lab/notes/RELEASE-NEKO-WIII-2026-09-22.md`.
+
 ## 2026-09-09 - v1.6.2 released
 
 Published [v1.6.2](https://github.com/meiiie/neko-core/releases/tag/v1.6.2) at

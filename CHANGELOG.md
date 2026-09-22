@@ -6,135 +6,43 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
-
-- **Stale freer-auto ACP computer fixture.** Residual `acp-computer` test still expected
-  `Denied by user` for gated `computer` `acquire` under product-default `auto`. Freer-auto
-  allows host computer without prompting; `default` still asks once. Aligned the port/schema
-  inheritance test and added an explicit default-mode consent refusal case.
-
-- **Stale freer-auto outside-write tests.** Residual fixtures still expected `Denied by user` for ordinary
-  outside `write_file`/`edit` under product-default `auto` (and treated additional-root siblings as denied
-  when the gate returned false). Freer-auto allows those host writes without prompting; `default` still
-  asks once; policy `~/.neko-core/config.json` stays consent-gated. Aligned `tool-runtime`,
-  `read-outside-root`, and `policy-config-write` tests + file header.
-
-- **Typecheck P0: edit EOL soft-match + ChatProps `yolo`.** CRLF-normalized `applyUniqueEdit` treated a
-  truthy `EditApplyErr` (ambiguous old_string) as success and then read `.text` — typecheck failed and
-  multi-match under CRLF could throw. Narrow on `ok` before rewriting EOL. Tests that assert product-
-  default `auto` (not explicit `--yolo`) pass `yolo={false}`; not-found edit assert stringifies
-  `execute` output (`string | any[]`).
-
-- **`neko bench gui` ignored CLI `--max-steps`.** Coding/eval benches already took the flag, but the GUI
-  long-horizon path called `runGuiTrial` without an override so each task silently kept its built-in
-  horizon (16–32). Same honesty class as the HardMix `neko run --max-steps` silent no-op (#62): operators
-  who budgeted a higher cap paid for a different run than they asked for. `runGuiBench` now forwards an
-  explicit CLI override; omit the flag to keep per-task horizons (do not silently substitute config
-  `max_steps`).
-
-- **`neko run --max-steps` was a silent no-op.** The flag was parsed and honored by `bench/*`, but
-  `neko run` always used config `max_steps` (default **40**). HardMix runners and docs that passed
-  `--max-steps 80` never raised the per-round cap. `load()` now applies a bounded CLI override
-  (1..512) so `run` and `doctor`/`config` see the same value. Surfaced by HardMix same-SHA yolo A/B
-  `regex-chess` (`NEKO-REGEX-CHESS-AB-2026-09-21`).
-
-- **`--loop` / exitWhenIdle no longer treats a max_steps wrap-up as verified idle.** Hitting the
-  step cap now forces at least one closed-loop review even when a required artifact file already
-  exists (avoids stopping on a broken `re.json` that merely satisfied the non-empty artifact gate).
+## [1.7.0] - 2026-09-22
 
 ### Changed
 
-- **Docs: `--max-steps` now wired for `neko run` (CONT-11).** README Everyday use shows
-  `neko run --loop --max-steps 80`; prose notes the CLI override (1..512; default 40) is honored on
-  `run`/`doctor`/`config` (not a silent no-op). HardMix lived note records that git `a9276e6` A/B still
-  ran under effective cap **40**. Harness architecture documents the step ceiling + `--loop` max_steps
-  review guard shipped in #62.
+- **Product-default permission mode is `auto` (freer-auto).** Ordinary workspace tools,
+  outside `write_file`/`edit`/`multi_edit`, and gated host `computer` actions proceed without
+  routine prompts. Workspace-destructive bash (`rm -rf`, force-push, `sudo`, `curl|sh`, …) still
+  asks once. Credential/system/catastrophic seatbelts and `~/.neko-core/config.json` confirmation
+  remain. Set `"mode": "default"` for asks-first. ToolRegistry / library hosts and ACP session-list
+  metadata fall back to `auto` when mode is omitted.
+- **`--always-approve` is a documented synonym of `--yolo`.** Explicit `--yolo` skips remaining
+  approval prompts (including destructive bash); hard seatbelts stay. Ctrl+O remains expand-output.
+- **Plan exit offers mode choice.** `exit_plan_mode` ApprovalBox: `[y] auto` / `[e] accept-edits` /
+  `[n] keep planning` instead of forcing accept-edits.
+- **TUI honesty polish.** Quieter Shift+Tab mode flash (ephemeral status); clearer approval diffs,
+  elide context, tool collapse line counts, jump-pill baseline, `/cost` survives resume, ASCII-safe
+  chrome (`NEKO_ASCII_CHROME=1` / non-UTF-8). Doctor, policy, capabilities, ACP, and Architecture
+  copy match the freer-auto contract.
+- **`neko run --max-steps` and `neko bench gui --max-steps` are honored** (1..512; default 40).
+  Hitting the step cap under `--loop` forces a closed-loop review instead of treating wrap-up as
+  verified idle. Skill router false-positives tightened (`research-method`, `meeting-notes`).
 
-- **README freer-auto HardMix get-started (CONT-POST-ARTICLE).** Install/get-started points at product-default
-  `auto` before `--yolo`; Everyday use comments mark headless freer-auto seatbelt denials. Permissions adds
-  lived HardMix-12 same-SHA A/B (auto **12/12** vs yolo **11/12**, glm-5.3, git `a9276e6`) with recovery /
-  non-classifier honesty and link to the published write-up
-  https://x.com/MeiiieAI/status/2101865385167372288.
+### Fixed
 
-- **Harness/docs honesty + Always-approve map (CONT-PIVOT / REF-NEXT-GAPS).** README Permissions
-  states product-default `auto` is an allow-list plus surgical seatbelts — **not** a Claude or Grok
-  Build LLM classifier. SANDBOX clarifies heuristic destructive-bash vs classifier; seatbelts ≠
-  confinement. `--always-approve` is a documented synonym of `--yolo` (Grok Always-approve); Ctrl+O
-  stays expand-output. Architecture handoff boundary: not Claude `ListAgents`/`SendMessage`.
+- Typecheck P0: edit EOL soft-match no longer treats ambiguous `old_string` as success; ChatProps
+  tests pass explicit `yolo={false}` under product-default `auto`.
+- Anti-slop Batch 1–2: SAFETY comments for unjustified `as` casts; narrowing/shape-erasure cleanups.
+- Freer-auto test honesty: outside-write and ACP computer fixtures aligned with product-default `auto`.
+- Native edit skips host preflight; independent verify clears HardMix artifact block; CI flake
+  quarantine for fullscreen-sim + feedback-ui.
 
-- **Marketing freer-auto truth.** OG/banner cards and IMAGE-BRIEFS no longer claim "asks before it
-  acts" as the default; copy keeps destructive-bash honesty.
+### Compatibility
 
-- **Doctor/policy `--yolo` honesty (CONT-7).** `neko --yolo doctor` and `auto_without_live_sandbox`
-  no longer claim workspace-destructive bash still asks. Explicit `--yolo` disables remaining approval
-  prompts (including destructive bash); hard credential/system/catastrophic seatbelts remain.
-  Ordinary `auto` doctor/policy copy is unchanged.
-
-- **RULES + ACP freer/`--yolo` residual (CONT-7).** Working Rules no longer say ordinary auto still
-  asks for host Computer. ACP `--yolo` docs mirror Architecture: additive skips on top of freer
-  `auto`, not "keeps destructive-bash warnings."
-
-- **Architecture freer-auto residual (CONT-6).** Outside-workspace Architecture copy no longer claims
-  structured mutations are confirmation-gated for every mode. Product-default `auto` allows ordinary
-  outside writes + host computer; `default`/`accept-edits` keep the exact-path prompt; `--yolo` only
-  adds the remaining skips (destructive bash, policy-write, plan-exit). UNCONFINED AUTO disclosure
-  names destructive-ask.
-
-- **Policy UNCONFINED AUTO honesty (CONT-6).** `auto_without_live_sandbox` now states ordinary bash
-  runs without approval while workspace-destructive bash still asks once (parity with doctor/runtime).
-
-- **Help/cost honesty (CONT-6).** `/help` tips name freer `auto` (outside writes + computer; destructive
-  bash still asks). `/cost` slash desc and summary clarify tokens only — no USD estimate.
-
-- **Jump-to-bottom pill baseline (CONT-5).** Reading-mode "N new messages" baseline is captured on the
-  rising edge of scroll-away during render, not in a post-paint `useEffect`. Stops a one-frame phantom
-  count of the whole transcript (or sticky-bottom growth) when PgUp / wheel engages the jump pill.
-
-- **Capabilities freer-auto honesty (CONT-5).** `neko capabilities` `file_write` / `shell` details under
-  product-default `auto` now mirror Grok-free runtime: ordinary outside structured writes pre-authorized;
-  ordinary bash without approval; workspace-destructive bash still asks. Non-auto modes keep prior copy.
-
-- **ACP freer-auto wording (CONT-4).** ACP session mode `auto`, `--yolo` docs, and Architecture/
-  Sandbox permission copy now match the Grok-free contract: coding tools, outside structured writes,
-  and host computer proceed without routine prompts; destructive bash still asks; seatbelts remain.
-  Stale "host-computer consent remain active" / "bounded coding tools" Claude-tight phrasing removed
-  from the IDE-visible mode picker and ACP docs.
-
-- **Skill router false-positive tighten (CONT-4).** `research-method` no longer routes on bare
-  `latest` / `newest` / `benchmark` in ordinary coding prompts. `meeting-notes` no longer routes on
-  filename-only "meeting notes" without a capture/summary verb (`take/write notes`, summary, record, …).
-
-- **Plan-exit mode choice (CONT-2).** `exit_plan_mode` ApprovalBox offers Claude-shaped
-  `[y] auto` / `[e] accept-edits` / `[n] keep planning` instead of forcing
-  accept-edits. Flash shows `approved → auto|accept-edits`. Pointer zones match. Remote/ACP
-  allow without a choice still defaults to accept-edits. `[a]` is not session-always on plan exit.
-  Ctrl+O expand and Shift+Tab-while-approval policy (C) unchanged.
-
-- **Quieter Shift+Tab mode flash.** Mode-cycle contract feedback uses the reserved ephemeral
-  status row (~1.8s) instead of appending durable transcript `mode:` lines (CONT-1). Footer
-  chip still updates immediately. Shift+Tab remains disabled while an approval is open.
-  Boot / `--yolo` / resume disclosures stay one-shot durable info lines.
-
-- **Grok-free product-default `auto`.** Ordinary `write_file`/`edit`/`multi_edit` outside the
-  project and gated `computer` actions are **allowed** under ordinary `auto` (not only
-  `--yolo`), matching Grok Build sandbox-off freer posture. `plan` still denies. Workspace-
-  destructive bash (rm -rf, force-push, sudo, curl|sh, …) still asks once with ⚠.
-  Credential/system/catastrophic seatbelts and `~/.neko-core/config.json` confirmation remain.
-  Docs, `decide()`, doctor/policy, and runtime-block wording updated — not an LLM classifier.
-- **ToolRegistry / library hosts now default to permission mode `auto`.** Config and the TUI
-  already treated omitted `mode` as bounded auto (since 0.24.10); the constructor and README
-  host sample still said `default`. Aligning them makes SDK embeds and omitted-arg call sites
-  match Claude Code / Grok Build product default. Shift+Tab still cycles
-  `default | accept-edits | plan | auto`; set `"mode": "default"` for asks-first. ACP
-  session-list metadata falls back to `auto` when a record has no stored mode.
-
-### Added
-
-- **Optional ASCII TUI chrome** (`src/ui/chrome-glyphs.ts`): `NEKO_ASCII_CHROME=1` or
-  non-UTF-8 locale / `TERM=dumb` maps ApprovalBox ⚠✓✗, footer mode chip, and tree/error prefixes to
-  ASCII (`!` / `+` / `X` / `>>` / `|-`). Footer mode chip defaults to `>>` (U+23F5 ⏵⏵ tofu'd as `??` on thin Linux CSR fonts). Body text and OSC tab titles (🐱) are untouched. No Nerd
-  Font / Symbola dependency.
-
+- No session-format migration, ACP wire break, or new runtime dependency. Existing `"mode": "default"`
+  configs keep asks-first. Installers and standalone binaries remain the 1.x five-target set.
+- Main tip CI green after #73; release uses cross-platform typecheck/lint/policy plus the release
+  artifact workflow. No new ProgramBench campaign.
 
 ## [1.6.2] - 2026-09-09
 
