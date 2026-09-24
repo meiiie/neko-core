@@ -10,6 +10,9 @@ import { ApprovalBox, ChatApp } from "../src/ui/chat.tsx";
 import { buildReplayLines, clampToRows, collapsedToolResultExpandable, contentToText, countNewActivities, scrollAwayBaselineOnEdge, recoverTodos, renderTail, replaySessionLines, resultSummary,
   isTodoWriteResultText,
   summarizeTodoWriteResult,
+  takeProgressiveCommit,
+  streamedAssistantSegment,
+  shouldAppendFinalAssistant,
 } from "../src/ui/chat-lines.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
 import { setModel } from "../src/adapters/project.ts";
@@ -240,6 +243,62 @@ test("clampToRows bounds the live stream to the viewport height (fixes streaming
   expect(out.startsWith("...")).toBe(true); // marks truncation
   const wide = "x".repeat(240) + "\nshort"; // 240/80 = 3 wrapped rows
   expect(clampToRows(wide, 2, 80).includes("x".repeat(240))).toBe(false); // 3 rows > 2 budget -> dropped
+});
+
+test("takeProgressiveCommit moves completed paragraphs into Static once the live buffer outgrows the viewport", () => {
+  const short = "hello\n\nworld";
+  expect(takeProgressiveCommit(short, 24)).toEqual({ commit: null, rest: short });
+
+  const paras = Array.from({ length: 40 }, (_, i) => `Paragraph ${i}: ` + "word ".repeat(8).trim()).join("\n\n");
+  const { commit, rest } = takeProgressiveCommit(paras, 16);
+  expect(commit).not.toBeNull();
+  expect(commit!.length).toBeGreaterThan(0);
+  expect(rest.length).toBeGreaterThan(0);
+  // Rest is only the current paragraph (after the last blank line).
+  expect(rest.includes("\n\n")).toBe(false);
+  expect(paras.startsWith(commit!)).toBe(true);
+  expect(paras.endsWith(rest)).toBe(true);
+});
+
+test("shouldAppendFinalAssistant: progressive Static commits must not re-print the provider result", () => {
+  // Non-streaming provider: nothing painted yet -> append the result once.
+  expect(shouldAppendFinalAssistant("", "Final answer")).toBe(true);
+  expect(shouldAppendFinalAssistant("   ", "Final answer")).toBe(true);
+  expect(shouldAppendFinalAssistant("", "  ")).toBe(false);
+
+  // Live remainder still in streamRef (short reply, no progressive commit) -> already painted via flushStream.
+  expect(shouldAppendFinalAssistant("Final answer", "Final answer")).toBe(false);
+
+  // Long reply: progressive commit emptied or shrunk streamRef; segment still remembers committed text.
+  // Repro of the duplicate final markdown in the terminal (full answer, then full answer again).
+  const full = [
+    "## Summary",
+    "",
+    "A long answer with headings and a wide table.",
+    "",
+    "| col | value |",
+    "| --- | ----- |",
+    "| a   | " + "x".repeat(80) + " |",
+    "",
+    "- bullet one",
+    "- bullet two",
+    "",
+    "Closing sentence.",
+  ].join("\n");
+  let progressive = "";
+  let live = full;
+  for (let i = 0; i < 8; i++) {
+    const { commit, rest } = takeProgressiveCommit(live, 16);
+    if (commit == null) break;
+    progressive = streamedAssistantSegment(progressive, commit);
+    live = rest;
+  }
+  const segment = streamedAssistantSegment(progressive, live);
+  expect(segment.length).toBeGreaterThan(0);
+  // Bug: measuring only `live` (streamRef) after progressive commit made the finalize path think
+  // nothing was streamed, so it appended `full` again on top of the Static commits.
+  expect(shouldAppendFinalAssistant(live, full)).toBe(live.trim().length === 0);
+  expect(shouldAppendFinalAssistant(segment, full)).toBe(false);
 });
 
 test("renderTail bounds live-stream rendering to O(1) so the event loop can't stall on huge output", () => {
