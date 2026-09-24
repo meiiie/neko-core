@@ -102,6 +102,9 @@ import {
   REPLAY_MAX_LINES,
   RESUME_SUMMARY_AT,
   collapsedToolResultExpandable,
+  takeProgressiveCommit,
+  streamedAssistantSegment,
+  shouldAppendFinalAssistant,
 } from "./chat-lines.ts";
 import { describeToolCall, toolSchemas } from "../core/tools.ts";
 import { createCompletionSupervisor } from "../adapters/completion-supervisor.ts";
@@ -220,6 +223,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const startupToolSchemas = useMemo(() => [...toolSchemas(), ...(mcpHub?.toolSchemas() ?? [])], [mcpHub]);
   const idRef = useRef(0);
   const streamRef = useRef("");
+  // Assistant text already moved into <Static> by progressive commit since the last flushStream.
+  // Finalize must count this too — streamRef alone is only the live remainder.
+  const progressiveAssistRef = useRef("");
   const lastPumpRef = useRef(0);
   const streamPumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busyRef = useRef(false); // mirrors `busy` for closures (onSubmit's queue decision) — no stale read
@@ -603,14 +609,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // makes it redraw from the top every frame -- the "streaming keeps jumping to the top" bug. Once the
     // buffered reply outgrows the viewport, move its COMPLETED paragraphs (up to the last blank line) into
     // <Static> -- they scroll into scrollback naturally -- and keep only the current paragraph live.
-    const s = streamRef.current;
     const viewport = (stdout?.rows ?? 24) - 8;
-    if (s.split("\n").length > viewport) {
-      const cut = s.lastIndexOf("\n\n");
-      if (cut > 0) {
-        addLine("assistant", s.slice(0, cut).trimEnd());
-        streamRef.current = s.slice(cut + 2);
-      }
+    const { commit, rest } = takeProgressiveCommit(streamRef.current, viewport);
+    if (commit != null) {
+      addLine("assistant", commit);
+      progressiveAssistRef.current = streamedAssistantSegment(progressiveAssistRef.current, commit);
+      streamRef.current = rest;
     }
     setStream(streamRef.current);
     setReasoning(reasoningRef.current);
@@ -626,6 +630,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
     if (streamRef.current.trim()) addLine("assistant", streamRef.current.trimEnd());
     streamRef.current = "";
+    progressiveAssistRef.current = "";
     setStream("");
     relayRef.current?.publish({ type: "stream", text: "" });
     bridgeHolder?.current?.pushPanel({ type: "stream", text: "" }); // end the panel's live bubble
@@ -2616,7 +2621,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             images: imgs.length ? imgs : undefined,
             internal,
           });
-      const streamed = streamRef.current.trim();
+      // Include progressive <Static> commits: streamRef alone is only the live remainder, so a long
+      // answer that already flushed paragraphs would look "unstreamed" and the full result would reprint.
+      const streamedSegment = streamedAssistantSegment(progressiveAssistRef.current, streamRef.current);
       flushStream();
       if (result === "[interrupted]") {
         // Tool body already painted `(interrupted)` — do not stack a second banner (raise-bar-11).
@@ -2632,7 +2639,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       else {
         if (agentRef.current!.completionStatus.reason === "outcome_unverified" && result.trim()) addLine("error", result);
-        else if (result.trim() && !streamed.endsWith(result.trim())) addLine("assistant", result);
+        else if (shouldAppendFinalAssistant(streamedSegment, result)) addLine("assistant", result);
         const secs = Math.round((Date.now() - turnStart) / 1000);
         // Whole-turn tokens split by direction (input up / output down), matching the live spinner.
         const inTok = Math.max(0, agentRef.current!.cost.promptTokens - turnInStartRef.current);

@@ -368,3 +368,34 @@ export function clampToRows(text: string, maxRows: number, cols: number): string
   }
   return kept.join("\n");
 }
+
+/** Result of splitting a live stream buffer for progressive <Static> commit. */
+export type ProgressiveCommit = { commit: string | null; rest: string };
+
+/** Split a live stream buffer for progressive <Static> commit. When the buffered reply is taller than
+ *  the viewport (by raw newline count), move completed paragraphs (up to the last blank line) into
+ *  scrollback and keep only the current paragraph live — otherwise Ink redraws from the top each frame. */
+export function takeProgressiveCommit(stream: string, viewportRows: number): ProgressiveCommit {
+  if (viewportRows <= 0 || stream.split("\n").length <= viewportRows) {
+    return { commit: null, rest: stream };
+  }
+  const cut = stream.lastIndexOf("\n\n");
+  if (cut <= 0) return { commit: null, rest: stream };
+  return { commit: stream.slice(0, cut).trimEnd(), rest: stream.slice(cut + 2) };
+}
+
+/** Join progressive <Static> commits with the still-live remainder so finalize can tell whether the
+ *  turn already painted assistant text (even when progressive commit emptied streamRef). */
+export function streamedAssistantSegment(progressiveCommitted: string, remaining: string): string {
+  const parts = [progressiveCommitted, remaining].map((part) => part.trim()).filter(Boolean);
+  return parts.join("\n\n");
+}
+
+/** Append the provider's final `result` string only when nothing was streamed this segment.
+ *  Progressive commit moves paragraphs out of streamRef into <Static>; measuring only the live
+ *  remainder would wrongly re-append the full answer (duplicate final markdown in the terminal). */
+export function shouldAppendFinalAssistant(streamedSegment: string, result: string): boolean {
+  const text = result.trim();
+  if (!text) return false;
+  return streamedSegment.trim().length === 0;
+}
