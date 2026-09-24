@@ -369,10 +369,13 @@ export function clampToRows(text: string, maxRows: number, cols: number): string
   return kept.join("\n");
 }
 
+/** Result of splitting a live stream buffer for progressive <Static> commit. */
+export type ProgressiveCommit = { commit: string | null; rest: string };
+
 /** Split a live stream buffer for progressive <Static> commit. When the buffered reply is taller than
  *  the viewport (by raw newline count), move completed paragraphs (up to the last blank line) into
  *  scrollback and keep only the current paragraph live — otherwise Ink redraws from the top each frame. */
-export function takeProgressiveCommit(stream: string, viewportRows: number): { commit: string | null; rest: string } {
+export function takeProgressiveCommit(stream: string, viewportRows: number): ProgressiveCommit {
   if (viewportRows <= 0 || stream.split("\n").length <= viewportRows) {
     return { commit: null, rest: stream };
   }
