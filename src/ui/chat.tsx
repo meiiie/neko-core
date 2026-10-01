@@ -25,7 +25,7 @@ import { TranscriptViewer } from "./transcript-viewer.tsx";
 import { isEscapeResidue, MAX_INPUT_LINES, TextInput } from "./text-input.tsx";
 import { openExternalEditor } from "./external-editor.ts";
 import { CompactingLine, DOWN, RunningLine, ThinkingLine, UP, VERBS } from "./thinking-line.tsx";
-import { probeSyncOutput, syncOutputDecision, wrapStdoutForSync } from "./sync-stdout.ts";
+import { syncOutputDecision, wrapStdoutForSync } from "./sync-stdout.ts";
 import { FrameDiffer, HIT_SENTINEL } from "./frame-diff.ts";
 import { canFullscreen, emergencyRestore, installAltScreenGuard } from "./altscreen.ts";
 import { setApprovalCursorHidden, setFocusReporting, terminalFocusFromInput } from "./terminal-attention.ts";
@@ -4073,11 +4073,10 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
   saveTitle();
   // Pre-render and mounted title writes cover terminals that enable VT at different times.
   setTerminalTitle(brandTitle(resumed?.title || "Neko Core"));
-  // Probe DEC 2026 only when environment detection is inconclusive; probing known-bad Windows terminals
-  // can re-enable a mode that corrupts their input/rendering path.
-  const syncDecision = syncOutputDecision();
-  let syncSupported = syncDecision === "yes";
-  if (syncDecision === "unknown") syncSupported = (await probeSyncOutput()) === true;
+  // Never consume stdin to probe terminal capabilities before Ink owns input: users can already
+  // be typing, and the probe discards those bytes. Unknown terminals use unsynchronized output;
+  // known support and the explicit NEKO_SYNC override still select synchronized rendering.
+  const syncSupported = syncOutputDecision() === "yes";
   const clearHolder = { fn: () => {} };
   // The stdout differ minimizes Ink frames; its periodic absolute repaint bounds ConPTY displacement.
   const differ = process.env.NEKO_INCR === "0" ? undefined : new FrameDiffer();

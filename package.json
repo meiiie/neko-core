@@ -33,7 +33,7 @@
     "eval:programbench": "bun scripts/programbench-eval.ts",
     "eval:programbench:campaign": "bun scripts/programbench-campaign.ts",
     "lab:antigravity-contract": "bun scripts/antigravity-contract-lab.ts",
-    "build": "bun scripts/build.ts && dist/neko __uiprobe && bun scripts/input-probe.ts && bun scripts/acp-smoke.ts && bun scripts/e2e-startup-lifecycle.ts",
+    "build": "bun scripts/build.ts && dist/neko __uiprobe && bun scripts/input-probe.ts && bun scripts/acp-smoke.ts && bun scripts/e2e-startup-lifecycle.ts && bun scripts/e2e-startup-input.ts",
     "test": "bun test",
     "lint": "oxlint",
     "eval:office": "bun test/office-value-eval.ts",
