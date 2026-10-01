@@ -102,3 +102,36 @@ test("Responses effort negotiates the highest advertised compatible tier before 
   await new ResponsesProvider(cfg).complete([{ role: "user", content: "hi" }]);
   expect(efforts).toEqual(["max", "xhigh"]);
 });
+
+for (const emitted of ["text", "tool", "none"] as const) {
+  test(`Responses idle timeout only replays before semantic output (${emitted})`, async () => {
+    const cfg = new NekoConfig({ provider: "responses", base_url: "https://example.invalid/v1", model: "synthetic",
+      max_retries: 1, offline_retry_seconds: 0, timeout_seconds: 0.02,
+      retry_base_delay_seconds: 0.001, retry_max_delay_seconds: 0.001 }, null, {}, "synthetic-key");
+    let requests = 0;
+    let tools = 0;
+    let text = "";
+    // SAFETY: the in-memory fetch fixture emits only synthetic Responses events and honors abort.
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests++;
+      if (requests > 1) return new Response('data: {"type":"response.completed","response":{"output":[]}}\n\n');
+      const events = emitted === "text" ? [{ type: "response.output_text.delta", delta: "partial" }]
+        : emitted === "tool" ? [{ type: "response.output_item.done", output_index: 0,
+          item: { type: "function_call", id: "fc1", call_id: "call1", name: "write_file", arguments: '{"path":"x","content":"y"}' } }] : [];
+      const stream = new ReadableStream<Uint8Array>({ start(controller) {
+        for (const event of events) controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+        init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason), { once: true });
+      } });
+      return new Response(stream, { headers: { "content-type": "text/event-stream" } });
+    }) as typeof fetch;
+    const completion = new ResponsesProvider(cfg).complete([{ role: "user", content: "probe" }], undefined,
+      (delta) => { text += delta; }, undefined, { onToolCallReady: () => { tools++; } });
+    if (emitted === "none") { await completion; expect(requests).toBe(2); }
+    else {
+      await expect(completion).rejects.toMatchObject({ recovery: "continue", semanticActivity: true });
+      expect(requests).toBe(1);
+      if (emitted === "text") expect(text).toBe("partial");
+      else expect(tools).toBe(1);
+    }
+  });
+}

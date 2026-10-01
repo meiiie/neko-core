@@ -18,7 +18,14 @@ bodies, credentials and model reasoning are not printed by this status formatter
 Real CLI child-process tests against a local HTTP fixture cover 429/503 recovery and
 stdout/stderr separation. This does not change retry budgets or execution authority.
 
-Validation: 72 tests across six focused files on Linux/Bun 1.4.0; typecheck and lint.
+Further cross-provider regressions reproduced cancellation delays in the compatible,
+Anthropic and Responses credential resolvers. These now stop waiting on cancellation.
+Anthropic and Responses also emit the same payload-free retry lifecycle events.
+Responses idle timeout no longer replays after partial text or a tool call was emitted;
+the core receives the typed continuation error instead. Empty pre-output stalls remain
+retryable. This prevents a replay path; it is not an exactly-once guarantee for external tools.
+
+Validation: 126 tests across nine focused files on Linux/Bun 1.4.0; typecheck and lint.
 Full cross-platform CI remains an acceptance gate. This is not a release or a claim
 of verified long-session model quality, Windows desktop behavior, or live network
 policy resolution. Existing integration work is outside this focused upstream patch.
