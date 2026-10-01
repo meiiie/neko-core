@@ -5,7 +5,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
-import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, normalizeSandboxDomains, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, sandboxProcessDeadlineMs, srtHealthAsync, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, windowsSearchDirs, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
+import { buildSandbox, destructiveInWorkspace, detectSandbox, executableOnPath, findWindowsBash, formatSrtProbeFailure, isDockerCommand, missingSandboxRefusal, normalizeSandboxDomains, plainTarget, purgeStaleSrtScripts, resolveSrtBunBridge, sandboxActive, sandboxProcessDeadlineMs, srtHealthAsync, srtHealthCacheReusable, srtLaunchRefusal, srtScript, srtSettings, windowsSearchDirs, withSrtStateVolumeGuidance, wrapBash, writeEphemeralSrtBunShim, writeEphemeralSrtScript, writeEphemeralSrtSettings } from "../src/core/sandbox.ts";
 
 // Report unavailable live infrastructure as an actual skip instead of a passing test whose body
 // returned early. The health probe is cached by the production sandbox module for this process.
@@ -336,6 +336,9 @@ test("an enabled but unhealthy SRT is refused before launch, while other posture
   expect(srtLaunchRefusal(true, "srt", { ok: true, detail: "healthy" })).toBeNull();
   expect(srtLaunchRefusal(false, "srt", { ok: false, detail: "down" })).toBeNull();
   expect(srtLaunchRefusal(true, "none", { ok: false, detail: "absent" })).toBeNull();
+  expect(missingSandboxRefusal(true, "none")).toContain("bash was not executed");
+  expect(missingSandboxRefusal(false, "none")).toBeNull();
+  expect(missingSandboxRefusal(true, "srt")).toBeNull();
 });
 
 test("an SRT health-probe timeout retries the exact sandbox instead of creating a false refusal", () => {
@@ -552,8 +555,16 @@ test("isDockerCommand detects direct and common shell-wrapped host-daemon CLIs",
 });
 
 test("wrapBash only exposes a host daemon after the explicit capability override", () => {
+  if (detectSandbox() === "none") {
+    expect(() => wrapBash("docker build -t x .", "/w", { enabled: true, allowNetwork: false }))
+      .toThrow("no trusted primitive");
+    expect(() => wrapBash("docker build -t x .", "/w", {
+      enabled: true, allowNetwork: false, allowHostDaemon: true,
+    })).toThrow("no trusted primitive");
+    return;
+  }
   const contained = wrapBash("docker build -t x .", "/w", { enabled: true, allowNetwork: false });
-  if (detectSandbox() !== "none") expect(contained.file.toLowerCase()).not.toContain("bash");
+  expect(contained.file.toLowerCase()).not.toContain("bash");
   contained.cleanup?.();
 
   const t = wrapBash("docker build -t x .", "/w", { enabled: true, allowNetwork: false, allowHostDaemon: true });
@@ -564,17 +575,14 @@ test("wrapBash only exposes a host daemon after the explicit capability override
   }
 });
 
-test("none / disabled run the command unconfined (git-bash on Windows, platform shell elsewhere)", () => {
-  const none = buildSandbox("none", "echo hi", "/w", false);
+test("only explicitly disabled sandbox runs the command unconfined", () => {
+  expect(() => buildSandbox("none", "echo hi", "/w", false)).toThrow("no trusted primitive");
   const disabled = wrapBash("ls", "/w", { enabled: false, allowNetwork: false });
   if (process.platform === "win32" && findWindowsBash()) {
-    for (const [t, cmd] of [[none, "echo hi"], [disabled, "ls"]] as const) {
-      expect(t.shell).toBe(false);
-      expect(t.file.toLowerCase()).toContain("bash");
-      expect(t.args).toEqual(["-c", cmd]);
-    }
+    expect(disabled.shell).toBe(false);
+    expect(disabled.file.toLowerCase()).toContain("bash");
+    expect(disabled.args).toEqual(["-c", "ls"]);
   } else {
-    expect(none).toEqual({ file: "echo hi", args: [], shell: true });
     expect(disabled).toEqual({ file: "ls", args: [], shell: true });
   }
 });

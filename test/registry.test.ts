@@ -36,10 +36,12 @@ test("policy distinguishes an unavailable sandbox from an unhealthy fail-closed 
     { kind: "none", live: false },
   );
   expect(unavailable.findings.some((finding) =>
-    finding.code === "auto_without_live_sandbox"
-    && finding.message.includes("UNCONFINED AUTO")
-    && /destructive/i.test(finding.message)
+    finding.code === "auto_with_unusable_sandbox"
+    && finding.message.includes("FAILS CLOSED")
+    && finding.message.includes("no trusted OS sandbox primitive")
   )).toBe(true);
+  expect(unavailable.findings.some((finding) => finding.code === "auto_without_live_sandbox")).toBe(false);
+  expect(unavailable.findings.some((finding) => finding.message.includes("UNCONFINED AUTO"))).toBe(false);
 
   const unhealthy = evaluatePolicy(
     new NekoConfig({ mode: "auto", sandbox: true }, null, {}, ""),
@@ -57,6 +59,19 @@ test("policy distinguishes an unavailable sandbox from an unhealthy fail-closed 
   expect(transient.findings.some((finding) => finding.code === "auto_srt_probe_timed_out")).toBe(true);
   expect(transient.findings.some((finding) => finding.code === "auto_with_unusable_sandbox")).toBe(false);
   expect(transient.findings.some((finding) => finding.message.includes("UNCONFINED AUTO"))).toBe(false);
+});
+
+test("policy warns about a missing configured primitive outside auto mode", () => {
+  const report = evaluatePolicy(
+    new NekoConfig({ mode: "default", sandbox: true }, null, {}, ""),
+    { kind: "none", live: false },
+  );
+  expect(report.findings).toContainEqual(expect.objectContaining({
+    code: "sandbox_primitive_unavailable",
+    severity: "warn",
+    message: expect.stringContaining("FAILS CLOSED"),
+  }));
+  expect(report.findings.some((finding) => finding.message.includes("UNCONFINED AUTO"))).toBe(false);
 });
 
 test("command registry covers every canonical public CLI dispatch", () => {
@@ -84,4 +99,21 @@ test("capabilities file_write/shell mirror freer auto (not Claude-tight cwd/appr
   const defaultCaps = collectCapabilities(cfg("default"));
   expect(defaultCaps.find((c) => c.name === "file_write")!.detail).toContain("project plus explicit additional_write_roots");
   expect(defaultCaps.find((c) => c.name === "shell")!.detail).toBe("bash (gated: needs approval)");
+});
+
+test("capabilities mark missing local sandbox primitive as blocked Bash", () => {
+  const config = new NekoConfig({ mode: "auto", sandbox: true }, null, {}, "");
+  const runtime = { kind: "none" as const, live: false };
+  for (const explicitYolo of [false, true]) {
+    const shell = collectCapabilities(config, explicitYolo, runtime).find((c) => c.name === "shell")!;
+    expect(shell.status).toBe("unavailable");
+    expect(shell.detail).toContain("FAILS CLOSED");
+    expect(shell.detail).toContain("no host fallback");
+    expect(shell.detail).not.toContain("approval-free");
+  }
+
+  const hostShell = collectCapabilities(new NekoConfig({ mode: "auto", sandbox: false }, null, {}, ""), false, runtime)
+    .find((c) => c.name === "shell")!;
+  expect(hostShell.status).toBe("enabled");
+  expect(hostShell.detail).toContain("ordinary commands without approval");
 });

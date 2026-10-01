@@ -25,13 +25,13 @@ function modeRuntimeDetail(
     case "auto":
       if (registry.isExplicitYolo()) {
         return failClosedBash
-          ? "explicit --yolo removes approval prompts; bash still FAILS CLOSED until its configured OS sandbox is healthy; hard seatbelts still apply"
+          ? "explicit --yolo removes approval prompts; bash still FAILS CLOSED until a trusted sandbox is available; hard seatbelts still apply"
           : unconfinedAuto
             ? "EXPLICIT --YOLO / UNCONFINED: approval prompts are disabled and bash runs on the host; hard seatbelts still apply"
             : "explicit --yolo removes approval prompts; hard seatbelts still apply";
       }
       return failClosedBash
-        ? "non-bash gated tools run without an approval prompt; bash FAILS CLOSED until its configured OS sandbox is healthy; outside structured writes and host computer are allowed under auto; destructive bash still asks; Neko seatbelts still apply"
+        ? "non-bash gated tools run without an approval prompt; bash FAILS CLOSED until a trusted sandbox is available; outside structured writes and host computer are allowed under auto; destructive bash still asks when bash can run; Neko seatbelts still apply"
         : unconfinedAuto
           ? "UNCONFINED AUTO: gated coding tools, outside structured writes, and host computer run without an approval prompt; bash runs on the host; destructive bash still asks; Neko seatbelts still apply"
           : "gated coding tools, outside structured writes, and host computer run without an approval prompt; destructive bash still asks; Neko seatbelts still apply";
@@ -53,9 +53,10 @@ function modeRuntimeDetail(
 export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?: SandboxRuntimeStatus): string {
   const turnPolicy = registry.turnPolicyDescriptor();
   const bashCallable = !registry.noTools && registry.isToolAvailable("bash");
+  const nativeBash = bashCallable && registry.nativeBashOwned();
   const skillCallable = !registry.noTools && registry.isToolAvailable("skill") && Boolean(registry.loadSkill);
   const networkProbeCallable = !registry.noTools && registry.isToolAvailable("network_probe");
-  const detected = bashCallable && registry.sandboxBash
+  const detected = bashCallable && registry.sandboxBash && !nativeBash
     ? (sandboxRuntime?.kind ?? detectSandbox())
     : "none";
   const cachedSrtHealth = !sandboxRuntime && detected === "srt" ? srtHealthSnapshot() : undefined;
@@ -63,22 +64,33 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     (!sandboxRuntime && !cachedSrtHealth)
     || (!sandboxRuntime?.live && /health check deferred/i.test(sandboxRuntime?.detail ?? ""))
   );
-  const liveSandbox = registry.sandboxBash && detected !== "none" && (sandboxRuntime?.live
-    ?? (detected === "srt" ? cachedSrtHealth?.ok ?? false : true));
+  const liveSandbox = registry.sandboxBash && (nativeBash
+    ? registry.nativeBashSandboxAttested()
+    : detected !== "none" && (sandboxRuntime?.live
+      ?? (detected === "srt" ? cachedSrtHealth?.ok ?? false : true)));
   const transientSrt = registry.sandboxBash && detected === "srt" && !liveSandbox
     && transientSrtHealthFailure(sandboxRuntime?.detail ?? cachedSrtHealth?.detail ?? "");
   const exactReadOnlyValidator = turnPolicy?.bashPolicy === "foreground-validator-only";
+  const nativeBashBlocked = nativeBash && registry.sandboxBash && !liveSandbox;
   const failClosedBash = exactReadOnlyValidator
     ? !liveSandbox
-    : registry.sandboxBash && detected !== "none" && !liveSandbox && !transientSrt;
+    : registry.sandboxBash && !liveSandbox && !transientSrt;
   const unconfinedAuto = registry.mode === "auto" && bashCallable &&
-    !exactReadOnlyValidator && (!registry.sandboxBash || detected === "none");
+    !exactReadOnlyValidator && !registry.sandboxBash && !nativeBash;
   const sandboxedBash = liveSandbox && registry.sandboxAutoApprove;
-  const hostBash = !exactReadOnlyValidator && (!registry.sandboxBash || detected === "none");
-  const shell = platform() === "win32"
+  const hostBash = !exactReadOnlyValidator && !registry.sandboxBash && !nativeBash;
+  const missingPrimitive = registry.sandboxBash && !nativeBash && detected === "none";
+  const shell = nativeBash ? "backend-owned"
+    : platform() === "win32"
     ? (findWindowsBash() ? "GIT BASH (POSIX)" : "cmd.exe")
     : (liveSandbox ? "bash (POSIX)" : "/bin/sh (POSIX)");
-  const network = hostBash
+  const network = missingPrimitive || nativeBashBlocked
+    ? "unavailable while Bash is blocked"
+    : nativeBash
+      ? registry.sandboxBash
+        ? "enforced by the attested native backend"
+        : "native backend policy (Neko OS sandbox disabled)"
+    : hostBash
     ? "host networking available (not filtered by the optional Neko OS sandbox)"
     : !registry.sandboxAllowNetwork
     ? "blocked by standing policy (a bash call may request one-shot egress with network_domains; no config change is needed)"
@@ -92,21 +104,35 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
     ? ["bun", "node", "python", "python3", "git", "npm", "pnpm", "yarn", "go", "cargo", "rustc", "docker"]
       .filter((name) => executableOnPath(name, process.env.PATH ?? "", registry.root))
     : [];
-  const toolchain = detected === "srt"
+  const toolchain = missingPrimitive || nativeBashBlocked
+    ? "unavailable while Bash is blocked"
+    : nativeBash
+      ? "owned and reported by the native backend"
+      : detected === "srt"
     ? bunBridge
       ? `bun available in sandbox (bridged from ${bunBridge.source} with an exact-file read grant); node/python resolve from host`
       : "bun NOT available in sandbox (no bun.exe bridge on this machine) - use node or python for scripts/tests and say so; do not retry bun or try installing it (network in the sandbox is policy-bound)"
     : hostBash
       ? `host PATH tools detected now: ${detectedHostTools.join(", ") || "none of the common toolchain names"}`
       : "host toolchain";
-  const oneShotNetwork = hostBash
+  const oneShotNetwork = missingPrimitive || nativeBashBlocked
+    ? "network_domains cannot enable blocked Bash."
+    : nativeBash
+      ? "The native backend owns egress policy; Neko forwards this request without claiming local OS confinement."
+      : hostBash
     ? "The host shell already has ordinary host networking; network_domains is optional and grants no additional authority."
     : detected === "srt"
     ? "SRT enforces each network_domains entry as an exact per-call destination allowlist."
     : detected === "bwrap" || detected === "sandbox-exec"
       ? "This primitive cannot filter domains; a non-empty network_domains request is a one-call full-network grant."
       : "Without a live sandbox, network_domains does not add containment beyond the ordinary permission gate.";
-  const sandbox = exactReadOnlyValidator && !liveSandbox
+  const sandbox = nativeBash
+    ? !registry.sandboxBash
+      ? "off in Neko config (native backend-owned; no local confinement claim)"
+      : liveSandbox
+      ? "native backend-enforced (local OS primitive not used)"
+      : "native backend lacks Bash sandbox attestation (bash FAILS CLOSED)"
+    : exactReadOnlyValidator && !liveSandbox
     ? "required read-only isolation unavailable (exact-turn bash FAILS CLOSED; no host fallback)"
     : exactReadOnlyValidator
       ? `${detected} live (exact validators: project read-only; writes allowed only in unique temp; host reads remain available; network ${network})`
@@ -119,7 +145,7 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
       : transientSrt
         ? "srt behavioral probe timed out under host load; bash will still attempt the exact SRT boundary once and will never fall back unconfined"
       : detected === "none"
-        ? "requested but unavailable (host/unconfined)"
+        ? "requested but unavailable (bash FAILS CLOSED; no host fallback)"
       : `${detected} present but unhealthy in the latest snapshot (bash FAILS CLOSED; no host fallback; a later bash call re-checks SRT health after the bounded failure cache expires)`;
 
   return [
@@ -137,10 +163,12 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
       ? `Neko bash dynamic tool: callable; shell=${shell}; sandbox=${sandbox}. Docker/podman host-daemon access is refused or contained unless allow_dangerous_bash explicitly grants that capability.`
       : "Neko bash dynamic tool: unavailable in this request.",
     bashCallable
-      ? `Shell execution target: ${hostBash ? "this same host and current Neko process identity (not a VM or Computer Use)" : `${detected} OS sandbox on this host`}; cwd=${JSON.stringify(registry.root)}; Windows child consoles stay hidden. Shell toolchain: ${toolchain}. Treat this as authoritative; do not repeat probes for a capability already reported absent.`
+      ? `Shell execution target: ${missingPrimitive ? "none (configured OS sandbox primitive missing)" : nativeBash ? registry.sandboxBash ? "attested native backend" : "native backend (Neko sandbox disabled)" : hostBash ? "this same host and current Neko process identity (not a VM or Computer Use)" : `${detected} OS sandbox on this host`}; cwd=${JSON.stringify(registry.root)}; Windows child consoles stay hidden. Shell toolchain: ${toolchain}. Treat this as authoritative; do not repeat probes for a capability already reported absent.`
       : "",
     bashCallable
-      ? hostBash
+      ? missingPrimitive || nativeBashBlocked
+        ? "Bash egress unavailable because Bash is blocked; network_domains does not enable it."
+        : hostBash
         ? `Bash networking: ${network}. ${oneShotNetwork}`
         : `Bash egress capability: declare the exact destination hosts in the bash call's network_domains field. ${oneShotNetwork} Auto/yolo approves that bounded one-call request; other modes ask the user. Prefer this over asking the user to run /sandbox; /sandbox is only for a persistent standing policy.`
       : "",
@@ -149,11 +177,18 @@ export function dynamicToolRuntimeBlock(registry: ToolRegistry, sandboxRuntime?:
         ? "Bounded network diagnostics: network_probe can resolve one host and test bounded TCP ports without shell syntax; web_search/web_fetch handle web content."
         : "Host network diagnostics: network_probe can resolve one host and test bounded TCP ports outside the Bash sandbox; web_search/web_fetch handle web traffic. Prefer these structured tools when Bash egress is blocked."
       : "",
-    bashCallable
+    bashCallable && !failClosedBash
       ? "Tool routing: use Neko bash for shell, CLI, build, test, package, and process work. Never open or drive a terminal through computer as a Bash/network fallback. Use computer only for visible GUI interaction that has no precise tool. Long-lived servers/watchers use bash run_in_background=true plus bounded status checks."
-      : "",
+      : failClosedBash
+        ? "Tool routing: Bash is blocked until its configured sandbox is available. Never open or drive a terminal through computer as a Bash/network fallback."
+        : "",
     failClosedBash
       ? "Do not create a shell script whose only purpose is to wait for unavailable bash. Prefer an independent safe native tool that directly covers the task; otherwise state the boundary or request explicit computer consent before changing files."
+      : "",
+    registry.isToolAvailable("computer") && !registry.computerPort && !registry.computerHandler
+      ? `Local computer input policy: ${registry.computerInputPolicy}. ${registry.computerInputPolicy === "background"
+        ? "Supported semantic UIA actions are available; activation, keyboard/pointer input, OCR and app opening return needs_interaction. Unsupported invoke never falls back to a physical click."
+        : "Foreground desktop actions are explicitly enabled and can change focus or affect user input."} Approval mode does not widen this policy. Shared screenshots and application-side semantic effects are not desktop isolation.`
       : "",
     skillCallable
       ? "Neko skill dynamic tool: callable. Only exact names under NEKO SKILL CATALOG are accepted; provider-native skill names are not Neko skills."
@@ -169,6 +204,7 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
   registry.mcp = withOracleTools(registry.mcp, cfg, registry.root);
   registry.mcp = withImageTools(registry.mcp, registry.root);
   registry.hooks = cfg.hooks;
+  registry.memoryHome = cfg.resolvedHome;
   registry.childSecretEnvNames = cfg.childSecretEnvNames;
   registry.allowDangerousBash = cfg.allowDangerousBash;
   registry.readOutsideRoot = cfg.readOutsideRoot;
@@ -212,6 +248,7 @@ export function configureToolRegistry(registry: ToolRegistry, cfg: NekoConfig, o
   registry.presence = cfg.computerUseOverlay;
   registry.residentUia = cfg.computerUseResident;
   registry.inputBackend = cfg.computerUseInput;
+  registry.computerInputPolicy = cfg.computerUseInputPolicy;
   registry.web = webPort;
   registry.loadSkill = (name) => {
     const skill = loadSkill(name, registry.root, cfg.resolvedHome);
@@ -236,9 +273,11 @@ export function inheritToolRegistrySettings<T extends ToolRegistry>(target: T, s
   // Provider-native children inside one AgentSession share the same bounded host lease. Never
   // construct another owner, and never fall back to the local Windows computer implementation.
   target.computerPort = source.computerPort;
+  target.computerHandler = source.computerHandler;
   target.allowDangerousBash = source.allowDangerousBash;
   target.explicitYolo = source.explicitYolo;
   target.readOutsideRoot = source.readOutsideRoot;
+  target.memoryHome = source.memoryHome;
   target.additionalWriteRoots = [...source.additionalWriteRoots];
   target.bashTimeoutCapMs = source.bashTimeoutCapMs;
   target.sandboxBash = source.sandboxBash;
@@ -251,6 +290,7 @@ export function inheritToolRegistrySettings<T extends ToolRegistry>(target: T, s
   target.presence = source.presence;
   target.residentUia = source.residentUia;
   target.inputBackend = source.inputBackend;
+  target.computerInputPolicy = source.computerInputPolicy;
   target.searxngUrl = source.searxngUrl;
   target.searchBackend = source.searchBackend;
   target.searxngKeepalive = source.searxngKeepalive;

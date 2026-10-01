@@ -19,7 +19,7 @@ import { terminalSafeText } from "../shared/terminal-text.ts";
 import { listSkills, loadSkill } from "../adapters/skills.ts";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { listTools } from "../core/tools.ts";
-import { deleteMemoryFile, listMemories, memoryEnabled, readMemoryFile, setMemoryEnabled } from "../core/memory.ts";
+import { deleteMemoryFile, listMemories, memoryEnabled, memoryTool, readMemoryFile, setMemoryEnabled } from "../core/memory.ts";
 import { fmtBytes, relativeTime, trunc } from "./format.ts";
 import type { Overlay } from "./select-list.tsx";
 import type { Line, LineKind } from "./transcript.tsx";
@@ -44,7 +44,7 @@ import { activeBrowserMeeting, startBrowserMeeting, stopBrowserMeeting } from ".
 import { discoverMeetingSupport, installMeetingSupportPack, readMeetingSupportPack, removeMeetingSupportPack } from "../adapters/meeting-support-pack.ts";
 import { deleteMeeting, formatMeetingTime, latestMeeting, listMeetings, readMeeting, readMeetingTranscript, type MeetingManifest } from "../adapters/meeting.ts";
 import { transcribeMeeting } from "../adapters/meeting-transcription.ts";
-import { normalizeSandboxDomains } from "../core/sandbox.ts";
+import { detectSandbox, normalizeSandboxDomains, type SandboxKind } from "../core/sandbox.ts";
 import { messageOf } from "../shared/debug.ts";
 import type { FeedbackLogLine } from "../adapters/feedback.ts";
 import { openFeedback } from "./feedback-flow.ts";
@@ -111,6 +111,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/contract", desc: "show the active completion contract and independent verdict" },
   { name: "/sessions", desc: "list saved sessions here" },
   { name: "/resume", desc: "resume a session (/resume [id|all]; Ctrl+A in the picker flips scope)" },
+  { name: "/task", desc: "explicit task session (/task new|use|list|status|resume)" },
   { name: "/handoff", desc: "send/list summary-only messages for this session" },
   { name: "/continue", desc: "pick up an interrupted task where it left off" },
   { name: "/retry", desc: "re-run the last message (e.g. after an error)" },
@@ -181,6 +182,20 @@ export interface CommandCtx {
   setTitle: (name: string) => void; // /title: name the session + pin the tab title
   setupBrowser?: () => Promise<string>; // /browser: open consented Store/local setup and start the bridge
   exit: () => void;
+}
+
+/** Local /sandbox status, with native Bash attestation kept separate from local primitive discovery. */
+export function sandboxCommandStatus(
+  enabled: boolean,
+  kind: SandboxKind,
+  native: "local" | "attested" | "unattested" = "local",
+): string {
+  if (!enabled) return "off";
+  if (native === "attested") return "on (native backend-enforced)";
+  if (native === "unattested") return "on (native backend lacks sandbox attestation; bash FAILS CLOSED)";
+  return kind === "none"
+    ? "on (requested but unavailable; no trusted OS primitive; bash FAILS CLOSED; no host fallback)"
+    : `on (${kind})`;
 }
 
 /** The last two path segments - enough to tell projects apart without eating the row. */
@@ -1061,6 +1076,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return;
     }
     case "/model": {
+      if (ctx.registry.taskScope) return addLine("info", "Model changes are unavailable in a scoped task session; resume requires the original model configuration.");
       const arg = input.slice("/model".length).trim();
       if (arg === "list") {
         ctx.setBusy(true);
@@ -1086,6 +1102,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         }
         cfg.data.model = arg;
         setModel(arg, cfg.profile); // remember it for the next session/folder too - in the ACTIVE profile
+        agent.setMaxContextTokens(cfg.contextWindow);
         return addLine("info", `model -> ${arg}`);
       }
       await openModelPicker(ctx); // model of the CURRENT provider (quick swap without changing account)
@@ -1094,6 +1111,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
     case "/provider":
     case "/providers":
     case "/profiles": {
+      if (ctx.registry.taskScope) return addLine("info", "Provider changes are unavailable in a scoped task session; resume requires the original provider configuration.");
       const arg = input.slice(cmd.length).trim();
       if (arg === "list") return addLine("info", "providers: " + providerChoices(cfg).map((choice) => choice.label).join(", "));
       if (arg === "openai") { openProviderPicker(ctx, "openai"); return; }
@@ -1105,6 +1123,9 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       const reg = ctx.registry;
       const arg = input.split(/\s+/)[1];
       if (arg) {
+        if (reg.taskScope && ["workflow", "playbook", "skill", "task"].includes(arg)) {
+          return addLine("info", `${arg} is unavailable in a scoped task session`);
+        }
         if (reg.disabled.has(arg)) reg.disabled.delete(arg);
         else reg.disabled.add(arg);
         return addLine("info", `${arg} -> ${reg.disabled.has(arg) ? "off" : "on"}`);
@@ -1112,10 +1133,13 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return addLine("info", "tools: " + listTools().map((t) => `${t.name}[${reg.disabled.has(t.name) ? "off" : "on"}]`).join("  "));
     }
     case "/init":
+      if (ctx.registry.taskScope) return addLine("info", "/init writes shared NEKO.md; unavailable in a scoped task session");
       return addLine("info", initProject());
     case "/skills":
+      if (ctx.registry.taskScope) return addLine("info", "Shared skills are unavailable in a scoped task session until explicit import.");
       return addLine("info", "skills: " + (listSkills().map((s) => s.name).join(", ") || "(none in ~/.neko-core/skills)"));
     case "/skill": {
+      if (ctx.registry.taskScope) return addLine("info", "/skill imports shared prose; unavailable in a scoped task session");
       const name = input.split(/\s+/)[1];
       if (!name) return addLine("info", "usage: /skill <name>  ·  /skills to list");
       const skill = loadSkill(name);
@@ -1140,6 +1164,9 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       // User-owned consent surface for the sandbox network policy (the runtime block tells the
       // agent this command exists, so "turn it on for me" becomes one confirmed step).
       const [, sub, flag, ...rest] = input.split(/\s+/);
+      if (ctx.registry.taskScope && sub === "network" && (flag === "on" || flag === "off")) {
+        return addLine("info", "Sandbox network changes are unavailable in a scoped task session; resume requires the original policy.");
+      }
       if (sub === "network" && flag === "off") {
         patchUserConfig({ sandbox_network: false });
         ctx.registry.sandboxAllowNetwork = false;
@@ -1166,9 +1193,13 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         : ctx.registry.sandboxDomains.length
           ? `allowlisted [${ctx.registry.sandboxDomains.join(", ")}]`
           : "BLOCKED (SRT needs explicit sandbox_domains)";
+      const native = ctx.registry.sandboxBash && ctx.registry.nativeBashOwned()
+        ? ctx.registry.nativeBashSandboxAttested() ? "attested" : "unattested"
+        : "local";
+      const kind = ctx.registry.sandboxBash && native === "local" ? detectSandbox() : "none";
       return addLine(
         "info",
-        `sandbox: ${ctx.registry.sandboxBash ? "on" : "off"}\nnetwork: ${network}\nusage: /sandbox network on <domain ...> | /sandbox network off  (applies now)`,
+        `sandbox: ${sandboxCommandStatus(ctx.registry.sandboxBash, kind, native)}\nnetwork: ${network}\nusage: /sandbox network on <domain ...> | /sandbox network off  (applies now)`,
       );
     }
     case "/bashes": {
@@ -1210,6 +1241,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       ctx.copy(input.slice("/copy".length).trim());
       return;
     case "/title":
+      if (ctx.registry.taskScope) return addLine("info", "Task labels are managed by /task; legacy /title is unavailable in a scoped task session.");
       ctx.setTitle(input.slice("/title".length).trim());
       return;
     case "/fps": {
@@ -1249,6 +1281,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       agent.restoreCompletionContract(undefined);
       return addLine("info", "(conversation reset)");
     case "/sessions": {
+      if (ctx.registry.taskScope) return addLine("info", "Legacy sessions are separate; use /task list or /task resume <id> before entering task mode.");
       const all = input.split(/\s+/)[1]?.toLowerCase() === "all";
       const mine = all ? listSessionMetas() : listSessionMetas().filter((s) => s.cwd === process.cwd());
       return addLine(
@@ -1259,6 +1292,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       );
     }
     case "/resume": {
+      if (ctx.registry.taskScope) return addLine("info", "Legacy /resume cannot enter a scoped task session. Use /task use <id>.");
       const arg = input.split(/\s+/)[1];
       // "/resume all" is a scope, not a session id (people type it instead of pressing Ctrl+A).
       if (arg && arg.toLowerCase() !== "all") {
@@ -1270,6 +1304,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return openResumePicker(ctx, arg ? "all" : "smart");
     }
     case "/handoff": {
+      if (ctx.registry.taskScope) return addLine("info", "Legacy handoff is unavailable in a scoped task session.");
       const rest = input.slice("/handoff".length).trim();
       const send = /^send\s+(\S+)\s+([\s\S]+)$/.exec(rest);
       if (send) {
@@ -1335,6 +1370,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return;
     }
     case "/effort": {
+      if (ctx.registry.taskScope) return addLine("info", "Effort changes are unavailable in a scoped task session; resume requires the original configuration.");
       if (cfg.usesGeminiCli) return addLine("info", "Gemini manages thinking adaptively for the selected model; OpenAI-style effort tiers do not apply.");
       let arg = input.slice("/effort".length).trim().toLowerCase();
       if (arg === "default") arg = "off";
@@ -1415,34 +1451,54 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       const userScope = rest.startsWith("--user");
       const note = userScope ? rest.slice("--user".length).trim() : rest;
       if (!note) return addLine("info", "usage: /remember [--user] <note>   (or just start a line with #)");
-      return addLine("info", rememberNote(note, userScope ? "user" : "project"));
+      const scope = ctx.registry.taskScope;
+      const home = scope ? ctx.registry.memoryHome : cfg.resolvedHome;
+      if (scope && userScope) {
+        return addLine("info", "Shared /remember --user is unavailable in a scoped task; use /remember <note> for task memory.");
+      }
+      return addLine("info", scope
+        ? memoryTool({ action: "append", name: "notes.md", content: note }, home, scope)
+        : rememberNote(note, userScope ? "user" : "project", home));
     }
     case "/memory": {
       const rest = input.slice("/memory".length).trim();
       const [rawAction = "", ...parts] = rest.split(/\s+/);
       const action = rawAction || "status";
       const name = parts.join(" ").trim();
-      if (action === "on") return addLine("info", setMemoryEnabled(true));
-      if (action === "off") return addLine("info", setMemoryEnabled(false));
-      if (action === "identity") return addLine("info", renderContext());
+      const scope = ctx.registry.taskScope;
+      const home = scope ? ctx.registry.memoryHome : cfg.resolvedHome;
+      if (scope && (action === "on" || action === "off")) {
+        return addLine("info", "Global memory on/off is unavailable inside a scoped task; no legacy memory was changed.");
+      }
+      if (action === "on") return addLine("info", setMemoryEnabled(true, home));
+      if (action === "off") return addLine("info", setMemoryEnabled(false, home));
+      if (action === "identity") return addLine("info", scope
+        ? "Shared identity is quarantined from this task. /task status shows the active task."
+        : renderContext(process.cwd(), home));
       if (action === "list") {
-        const memories = listMemories();
+        const memories = listMemories(home, scope);
         return addLine("info", memories.length ? memories.map((memory) => `- ${memory.name}: ${memory.summary}`).join("\n") : "(no memories yet)");
       }
       if (action === "read") {
         if (!name) return addLine("info", "usage: /memory read <name>");
-        return addLine("info", readMemoryFile(name));
+        return addLine("info", readMemoryFile(name, home, scope));
       }
       if (action === "forget" || action === "delete") {
         if (!name) return addLine("info", "usage: /memory forget <name>");
-        return addLine("info", deleteMemoryFile(name));
+        return addLine("info", deleteMemoryFile(name, home, scope));
       }
       if (action !== "status" && action !== "help") {
         return addLine("info", "usage: /memory [on|off|list|read <name>|forget <name>|identity]");
       }
-      const memories = listMemories();
+      const memories = listMemories(home, scope);
+      if (scope) return addLine("info", [
+        `Neko task memory: ${memoryEnabled(home) ? "on" : "off"}`,
+        `task: ${scope.id}`,
+        `saved task memory files: ${memories.length}`,
+        "legacy memory is excluded until an explicit import",
+      ].join("\n"));
       return addLine("info", [
-        `Neko memory: ${memoryEnabled() ? "on" : "off"}`,
+        `Neko memory: ${memoryEnabled(home) ? "on" : "off"}`,
         "identity: ~/.neko-core/NEKO.md (create once; always user-owned)",
         "core profiles: ~/.neko-core/memory/user.md + self.md (bounded in context)",
         `saved memory files: ${memories.length}`,
@@ -1477,8 +1533,10 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       return;
     }
     case "/recipes":
+      if (ctx.registry.taskScope) return addLine("info", "Shared recipes are unavailable in a scoped task session until explicit import.");
       return addLine("info", "recipes: " + (listRecipes().map((r) => r.name).join(", ") || "(none in ~/.neko-core/recipes)"));
     case "/recipe": {
+      if (ctx.registry.taskScope) return addLine("info", "Shared recipes cannot be imported into a scoped task session yet.");
       const rest = input.slice("/recipe".length).trim();
       const name = rest.split(/\s+/)[0];
       if (!name) return addLine("info", "usage: /recipe <name> [args]  ·  /recipes to list");

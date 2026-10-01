@@ -1,3 +1,4 @@
+# neko-computer-input-policy-v1
 # Windows mouse-control primitive for desktop computer-use (the "control" half of screenshot -> ground -> act).
 # Uses SendInput with ABSOLUTE coordinates -- the modern, DPI-safe path that the legacy mouse_event does NOT
 # provide: Windows 11 apps (the new Paint, etc.) ignore mouse_event drags but accept SendInput. `click`/`stroke`
@@ -10,6 +11,15 @@
 #   powershell -NoProfile -File mouse.ps1 dblclick <x> <y>
 #   powershell -NoProfile -File mouse.ps1 stroke <x1> <y1> <x2> <y2> [x3 y3 ...]   # pen-down drag (draw)
 param([string]$cmd = "pos")
+# Hidden execution does not grant desktop input ownership; explicit foreground policy is required.
+$inputPolicy = [string]$env:NEKO_COMPUTER_INPUT_POLICY
+if(-not $inputPolicy){ $inputPolicy='background' }
+if($inputPolicy -notin @('background','foreground')){ Write-Output 'unsupported computer input policy; expected background or foreground'; exit 1 }
+$inputPolicy=$inputPolicy.ToLowerInvariant()
+if($inputPolicy -eq 'background'){
+  Write-Output "needs_interaction: mouse helper requires foreground input policy"
+  exit 1
+}
 # DPI: PER-MONITOR-AWARE v2 BEFORE the Mouse class reads GetSystemMetrics, so W/H are PHYSICAL (1920, not the
 # virtualized 1536 at 125%) and the SendInput-absolute normalization matches uia.ps1's physical coords.
 try { Add-Type 'using System;using System.Runtime.InteropServices;public class Dpi{[DllImport("user32.dll")]public static extern bool SetProcessDpiAwarenessContext(IntPtr v);}'; [void][Dpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch {}

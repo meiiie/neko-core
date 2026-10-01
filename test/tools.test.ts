@@ -35,7 +35,14 @@ test("computer action validates inputs deterministically (no NaN/garbage reaches
     expect(String(await tools.execute("computer", { action: "click" }))).toContain("Windows-only");
     return;
   }
-  // These all return BEFORE spawnSync, so no PowerShell runs — pure input validation.
+  expect(tools.computerInputPolicy).toBe("background");
+  tools.computerInputPolicy = "foreground";
+  let helperDispatchReads = 0;
+  tools.loadSkill = () => ({ body: "", get dir(): string {
+    helperDispatchReads++;
+    throw new Error("Malformed input reached computer helper dispatch");
+  } });
+  // Every malformed case returns before temporary payloads or native helper dispatch.
   expect(String(await tools.execute("computer", { action: "click" }))).toContain("numeric");
   expect(String(await tools.execute("computer", { action: "click", x: "abc", y: 5 }))).toContain("numeric");
   expect(String(await tools.execute("computer", { action: "stroke", points: [1, 2, "x", 4] }))).toContain("NUMBERS");
@@ -47,6 +54,7 @@ test("computer action validates inputs deterministically (no NaN/garbage reaches
   expect(String(await tools.execute("computer", { action: "wait", duration_ms: -1 }))).toContain("0 to 10000");
   expect(String(await tools.execute("computer", { action: "open" }))).toContain("needs 'target'");
   expect(String(await tools.execute("computer", { action: "bogus" }))).toContain("Unknown computer action");
+  expect(helperDispatchReads).toBe(0);
 });
 
 test("computer wait and display dispatch through deterministic one-shot helpers", async () => {
@@ -57,6 +65,7 @@ test("computer wait and display dispatch through deterministic one-shot helpers"
     const scripts = join(skill, "scripts");
     mkdirSync(scripts, { recursive: true });
     writeFileSync(join(scripts, "input.ps1"), [
+      "# neko-computer-input-policy-v1",
       "param([string]$action, [string]$unused, [string]$duration)",
       'if ($action -eq "wait") { Write-Output ("waited {0} ms" -f $duration) }',
     ].join("\n"));
@@ -145,7 +154,7 @@ test("schema shape", () => {
 
 test("tool order", () => {
   const expected = [
-    "read_file", "search", "glob", "ls", "disk_cleanup_scan", "network_probe", "write_file", "edit", "multi_edit", "bash", "computer", "todo_write",
+    "read_file", "source_lookup", "search", "glob", "ls", "disk_cleanup_scan", "network_probe", "write_file", "edit", "multi_edit", "bash", "computer", "todo_write",
     "web_search", "web_fetch", "exit_plan_mode", "task", "memory", "skill", "workflow", "playbook",
   ];
   if (process.platform !== "win32") {

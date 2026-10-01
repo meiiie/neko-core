@@ -8,6 +8,17 @@ description: Drive the computer like a person when there is no programmatic path
 Distilled from the 2026 SOTA (UI-TARS-2, OpenCUA, Agent S2, **CoAct-1**, OSWorld 2.0, OSGuard). The hard
 truth first, then the method.
 
+## Local input policy
+
+The built-in Windows executor defaults to `computer_use_input_policy: "background"`.
+Use supported semantic UIA actions. If an action returns `needs_interaction`, stop
+or use a precise API/file tool; do not retry through Bash, SendInput or activation.
+The user must explicitly select `foreground` in global config or
+`NEKO_COMPUTER_USE_INPUT_POLICY` before startup for the physical-input examples
+below. Auto/yolo approval does not change this policy. Screenshot reads the shared
+visible desktop; semantic UIA providers can still produce application-side focus
+changes. See [the policy contract](../../docs/process/COMPUTER-INPUT.md).
+
 ## The hard truth (read this)
 - **Most "GUI" control needs NO vision.** The screen is already structured data — the OS accessibility
   tree (web=DOM, desktop=Windows UIA) exposes every control's name + role + exact coordinates as TEXT, so a

@@ -75,6 +75,8 @@ test("OpenCode Zen routes documented model families without guessing unknown or 
   expect(openCodeZenTransport("deepseek-v4-pro")).toBe("openai_compat");
   expect(openCodeZenTransport("glm-5.2")).toBe("openai_compat");
   expect(openCodeZenTransport("kimi-k3")).toBe("openai_compat");
+  expect(openCodeZenTransport("space-bunny-free")).toBe("openai_compat");
+  expect(openCodeZenTransport("space-bunny-pro")).toBe("unsupported");
   expect(openCodeZenTransport("gemini-3.7-flash")).toBe("unsupported");
   expect(openCodeZenTransport("future-unknown")).toBe("unsupported");
 });
@@ -97,14 +99,14 @@ test("unknown OpenCode wires fail before fetch and never expose the profile key"
 });
 
 test("one OpenCode provider key reaches each model family only through its documented endpoint", async () => {
-  const calls: Array<{ url: string; headers: Headers }> = [];
+  const calls: Array<{ url: string; headers: Headers; body: string }> = [];
   // SAFETY: the fake implements the fetch parameters and returns a real Response for every call.
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    calls.push({ url: String(input), headers: new Headers(init?.headers) });
+    calls.push({ url: String(input), headers: new Headers(init?.headers), body: String(init?.body ?? "") });
     return new Response('{"error":{"message":"probe stop"}}', { status: 401, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
 
-  for (const model of ["gpt-5.6-terra", "claude-sonnet-5", "glm-5.2"]) {
+  for (const model of ["gpt-5.6-terra", "claude-sonnet-5", "glm-5.2", "space-bunny-free"]) {
     const provider = new OpenCodeZenProvider(config(model));
     await expect(provider.complete([{ role: "user", content: "probe" }])).rejects.toThrow();
     await provider.dispose();
@@ -114,9 +116,11 @@ test("one OpenCode provider key reaches each model family only through its docum
     "https://opencode.ai/zen/v1/responses",
     "https://opencode.ai/zen/v1/messages",
     "https://opencode.ai/zen/v1/chat/completions",
+    "https://opencode.ai/zen/v1/chat/completions",
   ]);
   for (const call of calls) expect(call.headers.get("authorization")).toBe("Bearer zen-key");
   expect(calls[1].headers.get("x-api-key")).toBe("zen-key");
+  expect(JSON.parse(calls.at(-1)?.body ?? "{}").model).toBe("space-bunny-free");
 });
 
 test("OpenCode model discovery is public, keeps supported wires, and omits Gemini until native Google support", async () => {
@@ -128,19 +132,23 @@ test("OpenCode model discovery is public, keeps supported wires, and omits Gemin
       { id: "gpt-5.6-sol" },
       { id: "claude-fable-5" },
       { id: "glm-5.2" },
+      { id: "space-bunny-free" },
+      { id: "space-bunny-pro" },
       { id: "gemini-3.7-flash" },
       { id: "unknown-wire" },
     ] });
   }) as typeof fetch;
 
   const models = await listModelOptions(config());
-  expect(models.slice(0, 3)).toEqual([
+  expect(models.slice(0, 4)).toEqual([
     expect.objectContaining({ id: "gpt-5.6-sol", description: "OpenCode Zen - Responses API" }),
     expect.objectContaining({ id: "claude-fable-5", description: "OpenCode Zen - Messages API" }),
     expect.objectContaining({ id: "glm-5.2", description: "OpenCode Zen - Chat Completions API" }),
+    expect.objectContaining({ id: "space-bunny-free", description: "OpenCode Zen - Chat Completions API" }),
   ]);
   expect(models.some((model) => model.id.startsWith("gemini-"))).toBe(false);
   expect(models.some((model) => model.id === "unknown-wire")).toBe(false);
+  expect(models.some((model) => model.id === "space-bunny-pro")).toBe(false);
   expect(models.find((model) => model.id === "gpt-5.6-sol")?.contextWindow).toBe(131_072);
   expect(requestHeaders.has("authorization")).toBe(false);
 });

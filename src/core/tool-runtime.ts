@@ -9,6 +9,7 @@
  * tool never crashes the agent loop. Mutations stay inside the project or explicit additional roots.
  */
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -34,11 +35,14 @@ import { homeDir } from "../shared/home.ts";
 import type { ComputerToolPort, McpTools, WebPort } from "./ports.ts";
 import { decide, type PermissionMode } from "./permissions.ts";
 import { memoryTool } from "./memory.ts";
+import { assertTaskScope, taskScopeIsActive, type TaskScope } from "./task-scope.ts";
+import { renderCompactionSourceLookup, type CompactionSourceEvent, type TrustedReadFileSource } from "./compaction-source.ts";
 import { playbookTool } from "./playbook.ts";
 import { workflowTool } from "./workflows.ts";
-import { destructiveInWorkspace, detectSandbox, executableOnPath, isDockerCommand, normalizeSandboxDomains, sandboxActiveAsync, sandboxProcessDeadlineMs, srtHealthAsync, srtLaunchRefusal, withSrtStateVolumeGuidance, wrapBash } from "./sandbox.ts";
+import { destructiveInWorkspace, detectSandbox, executableOnPath, isDockerCommand, missingSandboxRefusal, normalizeSandboxDomains, sandboxActiveAsync, sandboxProcessDeadlineMs, srtHealthAsync, srtLaunchRefusal, withSrtStateVolumeGuidance, wrapBash } from "./sandbox.ts";
 import { effectivePermission, GATED, resolveTool, SAFE, taskDelegatesReadOnly, toolSchemas, type ToolSpec } from "./tools.ts";
-import { residentUiaHost } from "./windows-uia-host.ts";
+import { ResidentUiaAdmissionError, residentUiaHost } from "./windows-uia-host.ts";
+import { COMPUTER_INPUT_POLICY_CAPABILITY, ComputerInputPolicyCapabilityError, computerNeedsInteraction, parseComputerInputPolicy, type ComputerInputPolicy } from "./computer-input-policy.ts";
 import { debug, messageOf } from "../shared/debug.ts";
 import { scrubChildEnv } from "../shared/child-env.ts";
 import { minimalWindowsSystemEnv, resolveWindowsSystemExecutable } from "../shared/windows-system.ts";
@@ -72,6 +76,8 @@ export interface ToolTurnPolicy {
 export interface ToolTurnLease {
   close(): void;
 }
+
+const COMPUTER_PLATFORM_UNAVAILABLE = "Error: the computer tool is Windows-only (it drives Windows UI Automation via PowerShell). It is not available on this platform.";
 
 export interface ToolTurnPolicyDescriptor {
   name: string;
@@ -526,6 +532,142 @@ function normalizeNativeBackend(backend?: NativeToolBackend): any {
  * is mutable so a REPL can cycle it (Shift+Tab) at runtime.
  */
 export class ToolRegistry {
+  private boundTaskScope?: TaskScope;
+  private taskExecution?: Readonly<{
+    root: string;
+    nativeBackend: NativeToolBackend | undefined;
+    bashTarget: "host" | "sandbox";
+    computerInputPolicy: ComputerInputPolicy;
+    policyId: string;
+    allowedTools: readonly string[] | null;
+    deniedTools: readonly string[];
+    noTools: boolean;
+    computer: ComputerToolPort | undefined;
+    mcp: McpTools | undefined;
+    computerHandler: ToolRegistry["computerHandler"];
+    loadSkill: ToolRegistry["loadSkill"];
+    web: WebPort | undefined;
+    boundaries: string;
+  }>;
+
+  private executionBoundaries(): string {
+    return JSON.stringify({
+      computerInputPolicy: parseComputerInputPolicy(this.computerInputPolicy),
+      sandboxNetwork: this.sandboxAllowNetwork, sandboxDomains: [...this.sandboxDomains].sort(),
+      sandboxDenyReadFiles: [...this.sandboxDenyReadFiles].sort(),
+      readOutsideRoot: this.readOutsideRoot, additionalWriteRoots: [...this.additionalWriteRoots].sort(),
+      allowDangerousBash: this.allowDangerousBash, allowBackgroundBash: this.allowBackgroundBash,
+      hooks: this.hooks, nativeBackend: this.nativeBackendAttestation,
+      childSecretEnvNames: [...this.childSecretEnvNames].sort(),
+    });
+  }
+
+  private taskExecutionBindingRefusal(): string | null {
+    const binding = this.taskExecution;
+    if (!binding) return null;
+    if (!this.boundTaskScope || !taskScopeIsActive(this.boundTaskScope)) return "Blocked: task execution activation is retired.";
+    if (binding.root !== this.root || binding.nativeBackend !== this.nativeBackend
+      || binding.bashTarget !== (this.sandboxBash ? "sandbox" : "host")
+      || binding.computer !== this.computerPort || binding.mcp !== this.mcp
+      || binding.computerHandler !== this.computerHandler || binding.loadSkill !== this.loadSkill
+      || binding.web !== this.web || binding.boundaries !== this.executionBoundaries()) {
+      return "Blocked: task execution target or capabilities changed; activate a new runtime.";
+    }
+    return null;
+  }
+
+  /** Trusted factory admission checks pinned state, independently of tool availability. */
+  assertTaskExecutionBinding(): void {
+    if (!this.boundTaskScope || !this.taskExecution) throw new Error("Task execution binding is unavailable.");
+    const refusal = this.taskExecutionBindingRefusal();
+    if (refusal) throw new Error(refusal);
+  }
+
+  private taskExecutionRefusal(name?: string): string | null {
+    const refusal = this.taskExecutionBindingRefusal();
+    if (refusal) return refusal;
+    const binding = this.taskExecution;
+    if (!binding) return null;
+    if (binding.noTools || (name !== undefined && (binding.deniedTools.includes(name)
+      || (binding.allowedTools && !binding.allowedTools.includes(name))))) {
+      return `Blocked: ${name ?? "checkpoint restore"} exceeds the activated task capability ceiling.`;
+    }
+    return null;
+  }
+
+  /** A runtime policy receipt, never an OS permission grant or sandbox health assertion. */
+  taskExecutionReceipt() {
+    const scope = this.boundTaskScope;
+    const binding = this.taskExecution;
+    if (!scope || !binding) return undefined;
+    const computer = binding.noTools || binding.deniedTools.includes("computer")
+      || (binding.allowedTools && !binding.allowedTools.includes("computer"))
+      ? "unavailable" : binding.computer ? "host-port" : binding.computerHandler ? "injected-backend" : "local-host";
+    return {
+      version: 1, taskId: scope.id, root: scope.canonicalRoot,
+      activationEpoch: scope.activationEpoch, activationId: scope.activationId,
+      authorityId: scope.executionAuthorityId ?? null, policyId: binding.policyId,
+      bashTarget: binding.bashTarget,
+      bashExecutor: this.nativeBackendTools.has("bash") ? "native-backend" : "local-process",
+      nativeBackend: this.nativeBackendAttestation ? { protocol: this.nativeBackendAttestation.protocol,
+        root: this.nativeBackendAttestation.canonicalPosixRoot, bashSandbox: this.nativeBackendAttestation.bashSandbox } : null,
+      confinement: binding.bashTarget === "sandbox" ? "required-not-attested" : "none",
+      osAuthority: "not-attested",
+      interaction: { policy: binding.computerInputPolicy, scope: "owned-local-computer-helpers",
+        appliesToComputer: computer === "local-host", desktopIsolation: "not-attested" },
+      capabilities: { allowedTools: binding.allowedTools ? [...binding.allowedTools] : null,
+        deniedTools: [...binding.deniedTools], toolsDisabled: binding.noTools,
+        scope: "configured-registry", computer },
+      approval: { mode: this.mode, yolo: this.isExplicitYolo() },
+    };
+  }
+  private sourceLookup?: (id: string) => CompactionSourceEvent | undefined;
+  private configuredMemoryHome = homeDir();
+  /** Runtime-owned memory admission scope. A registry remains bound to one task/root. */
+  get taskScope(): TaskScope | undefined { return this.boundTaskScope; }
+
+  /** Legacy sessions may change home; a task-bound registry pins its canonical home. */
+  get memoryHome(): string { return this.configuredMemoryHome; }
+  set memoryHome(home: string) {
+    if (this.boundTaskScope) throw new Error("Task memory home is already bound to this registry");
+    this.configuredMemoryHome = home;
+  }
+
+  bindTaskScope(scope: TaskScope): void {
+    assertTaskScope(scope);
+    const physicalRoot = realpathSync.native(resolve(this.root));
+    const canonicalRoot = process.platform === "win32" ? physicalRoot.toLowerCase() : physicalRoot;
+    if (scope.canonicalRoot !== canonicalRoot) throw new Error("Task scope root does not match registry root");
+    if (this.boundTaskScope) throw new Error("Task scope already bound to this registry");
+    const physicalHome = realpathSync.native(resolve(this.configuredMemoryHome));
+    if (!statSync(physicalHome).isDirectory()) throw new Error("Task memory home must be a directory");
+    this.configuredMemoryHome = physicalHome;
+    // Unscoped skills and procedural stores are not admitted into a task without
+    // an explicit shared/import contract. This is also enforced at dispatch below.
+    this.disabled.add("skill");
+    this.disabled.add("workflow");
+    this.disabled.add("playbook");
+    this.boundTaskScope = scope;
+    const bashTarget = this.sandboxBash ? "sandbox" : "host";
+    const computerInputPolicy = parseComputerInputPolicy(this.computerInputPolicy);
+    const allowedTools = this.toolAllowlist ? Object.freeze([...this.toolAllowlist].sort()) : null;
+    const deniedTools = Object.freeze([...this.disabled].sort());
+    const boundaries = this.executionBoundaries();
+    const policyId = createHash("sha256").update(JSON.stringify({ bashTarget, allowedTools, deniedTools,
+      noTools: this.noTools, computer: Boolean(this.computerPort), boundaries })).digest("hex");
+    this.taskExecution = Object.freeze({ root: this.root, nativeBackend: this.nativeBackend,
+      bashTarget, computerInputPolicy, policyId, allowedTools, deniedTools,
+      noTools: this.noTools, computer: this.computerPort, mcp: this.mcp,
+      computerHandler: this.computerHandler, loadSkill: this.loadSkill, web: this.web, boundaries });
+  }
+
+  /** Only the Agent that owns this branded task registry can expose its validated archive. */
+  bindCompactionSourceLookup(scope: TaskScope, lookup: (id: string) => CompactionSourceEvent | undefined): void {
+    assertTaskScope(scope);
+    if (this.boundTaskScope !== scope || this.sourceLookup) throw new Error("Historical source lookup must bind once to the active task");
+    this.sourceLookup = lookup;
+  }
+
   mode: PermissionMode;
   /** Built-in tools turned off at runtime (via `/tools <name>` in chat). */
   disabled = new Set<string>();
@@ -614,6 +756,8 @@ export class ToolRegistry {
   /** Desktop input backend (computer_use_input): when "inject"/"sendinput", bash gets NEKO_INPUT=<value> so
    * mouse.ps1 routes clicks/strokes to the non-hijacking touch-injection path or the legacy SendInput path. */
   inputBackend = "";
+  /** Trusted local input policy; auto/yolo approval never enables foreground input. */
+  computerInputPolicy: ComputerInputPolicy = "background";
   /** Web-search backend (set from config). searxng_url -> self-hosted metasearch; else Tavily (env
    * key or `tavily_api_key` config) -> agent search; else DuckDuckGo (free, zero-config).
    * `searchBackend` forces one. */
@@ -757,6 +901,8 @@ export class ToolRegistry {
 
   /** Restore files to their pre-checkpoint state (undo this turn's write/edit/multi_edit). Returns count. */
   restoreCheckpoint(): number {
+    const refusal = this.taskExecutionRefusal();
+    if (refusal) throw new Error(refusal);
     let n = 0;
     this.restoreConflictPaths = [];
     this.restoreConflictCount = 0;
@@ -807,6 +953,9 @@ export class ToolRegistry {
 
   isToolAvailable(name: string): boolean {
     return !this.noTools
+      && !this.taskExecutionRefusal(name)
+      && !(this.boundTaskScope && (name === "skill" || name === "workflow" || name === "playbook"))
+      && !(name === "task" && this.boundTaskScope)
       && !this.disabled.has(name)
       && (!this.toolAllowlist || this.toolAllowlist.has(name))
       && (!this.turnToolPolicy?.allowedTools || this.turnToolPolicy.allowedTools.has(name))
@@ -888,6 +1037,15 @@ export class ToolRegistry {
       : undefined;
   }
 
+  /** Model-facing status must distinguish an attested native shell from the local OS primitive. */
+  nativeBashOwned(): boolean {
+    return Boolean(this.nativeBackendFor("bash"));
+  }
+
+  nativeBashSandboxAttested(): boolean {
+    return this.nativeBashOwned() && this.nativeBackendAttestation?.bashSandbox === "backend-enforced";
+  }
+
   private bashTimeoutMs(args: any): number {
     return Math.min(
       Math.max(Math.floor(Number(args.timeout) || BASH_TIMEOUT_MS), 1000),
@@ -951,11 +1109,15 @@ export class ToolRegistry {
     if (exactRefusal) return exactRefusal;
     if (signal?.aborted) return "(interrupted)";
     const sandboxKind = this.sandboxBash ? detectSandbox() : "none";
+    const missing = missingSandboxRefusal(this.sandboxBash, sandboxKind);
+    if (missing) return missing;
     const refusal = sandboxKind === "srt"
       ? srtLaunchRefusal(this.sandboxBash, sandboxKind, await srtHealthAsync(signal))
       : null;
     if (refusal) return refusal;
     if (signal?.aborted) return "(interrupted)";
+    const activationRefusal = this.taskExecutionRefusal("bash");
+    if (activationRefusal) return activationRefusal;
     const sb = wrapBash(command, this.root, {
       enabled: this.sandboxBash,
       allowNetwork: network.allowNetwork,
@@ -969,6 +1131,7 @@ export class ToolRegistry {
     const processDeadlineMs = sandboxProcessDeadlineMs(timeoutMs, sb.startupGraceMs);
     const env: NodeJS.ProcessEnv = scrubChildEnv(process.env, this.childSecretEnvNames);
     Object.assign(env, sb.env);
+    env.NEKO_COMPUTER_INPUT_POLICY = this.computerInputPolicy;
     if (this.presence) env.NEKO_PRESENCE = "1";
     if (this.inputBackend && this.inputBackend !== "auto") env.NEKO_INPUT = this.inputBackend;
     let child: BashChild;
@@ -1104,6 +1267,8 @@ export class ToolRegistry {
       }),
     };
     try {
+      const refusal = this.taskExecutionRefusal(name);
+      if (refusal) return refusal;
       const out = await backend.execute(name, Object.freeze({ ...args }), context);
       if (!isText(out) && !Array.isArray(out)) {
         throw new Error("returned an invalid native observation");
@@ -1135,6 +1300,7 @@ export class ToolRegistry {
     const builtIns = toolSchemas()
       .filter((s) => !(s.function.name === "computer" && this.computerPort))
       .filter((s) => !(s.function.name === "disk_cleanup_scan" && !this.readOutsideRoot))
+      .filter((s) => s.function.name !== "source_lookup" || Boolean(this.boundTaskScope && this.sourceLookup))
       .filter((s) => this.isToolAvailable(s.function.name))
       .map((schema) => this.schemaForTurn(schema));
     const hostComputer = this.computerPort && this.isToolAvailable("computer")
@@ -1197,7 +1363,16 @@ export class ToolRegistry {
     return schema;
   }
 
-  async execute(name: string, args: any, signal?: AbortSignal): Promise<string | any[]> {
+  async execute(name: string, args: any, signal?: AbortSignal,
+    onReadSource?: (source: TrustedReadFileSource) => void): Promise<string | any[]> {
+    if (name === "task" && this.boundTaskScope) {
+      return "Blocked: scoped task delegation needs a child runtime bound to the same task scope.";
+    }
+    if (this.boundTaskScope && (name === "skill" || name === "workflow" || name === "playbook")) {
+      return `Blocked: ${name} has no task-scoped admission contract.`;
+    }
+    const activationRefusal = this.taskExecutionRefusal(name);
+    if (activationRefusal) return activationRefusal;
     if (!isJsonObject(args)) {
       return `Error: arguments for ${name} must be an object`;
     }
@@ -1217,6 +1392,11 @@ export class ToolRegistry {
     }
     if (name === "bash" && args.run_in_background === true && this.turnToolPolicy?.allowBackgroundBash === false) {
       return `Error: background bash is unavailable for this turn (${this.turnToolPolicy.name}).`;
+    }
+    if (name === "computer" && !this.computerPort && !this.computerHandler) {
+      if (process.platform !== "win32") return COMPUTER_PLATFORM_UNAVAILABLE;
+      const refusal = computerNeedsInteraction(String(args.action ?? ""), this.computerInputPolicy);
+      if (refusal) return refusal;
     }
     let requestedBashNetworkDomains: string[] = [];
     if (name === "bash") {
@@ -1254,6 +1434,18 @@ export class ToolRegistry {
       const refusal = await this.exactValidatorSandboxRefusal(nativeBackend, signal);
       if (refusal) return refusal;
     }
+    // A configured local sandbox must exist before approval, adversarial review or executable
+    // hooks. Native Bash has its own trusted backend attestation and never uses the local shell.
+    if (name === "bash" && this.sandboxBash) {
+      if (nativeBackend) {
+        if (!this.nativeBashSandboxAttested()) {
+          return "Error: the remote native backend does not attest a Bash sandbox; bash was not executed.";
+        }
+      } else {
+        const missing = missingSandboxRefusal(true, detectSandbox());
+        if (missing) return missing;
+      }
+    }
     if (name === "skill" && this.skillToolUnavailable) {
       return `Tool 'skill' is unavailable for this turn: ${this.skillToolUnavailable}`;
     }
@@ -1263,6 +1455,8 @@ export class ToolRegistry {
     const preHookApplies = Boolean(this.hooks?.preToolUse)
       && !(name === "task" && taskDelegatesReadOnly(args));
     const runPreHook = async (): Promise<string | null> => {
+      const refusal = this.taskExecutionRefusal(name);
+      if (refusal) return refusal;
       const r = await runResponsiveChild(this.hooks!.preToolUse!, [], {
         shell: true, cwd: this.root, timeoutMs: 10_000, maxOutputBytes: 64 * 1024, signal,
         env: { ...scrubChildEnv(process.env, this.childSecretEnvNames), NEKO_TOOL: name, NEKO_ARGS: JSON.stringify(args) },
@@ -1275,7 +1469,7 @@ export class ToolRegistry {
         const cleanup = r.cleanupConfirmed ? "" : " (process-tree cleanup unconfirmed)";
         return `Blocked by pre_tool_use hook (${reason})${cleanup}: ${String(r.stderr || r.stdout || "").trim().slice(0, 200)}`;
       }
-      return null;
+      return this.taskExecutionRefusal(name);
     };
 
     // The catastrophic-command seatbelt is independent from sandbox and approval mode.
@@ -1292,6 +1486,16 @@ export class ToolRegistry {
         return `Blocked foreground polling: ${longPoll}. Start long-lived servers/watchers with ` +
           "run_in_background=true, then use short bounded status probes; one buffered shell call must not hold the turn.";
       }
+    }
+
+    if (name === "source_lookup") {
+      if (!this.boundTaskScope || !this.sourceLookup) return "Blocked: historical source lookup requires an active runtime task.";
+      const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
+      const id = args.id;
+      const offset = args.offset;
+      // Invalid IDs never query another task, store, cache, or legacy transcript.
+      const event = isText(id) && /^[a-f0-9]{64}$/.test(id) ? this.sourceLookup(id) : undefined;
+      return renderCompactionSourceLookup(event, id, offset);
     }
 
     if (name === "web_search") {
@@ -1341,6 +1545,8 @@ export class ToolRegistry {
     if (name === "mcp_load" && this.mcp?.loadTools) {
       const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       const names = Array.isArray(args.names) ? args.names.map(String) : [String(args.name ?? "")].filter(Boolean);
+      const refusal = this.taskExecutionRefusal(name);
+      if (refusal) return refusal;
       return this.mcp.loadTools(names);
     }
 
@@ -1358,6 +1564,8 @@ export class ToolRegistry {
       }
       const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
       try {
+        const refusal = this.taskExecutionRefusal(name);
+        if (refusal) return refusal;
         return await this.mcp.call(name, args, signal);
       } catch (error) {
         // SAFETY: caught value comes from the typed API calls in this try block; a non-Error throw would surface as undefined message text.
@@ -1476,6 +1684,9 @@ export class ToolRegistry {
     }
     const blocked = preHookApplies ? await runPreHook() : null; if (blocked) return blocked;
 
+    const dispatchRefusal = this.taskExecutionRefusal(name);
+    if (dispatchRefusal) return dispatchRefusal;
+
     // Generic children inherit the gated decision; read-only roles are host-restricted.
     if (name === "task") {
       if (signal?.aborted) return "(interrupted)"; // approval/review may have waited after the early check
@@ -1491,6 +1702,7 @@ export class ToolRegistry {
     }
 
     try {
+      let completedReadSource: TrustedReadFileSource | undefined;
       if (structuredPath) {
         const refusal = this.structuredMutationRefusal(structuredPath, String(args.path));
         if (refusal) return refusal;
@@ -1499,12 +1711,13 @@ export class ToolRegistry {
       // SAFETY: membership in the built-in tool-name set is checked just above.
       const out = nativeBackend ? await this.runNativeBackend(nativeBackend, name as NativeToolName, args, signal)
         : name === "bash" ? await this.runBash(args, signal)
-        : name === "read_file" ? await this.runReadFile(args, signal)
+        : name === "read_file" ? await this.runReadFile(args, signal, (source) => { completedReadSource = source; })
         : name === "disk_cleanup_scan" ? (this.readOutsideRoot
           ? await runDiskCleanupScan(signal)
           : "Error: disk_cleanup_scan is disabled because read_outside_root=false sets a hard project read wall.")
         : name === "network_probe" ? await runNetworkProbe(args, signal)
         : name === "skill" ? this.runSkill(args)
+        : name === "memory" ? memoryTool(args, this.memoryHome, this.boundTaskScope)
         : name === "computer" ? await this.runComputer(args, signal)
         : await DISPATCH[name](this.root, args, {
           readOutsideRoot: this.readOutsideRoot,
@@ -1537,6 +1750,9 @@ export class ToolRegistry {
         if (succeeded) this.remoteMutationPaths.add(String(args.path ?? "(unknown path)"));
       }
       await this.runPostHook(name, args, isText(out) ? out : "[image]", signal);
+      if (name === "read_file" && isText(out) && !out.startsWith("Error:") && completedReadSource) {
+        onReadSource?.(completedReadSource);
+      }
       return out;
     } catch (error) {
       if (structuredPath) this.finishStructuredMutation(structuredPath, false);
@@ -1547,7 +1763,8 @@ export class ToolRegistry {
 
   /** read_file with media awareness: images -> vision content (if enabled), PDFs -> extracted text,
    * everything else -> the line-numbered text path. */
-  private async runReadFile(args: any, signal?: AbortSignal): Promise<string | any[]> {
+  private async runReadFile(args: any, signal?: AbortSignal,
+    onReadSource?: (source: TrustedReadFileSource) => void): Promise<string | any[]> {
     const raw = requireArg(args, "path");
     const path = resolveForRead(this.root, raw, this.readOutsideRoot);
     if (!existsSync(path)) return `Error: no such file: ${raw}`;
@@ -1575,6 +1792,7 @@ export class ToolRegistry {
     return await toolReadFile(this.root, args, {
       readOutsideRoot: this.readOutsideRoot,
       additionalWriteRoots: this.additionalWriteRoots,
+      onReadSource,
     });
   }
 
@@ -1586,11 +1804,14 @@ export class ToolRegistry {
     // An injected backend owns the complete computer-tool contract.
     if (this.computerHandler) return this.computerHandler(args);
     if (process.platform !== "win32") {
-      return "Error: the computer tool is Windows-only (it drives Windows UI Automation via PowerShell). It is not available on this platform.";
+      return COMPUTER_PLATFORM_UNAVAILABLE;
     }
     const action = String(args.action ?? "");
+    const refusal = computerNeedsInteraction(action, this.computerInputPolicy);
+    if (refusal) return refusal;
     const skill = this.loadSkill?.("computer-use");
     const env: NodeJS.ProcessEnv = scrubChildEnv(process.env, this.childSecretEnvNames);
+    env.NEKO_COMPUTER_INPUT_POLICY = this.computerInputPolicy;
     if (args.window) { env.NEKO_UIA_WINDOW = String(args.window); env.NEKO_DRAW_WINDOW = String(args.window); }
     if (this.presence) env.NEKO_PRESENCE = "1";
     if (this.inputBackend && this.inputBackend !== "auto") env.NEKO_INPUT = this.inputBackend;
@@ -1695,24 +1916,40 @@ export class ToolRegistry {
             points: Array.isArray(args.points) ? args.points.map((n: any) => Math.round(Number(n))) : undefined,
             presence: this.presence,
             inputBackend: this.inputBackend,
+            inputPolicy: this.computerInputPolicy,
             capturePath: capturePath || undefined,
             width: action === "screenshot" ? 768 : undefined,
-          }, action === "watch" ? Number(args.duration_ms ?? 10_000) + 5_000 : 15_000, signal);
+          }, action === "watch" ? Number(args.duration_ms ?? 10_000) + 5_000 : 15_000, signal, () => {
+            const refusal = this.taskExecutionRefusal("computer");
+            if (refusal) throw new Error(refusal);
+          });
           if (!response.ok) return `Error: computer ${action} failed (resident Windows host). ${response.error || "unknown error"}`;
           if (action === "screenshot") residentOutput = response.output?.trim() || "";
           else return response.output?.trim() || "(no output)";
         } catch (error) {
           if (signal?.aborted) return "(interrupted)";
+          if (error instanceof ResidentUiaAdmissionError) return error.message;
+          if (error instanceof ComputerInputPolicyCapabilityError) {
+            return `Error: computer unsupported_helper: ${error.message}`;
+          }
           debug("computer", () => `resident Windows host unavailable, using one-shot fallback: ${messageOf(error)}`);
         }
       }
       let out = residentOutput ?? "", err = "";
       if (residentOutput === null) {
+        const refusal = this.taskExecutionRefusal("computer");
+        if (refusal) return refusal;
         if (action === "watch") return "Error: computer watch requires the resident Windows UIA host. Enable computer_use_resident, or use wait then read as the slower fallback.";
         if (action === "click" && args.mark !== undefined) return "Error: click by mark needs the resident host (computer_use_resident). Enable it and re-run ocr, or use a freshly verified screenshot with explicit x,y.";
+        const scriptPath = join(scriptsDir, script);
+        if (this.computerInputPolicy === "background" && !["screenshot", "display"].includes(action)) {
+          if (!existsSync(scriptPath) || !readFileSync(scriptPath, "utf8").includes(`# ${COMPUTER_INPUT_POLICY_CAPABILITY}`)) {
+            return "Error: computer unsupported_helper: trusted one-shot helper lacks background input-policy capability; update the support pack. No action was dispatched.";
+          }
+        }
         const r = await runResponsiveChild(
           WINDOWS_POWERSHELL,
-          ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(scriptsDir, script), ...sa],
+          ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, ...sa],
           { cwd: this.root, env, timeoutMs: 90_000, maxOutputBytes: 8 * 1024 * 1024, signal },
         );
         if (r.aborted) return `(interrupted)${r.cleanupConfirmed ? "" : "\n(process-tree cleanup could not be confirmed)"}`;
@@ -1747,6 +1984,7 @@ export class ToolRegistry {
 
   /** post_tool_use hook: ordered after the tool, but asynchronous so rendering/input stay live. */
   private async runPostHook(name: string, args: any, result: string, signal?: AbortSignal): Promise<void> {
+    if (this.taskExecutionRefusal(name)) return;
     if (!this.hooks?.postToolUse) return;
     try {
       const outcome = await runResponsiveChild(this.hooks.postToolUse, [], {
@@ -1772,13 +2010,29 @@ async function toolReadFile(root: string, args: any, opts: ToolOpts): Promise<st
   const limit = Number(args.limit) > 0 ? Math.floor(Number(args.limit)) : undefined;
   try {
     if (opened.size > MAX_INLINE_READ_BYTES) return await readLargeFileWindow(opened.fd, raw, offset, column, limit);
-    let text: string;
+    let bytes: Buffer;
     try {
-      text = (await readDescriptor(opened.fd)).toString("utf-8");
+      bytes = await readDescriptor(opened.fd);
     } catch {
       return `Error: cannot read file: ${raw}`;
     }
-    return formatReadWindow(splitFileLines(text), raw, offset, column, limit);
+    const rendered = formatReadWindow(splitFileLines(bytes.toString("utf-8")), raw, offset, column, limit);
+    if (opts.onReadSource && !rendered.startsWith("(offset ")) {
+      try {
+        // The path must still identify the descriptor just read. Otherwise keep the
+        // historical observation but decline to certify any pathname or revision.
+        const current = lstatSync(path);
+        const descriptor = fstatSync(opened.fd);
+        if (current.isFile() && current.dev === descriptor.dev && current.ino === descriptor.ino) {
+          const physical = realpathSync.native(path);
+          opts.onReadSource({
+            verifiedPath: process.platform === "win32" ? physical.toLowerCase() : physical,
+            resourceRevision: "sha256:" + createHash("sha256").update(bytes).digest("hex"),
+          });
+        }
+      } catch { /* A failed identity probe cannot erase a successful historical read. */ }
+    }
+    return rendered;
   } finally {
     try { closeSync(opened.fd); } catch { /* best effort; never replace a successful bounded read */ }
   }
@@ -2783,6 +3037,8 @@ export interface ToolOpts {
   /** Canonical identity captured when the exact-file lease was entered. */
   exactEditTarget?: string;
   signal?: AbortSignal;
+  /** Descriptor-derived identity of a successful local text read; never inferred from arguments. */
+  onReadSource?: (source: TrustedReadFileSource) => void;
 }
 
 const DISPATCH: any = {
@@ -2795,7 +3051,6 @@ const DISPATCH: any = {
   multi_edit: toolMultiEdit,
   // bash is handled by ToolRegistry.runBash (needs instance state for Ctrl+B backgrounding).
   // web_search + web_fetch are handled in execute() (need backend config / a summarizer).
-  memory: (_root: string, args: any) => memoryTool(args),
   workflow: (_root: string, args: any) => workflowTool(args),
   playbook: (_root: string, args: any) => playbookTool(args),
 };

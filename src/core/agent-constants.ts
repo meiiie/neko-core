@@ -232,6 +232,9 @@ export interface AgentOptions {
   /** Model context window (tokens). The loop compacts IN-LOOP before a request would overflow it,
    * so a single long turn (e.g. many huge browser snapshots) can't blow past the window. */
   maxContextTokens?: number;
+  /** Host-owned credential check for scoped historical source lookup. Omit to keep the lookup
+   * unavailable; the key is never persisted, logged, or sent to the provider. */
+  sourceArchiveCredential?: () => string | undefined;
   /** Opt-in pre-completion gate: the first tool-less final without fresh inspection/test evidence is
    * intercepted once and the model is told to re-inspect the ACTUAL state against the goal - catching
    * the "declared done without re-running the check" failure mode. (Config: `verify_before_exit`.) */

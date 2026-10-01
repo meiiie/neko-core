@@ -29,7 +29,7 @@ search:
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function ok(cmd: string, args: string[]): boolean {
-  try { return spawnSync(cmd, args, { encoding: "utf8", timeout: 12000 }).status === 0; } catch { return false; }
+  try { return spawnSync(cmd, args, { encoding: "utf8", timeout: 12000, windowsHide: true }).status === 0; } catch { return false; }
 }
 
 type BrowserMode = "persistent" | "attach" | "isolated";
@@ -79,14 +79,14 @@ async function setupSearxng(log: (m: string) => void): Promise<boolean> {
   const dir = join(homeDir(), "neko-searxng");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "settings.yml"), SETTINGS_YML, "utf-8");
-  spawnSync("docker", ["rm", "-f", "neko-searxng"], { encoding: "utf8", timeout: 30000 }); // idempotent
+  spawnSync("docker", ["rm", "-f", "neko-searxng"], { encoding: "utf8", timeout: 30000, windowsHide: true }); // idempotent
   // No --restart policy on purpose: Neko manages the lifecycle (Ollama-style) - web_search auto-starts
   // the container on demand and auto-stops it after `searxng_keepalive` idle minutes, so it costs zero
   // RAM between uses instead of idling forever.
   const run = spawnSync("docker", [
     "run", "-d", "--name", "neko-searxng",
     "-p", `${SEARXNG_PORT}:8080`, "-v", `${dir}:/etc/searxng`, "searxng/searxng:latest",
-  ], { encoding: "utf8", timeout: 240000 });
+  ], { encoding: "utf8", timeout: 240000, windowsHide: true });
   if (run.status !== 0) { log(`  [fail] SearXNG container — ${(run.stderr || run.stdout || "").trim().slice(0, 200)}`); return false; }
   log("  ...   SearXNG container started; waiting for the JSON API...");
   for (let i = 0; i < 14; i++) {

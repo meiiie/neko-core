@@ -136,8 +136,11 @@ export function collectChecks(
     : "";
   const srtBunBridge = config.sandbox && sandboxKind === "srt" ? resolveSrtBunBridge(process.cwd()) : null;
   const sandboxToolchainCheck = srtToolchainCheck(config.sandbox, sandboxKind, srtBunBridge);
-  const unconfinedAuto = config.mode === "auto" && (!config.sandbox || sandboxKind === "none");
-  const failClosedAuto = config.mode === "auto" && config.sandbox && sandboxKind !== "none" && !sandboxLive;
+  const unconfinedAuto = config.mode === "auto" && !config.sandbox;
+  const failClosedAuto = config.mode === "auto" && config.sandbox && !sandboxLive;
+  const sandboxFailure = sandboxKind === "none"
+    ? "no trusted OS sandbox primitive is available"
+    : `the configured ${sandboxKind} sandbox is unusable`;
   const needsCodexBridge = config.usesChatGptAuth && config.model.startsWith("gpt-5.6-");
   const bridge = needsCodexBridge ? (codexSupport ?? discoverCodexSupport()) : null;
   const bridgeUnavailable = needsCodexBridge && bridge?.state !== "ready";
@@ -208,8 +211,8 @@ export function collectChecks(
           : "auto - UNCONFINED AUTO: gated coding tools, outside structured writes, and host computer run without approval; bash has no live OS sandbox; destructive bash still asks"
         : failClosedAuto
           ? explicitYolo
-            ? `yolo (explicit --yolo) - gated coding tools, outside structured writes, and host computer run without approval; bash FAILS CLOSED because the configured ${sandboxKind} sandbox is unusable; hard seatbelts remain when bash can run`
-            : `auto - gated coding tools, outside structured writes, and host computer run without approval; bash FAILS CLOSED because the configured ${sandboxKind} sandbox is unusable; destructive bash still asks when bash can run`
+            ? `yolo (explicit --yolo) - gated coding tools, outside structured writes, and host computer run without approval; bash FAILS CLOSED because ${sandboxFailure}; hard seatbelts remain when bash can run`
+            : `auto - gated coding tools, outside structured writes, and host computer run without approval; bash FAILS CLOSED because ${sandboxFailure}; destructive bash still asks when bash can run`
         : config.mode === "auto"
           ? explicitYolo
             ? "yolo (explicit --yolo) - approval prompts disabled (including destructive bash); hard credential/system/catastrophic seatbelts remain"
@@ -228,11 +231,11 @@ export function collectChecks(
       name: "bash_sandbox",
       detail: unconfinedAuto
         ? explicitYolo
-          ? `UNCONFINED AUTO: ${config.sandbox ? "sandbox requested but not live" : "sandbox disabled"}; ordinary bash runs without approval; explicit --yolo disables remaining prompts (including workspace-destructive). The catastrophic-command seatbelt remains; it is not confinement.`
-          : `UNCONFINED AUTO: ${config.sandbox ? "sandbox requested but not live" : "sandbox disabled"}; ordinary bash runs without approval; workspace-destructive bash still asks. The seatbelt is not confinement.`
+          ? "UNCONFINED AUTO: sandbox disabled; ordinary bash runs without approval; explicit --yolo disables remaining prompts (including workspace-destructive). The catastrophic-command seatbelt remains; it is not confinement."
+          : "UNCONFINED AUTO: sandbox disabled; ordinary bash runs without approval; workspace-destructive bash still asks. The seatbelt is not confinement."
         : config.sandbox
         ? sandboxKind === "none"
-          ? "requested but unavailable on this OS - seatbelt + approval gate still apply"
+          ? "requested but unavailable (no trusted OS primitive) - bash FAILS CLOSED; no host fallback"
           : sandboxKind === "srt" && !srtIsProvisioned
             ? "on (srt) but not provisioned - bash FAILS CLOSED; run once: srt windows-install (one UAC prompt)"
             : sandboxKind === "srt" && !sandboxLive

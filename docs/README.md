@@ -20,7 +20,9 @@ the documents listed here.
 ## Capability guides
 
 - [ACP](process/ACP.md)
+- [ACP execution binding v1 candidate](process/ACP-EXECUTION-BINDING-V1.md)
 - [Browser Bridge](process/BROWSER-BRIDGE.md)
+- [Local computer input](process/COMPUTER-INPUT.md)
 - [Meetings](process/MEETINGS.md)
 - [Feedback and privacy](process/FEEDBACK.md) — reviewed private email reports, from v1.6.0.
 - [Office artifacts](process/OFFICE.md)

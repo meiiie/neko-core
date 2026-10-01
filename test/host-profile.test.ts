@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,6 +27,9 @@ test("built-in host profile is stable and round-trips durable authority", () => 
 test("host runtime excludes native/global tools and closes its in-band MCP", async () => {
   const root = mkdtempSync(join(tmpdir(), "neko-host-runtime-"));
   const home = mkdtempSync(join(tmpdir(), "neko-host-home-"));
+  const processHome = mkdtempSync(join(tmpdir(), "neko-host-process-home-"));
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
   let closed = false;
   const schemas = NEKOCUT_HOST_PROFILE.tools.map((tool) => ({
     type: "function",
@@ -50,6 +53,8 @@ test("host runtime excludes native/global tools and closes its in-band MCP", asy
     call: async () => "ok",
     close: async () => { closed = true; },
   };
+  process.env.HOME = processHome;
+  process.env.USERPROFILE = processHome;
   try {
     const cfg = loadConfig({ cwd: root, home });
     cfg.data.mcp = { configured_but_forbidden: { command: process.execPath, args: ["--version"] } };
@@ -59,6 +64,9 @@ test("host runtime excludes native/global tools and closes its in-band MCP", asy
       hostProfile: NEKOCUT_HOST_PROFILE,
       hostTools,
     });
+    expect(existsSync(join(home, ".neko-core", "memory", "user.md"))).toBe(true);
+    expect(existsSync(join(home, ".neko-core", "NEKO.md"))).toBe(true);
+    expect(existsSync(join(processHome, ".neko-core", "memory", "user.md"))).toBe(false);
     expect(runtime.registry.schemas().map((schema: any) => schema.function.name)).toEqual(hostToolNames(NEKOCUT_HOST_PROFILE));
     expect(runtime.registry.readOutsideRoot).toBe(false);
     expect(runtime.registry.allowBackgroundBash).toBe(false);
@@ -69,5 +77,10 @@ test("host runtime excludes native/global tools and closes its in-band MCP", asy
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
+    rmSync(processHome, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
   }
 });

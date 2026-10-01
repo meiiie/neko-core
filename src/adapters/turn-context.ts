@@ -20,6 +20,12 @@ export interface ProductionTurnContextOptions {
   includeTodos?: boolean;
 }
 
+function contextHome(registry: ToolRegistry, home: string): string {
+  // In task mode the registry owns memory admission. All home-sourced context must
+  // follow that same configured home, even if a caller supplies a stale home.
+  return registry.taskScope ? registry.memoryHome : home;
+}
+
 function hasAvailableExternalTool(registry: ToolRegistry): boolean {
   return Boolean(registry.mcp?.toolSchemas().some((schema) => {
     const name = String(schema?.function?.name ?? "");
@@ -30,15 +36,16 @@ function hasAvailableExternalTool(registry: ToolRegistry): boolean {
 /** Base/runtime/environment/project/core-memory remain present. Every optional catalog is emitted
  * only when its corresponding tool is callable under configured, role, and active-turn policy. */
 export function productionTurnContext(registry: ToolRegistry, options: ProductionTurnContextOptions): string {
+  const home = contextHome(registry, options.home);
   const blocks = [
-    environmentBlock({ model: options.model, provider: options.provider }, registry.root),
-    projectContextBlock(registry.root, options.home),
-    coreMemoryBlock(options.home),
-    registry.isToolAvailable("task") ? agentsContextBlock(registry.root, options.home) : "",
-    registry.isToolAvailable("skill") ? skillsContextBlock(registry, registry.root, options.home) : "",
-    registry.isToolAvailable("memory") ? memoryIndexBlock() : "",
-    registry.isToolAvailable("workflow") ? workflowsContextBlock() : "",
-    registry.isToolAvailable("playbook") ? playbookContextBlock() : "",
+    environmentBlock({ model: options.model, provider: options.provider }, registry.root, registry.taskScope),
+    projectContextBlock(registry.root, home, registry.taskScope),
+    coreMemoryBlock(home, registry.taskScope),
+    registry.isToolAvailable("task") ? agentsContextBlock(registry.root, home) : "",
+    registry.isToolAvailable("skill") ? skillsContextBlock(registry, registry.root, home) : "",
+    registry.isToolAvailable("memory") ? memoryIndexBlock(home, registry.taskScope) : "",
+    !registry.taskScope && registry.isToolAvailable("workflow") ? workflowsContextBlock() : "",
+    !registry.taskScope && registry.isToolAvailable("playbook") ? playbookContextBlock() : "",
     hasAvailableExternalTool(registry) ? registry.mcp?.indexBlock?.() ?? "" : "",
   ];
   const turn = [
@@ -51,9 +58,10 @@ export function productionTurnContext(registry: ToolRegistry, options: Productio
 
 /** Depth-one workers intentionally get only their small runtime plus a callable skill catalog. */
 export function subagentTurnContext(registry: ToolRegistry, home: string): string {
+  const effectiveHome = contextHome(registry, home);
   return [
     dynamicToolRuntimeBlock(registry),
-    registry.isToolAvailable("skill") ? skillsContextBlock(registry, registry.root, home) : "",
+    registry.isToolAvailable("skill") ? skillsContextBlock(registry, registry.root, effectiveHome) : "",
   ].filter(Boolean).join("\n\n");
 }
 
@@ -103,16 +111,17 @@ export function matchedTurnContext(
   home: string,
   skillLimit = 3,
 ): MatchedTurnContext {
+  const effectiveHome = contextHome(registry, home);
   const blocks: string[] = [];
   const skills: string[] = [];
   if (registry.isToolAvailable("skill")) {
-    for (const matched of matchSkills(rawText, skillLimit, registry.root, home)) {
+    for (const matched of matchSkills(rawText, skillLimit, registry.root, effectiveHome)) {
       if (registry.skillUnavailableReason(matched.name)) continue;
       skills.push(matched.name);
       blocks.push(`# Skill: ${matched.name}\n(skill files dir: ${matched.dir} - run bundled scripts from here)\n${matched.body}`);
     }
   }
-  const workflow = registry.isToolAvailable("workflow") ? matchWorkflow(rawText) : null;
+  const workflow = !registry.taskScope && registry.isToolAvailable("workflow") ? matchWorkflow(rawText) : null;
   if (workflow) blocks.push(`# Learned workflow: ${workflow.name}\n${workflow.body}`);
   const asyncCancel = asyncCancelVerificationGuidance(rawText);
   if (asyncCancel) blocks.push(asyncCancel);

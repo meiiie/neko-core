@@ -571,7 +571,7 @@ export class McpHub {
     if (pid) {
       try {
         if (process.platform === "win32") {
-          if (WINDOWS_TASKKILL) spawnSync(WINDOWS_TASKKILL, ["/PID", String(pid), "/T", "/F"], { timeout: 5000 });
+          if (WINDOWS_TASKKILL) spawnSync(WINDOWS_TASKKILL, ["/PID", String(pid), "/T", "/F"], { timeout: 5000, windowsHide: true, stdio: "ignore" });
         }
         else process.kill(pid, "SIGKILL");
       } catch { /* already gone */ }

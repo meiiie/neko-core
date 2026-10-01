@@ -156,15 +156,15 @@ function hasUnsafeConfigStructure(root: any): boolean {
 function hasExecutableProjectConfig(data: any): boolean {
   if (hasUnsafeConfigStructure(data)) return true;
   // A checkout may tune declarative model behavior after exact-cwd trust, but it must never grant
-  // itself write authority elsewhere on the host. External write roots are user-global/env policy.
-  if (Object.hasOwn(data, "additional_write_roots")) return true;
+  // itself external write or foreground input authority. Those capabilities are user-global/env policy.
+  if (Object.hasOwn(data, "additional_write_roots") || Object.hasOwn(data, "computer_use_input_policy")) return true;
   if (nonEmptyExecutableMap(Object.hasOwn(data, "hooks") ? data.hooks : undefined)
     || nonEmptyExecutableMap(Object.hasOwn(data, "mcp_servers") ? data.mcp_servers : undefined)
     || nonEmptyExecutableMap(Object.hasOwn(data, "mcpServers") ? data.mcpServers : undefined)) return true;
   const profiles = Object.hasOwn(data, "profiles") ? data.profiles : undefined;
   if (profiles !== undefined && !isObject(profiles)) return true;
   return isObject(profiles) && Object.values(profiles).some((profile) => isObject(profile)
-    && (Object.hasOwn(profile, "additional_write_roots")
+    && (Object.hasOwn(profile, "additional_write_roots") || Object.hasOwn(profile, "computer_use_input_policy")
       || nonEmptyExecutableMap(profile.hooks) || nonEmptyExecutableMap(profile.mcp_servers)
       || nonEmptyExecutableMap(profile.mcpServers)));
 }

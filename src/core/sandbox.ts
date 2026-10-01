@@ -531,16 +531,22 @@ export async function sandboxActiveAsync(signal?: AbortSignal): Promise<boolean>
 
 /** True when bash would actually run CONFINED right now: a primitive exists and (for srt) the
  * one-time provisioning is live. Sandboxed-bash auto-approval keys off this, never off the config
- * intent alone - "sandbox": true on a machine with no primitive must still prompt. */
+ * intent alone - "sandbox": true on a machine with no primitive must fail closed. */
 export function sandboxActive(): boolean {
   const kind = detectSandbox();
   if (kind === "none") return false;
   return kind !== "srt" || srtHealth().ok;
 }
 
-/** Refuse a configured-but-unhealthy Windows sandbox BEFORE launching the user's command. Presence
- * and health have different jobs: an absent primitive retains Neko's documented unconfined fallback,
- * while a present SRT whose behavioral probe failed must never be bypassed implicitly. */
+/** Refuse a configured sandbox with no trusted primitive before approval or launch. */
+export function missingSandboxRefusal(enabled: boolean, kind: SandboxKind): string | null {
+  return enabled && kind === "none"
+    ? "Error: configured OS sandbox is unavailable; no trusted primitive was found; bash was not executed."
+    : null;
+}
+
+/** Refuse a configured-but-unhealthy Windows sandbox BEFORE launching the user's command. An
+ * absent primitive is handled by missingSandboxRefusal; neither case may fall back to the host. */
 export function srtLaunchRefusal(
   enabled: boolean,
   kind: SandboxKind,
@@ -929,7 +935,11 @@ export function buildSandbox(
       ...(srt.cleanup ? { cleanup: srt.cleanup } : undefined),
     };
   }
-  return noneTarget(command); // none: git-bash on Windows, else the platform shell (seatbelt + gate still apply)
+  // buildSandbox is only for configured confinement. The explicit sandbox:false path in wrapBash
+  // uses noneTarget directly; a missing primitive or launch descriptor cannot grant host Bash.
+  throw new Error(kind === "none"
+    ? "configured OS sandbox is unavailable; no trusted primitive was found"
+    : "configured SRT sandbox launch is unavailable");
 }
 
 /** Spawn target for a bash command, sandboxed if enabled + available. */
@@ -960,11 +970,12 @@ export function wrapBash(command: string, root: string, opts: { enabled: boolean
     if (requiresLiveSandbox) throw new Error("restricted bash profile requires a live OS sandbox");
     return noneTarget(command);
   }
+  const kind = detectSandbox();
+  const missing = missingSandboxRefusal(true, kind);
+  if (missing) throw new Error(missing);
   // Host-daemon access is an explicit capability, not a side effect of recognizing a CLI name.
   // Without the override even an obfuscated/missed invocation remains inside the OS sandbox.
   if (!opts.readOnlyWorkspace && opts.allowHostDaemon && isDockerCommand(command)) return noneTarget(command);
-  const kind = detectSandbox();
-  if (requiresLiveSandbox && kind === "none") throw new Error("restricted bash profile requires a live OS sandbox");
   const exe = kind === "srt" ? findSrt() : null;
   // Use the exact primitive that detection already canonicalized. Spawning a bare name would ask
   // the OS to search PATH again and could select a workspace-local binary that detection rejected.

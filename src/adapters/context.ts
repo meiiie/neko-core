@@ -9,6 +9,7 @@ import { platform, release } from "node:os";
 import { appendCoreMemory, ensureCoreMemories, type MemoryBootstrapState } from "../core/memory.ts";
 import { findWindowsBash } from "../core/sandbox.ts";
 import { deniedCredentialPath } from "../core/read-policy.ts";
+import { assertTaskScope, type TaskScope } from "../core/task-scope.ts";
 import { trustedGitOutput } from "./trusted-git.ts";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
@@ -116,7 +117,21 @@ export interface ContextFile {
   text: string;
 }
 
-export function loadProjectContext(cwd: string = process.cwd(), home: string = homeDir()): ContextFile[] {
+function assertContextScopeRoot(cwd: string, scope: TaskScope): void {
+  assertTaskScope(scope);
+  const physical = realpathSync.native(resolve(cwd));
+  const canonical = process.platform === "win32" ? physical.toLowerCase() : physical;
+  if (canonical !== scope.canonicalRoot) {
+    throw new Error("Task context root does not match active task scope");
+  }
+}
+
+export function loadProjectContext(
+  cwd: string = process.cwd(),
+  home: string = homeDir(),
+  taskScope?: TaskScope,
+): ContextFile[] {
+  if (taskScope) assertContextScopeRoot(cwd, taskScope);
   const out: ContextFile[] = [];
   let total = 0;
 
@@ -140,8 +155,8 @@ export function loadProjectContext(cwd: string = process.cwd(), home: string = h
     }
   };
 
-  // Global user context first (least specific).
-  addGlobal(globalNekoMdPath(home), "~/.neko-core/NEKO.md");
+  // Legacy global context is not admitted to a scoped task without explicit import.
+  if (!taskScope) addGlobal(globalNekoMdPath(home), "~/.neko-core/NEKO.md");
 
   // Project instructions can redirect the entire agent. Only exact snapshotted bytes at the trusted
   // cwd enter context; ancestor repositories are separate trust roots and never inherit implicitly.
@@ -156,11 +171,14 @@ export function loadProjectContext(cwd: string = process.cwd(), home: string = h
 }
 
 /** The context block to prepend to the system prompt (empty string when none found). */
-export function projectContextBlock(cwd?: string, home?: string): string {
-  const files = loadProjectContext(cwd, home);
+export function projectContextBlock(cwd?: string, home?: string, taskScope?: TaskScope): string {
+  const files = loadProjectContext(cwd, home, taskScope);
   if (!files.length) return "";
   const blocks = files.map((f) => `<context path="${f.path}">\n${f.text}\n</context>`);
-  return "# Neko Core identity and project context (from NEKO.md / AGENTS.md / CLAUDE.md)\n\n" + blocks.join("\n\n");
+  const heading = taskScope
+    ? "# Neko Core project context (trusted exact root; NEKO.md / AGENTS.md / CLAUDE.md)"
+    : "# Neko Core identity and project context (from NEKO.md / AGENTS.md / CLAUDE.md)";
+  return heading + "\n\n" + blocks.join("\n\n");
 }
 
 /** Read-only diagnostic for `neko context`. */
@@ -222,13 +240,15 @@ function git(cwd: string, args: string[]): string {
 
 /** The agent's situational awareness: where it is, when, what it runs on. Goes in the prompt.
  *
- * SNAPSHOT semantics, memoized per (cwd, model, provider): the env block sits in the system prompt —
+ * SNAPSHOT semantics, memoized per (cwd, model, provider) in legacy sessions and per task
+ * activation in task mode: the env block sits in the system prompt -
  * the very head of every request — so any per-turn variation (a dirty-file count that flips on every
  * edit, a date that ticks) invalidates the provider's prompt-prefix cache for the ENTIRE conversation,
  * every turn. The volatile bits are exactly what the agent can (and should) fetch live with its own
  * tools, so the block is captured once and labeled a snapshot. (Manus: stable prefix, no timestamps;
  * "Don't Break the Cache", arXiv 2601.06007: 41-80% agent-cost cut from a stable prefix.) */
 const envSnapshot = new Map<string, string>();
+const taskEnvSnapshots = new WeakMap<TaskScope, Map<string, string>>();
 
 /** Render external metadata as inert text inside the XML-shaped prompt envelope. Cwd and Git refs
  * are repository-controlled data: Git permits angle brackets in refs on POSIX, so raw interpolation
@@ -244,12 +264,22 @@ function promptMetadata(value: any, maxChars: number): string {
     .replace(/'/g, "&apos;");
 }
 
-export function environmentBlock(info: { model?: string; provider?: string } = {}, cwd: string = process.cwd()): string {
+export function environmentBlock(
+  info: { model?: string; provider?: string } = {},
+  cwd: string = process.cwd(),
+  taskScope?: TaskScope,
+): string {
+  // Each activation gets a freshly constructed, runtime-branded TaskScope. A later A -> B -> A
+  // activation therefore recaptures Git state while repeated turns in A keep a stable prefix.
+  if (taskScope) assertContextScopeRoot(cwd, taskScope);
   const safeCwd = promptMetadata(cwd, 1024);
   const safeModel = promptMetadata(info.model, 256);
   const safeProvider = promptMetadata(info.provider, 128);
   const key = [safeCwd, safeModel, safeProvider].join("\0");
-  const hit = envSnapshot.get(key);
+  const snapshots = taskScope
+    ? (taskEnvSnapshots.get(taskScope) ?? new Map<string, string>())
+    : envSnapshot;
+  const hit = snapshots.get(key);
   if (hit) return hit;
   const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
   // The single highest-cost ambiguity on Windows agents is WHICH shell runs `bash` commands: told
@@ -274,7 +304,8 @@ export function environmentBlock(info: { model?: string; provider?: string } = {
     ? "(snapshot from session start - run `git status` etc. for the current state)"
     : "(snapshot from session start - this is not a Git repository. Do not run Git commands unless the user explicitly asks.)");
   const out = `<env>\n${lines.join("\n")}\n</env>`;
-  envSnapshot.set(key, out);
+  snapshots.set(key, out);
+  if (taskScope) taskEnvSnapshots.set(taskScope, snapshots);
   return out;
 }
 
