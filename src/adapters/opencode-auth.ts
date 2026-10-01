@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path";
 
 import { atomicWriteFileSync } from "../shared/atomic.ts";
-import { abortableDelay, requestSignal, throwIfAborted } from "../shared/abort.ts";
+import { abortable, abortableDelay, requestSignal, throwIfAborted } from "../shared/abort.ts";
 import { homeDir } from "../shared/home.ts";
 import { isJsonNumber, isJsonObject, isText, type JsonObject, type JsonValue } from "../shared/wire.ts";
 import { openBrowser } from "./chatgpt-auth.ts";
@@ -181,11 +181,14 @@ async function getJson(fetchImpl: typeof fetch, url: string, token: string, orgI
 }
 
 /** Fetch the account-managed provider catalog without persisting its dynamic contents. */
-export async function loadOpenCodeAccountConfig(fetchImpl: typeof fetch = fetch): Promise<OpenCodeAccountConfig> {
-  const token = await validOpenCodeAccessToken({ fetchImpl });
+export async function loadOpenCodeAccountConfig(fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<OpenCodeAccountConfig> {
+  throwIfAborted(signal);
+  // A caller may stop waiting without cancelling a shared token refresh for other callers.
+  const token = await abortable(validOpenCodeAccessToken({ fetchImpl }), signal);
+  throwIfAborted(signal);
   const credentials = loadOpenCodeCredentials();
   if (!credentials) throw new Error("OpenCode Console credentials disappeared during refresh. Run /login again.");
-  const body = await getJson(fetchImpl, `${fixedServer(credentials.server)}/api/config`, token, credentials.orgId);
+  const body = await getJson(fetchImpl, `${fixedServer(credentials.server)}/api/config`, token, credentials.orgId, signal);
   if (!isJsonObject(body) || !isJsonObject(body.config) || !isJsonObject(body.config.provider)) {
     throw new Error("OpenCode Console returned no usable provider catalog for this account.");
   }

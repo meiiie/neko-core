@@ -10,6 +10,7 @@ import { createInterface } from "node:readline/promises";
 import { join } from "node:path";
 import { format } from "node:util";
 
+import { cliProviderRetryStatus } from "../src/adapters/cli-provider-status.ts";
 import { Agent } from "../src/core/agent.ts";
 import { loadConfig, redactSecrets, type NekoConfig } from "../src/adapters/config.ts";
 import { inspectProjectTrust, listTrustedProjects, revokeProjectTrust, trustProject } from "../src/adapters/project-trust.ts";
@@ -197,6 +198,11 @@ async function promptApprove(toolName: string, args: any): Promise<boolean> {
 
 /** Compact, human-readable trace of the agent loop. */
 function printEvent(kind: string, data: any): void {
+  if (kind === "provider_attempt") {
+    const status = cliProviderRetryStatus(data);
+    if (status) process.stderr.write(`${status}\n`);
+    return;
+  }
   if (kind === "tool_call") {
     console.log(`\n  -> ${terminalSafeText(describeToolCall(data.name, data.arguments))}`);
   } else if (kind === "tool_result") {

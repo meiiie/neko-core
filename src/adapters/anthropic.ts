@@ -4,6 +4,7 @@
  * It implements the same `Provider` port as openai_compat, so it's a config choice (`provider: "anthropic"`),
  * not a core change. Converts Neko's internal OpenAI-shaped messages/tools to Anthropic blocks and back.
  */
+import { abortable, throwIfAborted } from "../shared/abort.ts";
 import type { Usage } from "../core/cost.ts";
 import { splitSystemContext } from "../core/agent-constants.ts";
 import { ProviderAttemptError, type CompleteOptions, type DeltaHook, type Provider, type ProviderResponse, type ToolCall } from "../core/ports.ts";
@@ -31,13 +32,14 @@ export class AnthropicProvider implements Provider {
   ) {}
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
+    throwIfAborted(signal);
     if (!this.cfg.baseUrl) throw new Error("anthropic provider needs a base_url (e.g. https://api.z.ai/api/anthropic).");
     const endpoint = new URL(this.cfg.baseUrl);
     if (endpoint.hostname === "api.z.ai" && /^\/api\/(?:paas|coding)\/v4\/?$/.test(endpoint.pathname)) {
       throw new Error("Z.AI endpoint/protocol mismatch: Anthropic Messages needs https://api.z.ai/api/anthropic. Set profiles.zai.base_url to that URL for GLM Coding Plan, or select /provider zai-openai for the paid OpenAI-compatible API. Check NEKO_BASE_URL too; no request was sent.");
     }
     if (!this.cfg.model) throw new Error("anthropic provider needs a model (e.g. glm-5.3 or claude-sonnet-5).");
-    const key = await this.resolveApiKey();
+    const key = await abortable(Promise.resolve(this.resolveApiKey()), signal);
     if (!key && !this.cfg.isLocalEndpoint) throw new Error("No API key for the anthropic provider. Set it in the profile's api_key or NEKO_API_KEY.");
 
     const stream = Boolean(onDelta);
@@ -97,8 +99,9 @@ export class AnthropicProvider implements Provider {
     let cacheOn = this.cfg.promptCache && this.rejectedCacheScope !== continuationScope;
     if (cacheOn) addCacheBreakpoints(payload);
 
+    throwIfAborted(signal);
     const headers: any = {
-      ...(await this.resolveHeaders()),
+      ...(await abortable(Promise.resolve(this.resolveHeaders()), signal)),
       "content-type": "application/json",
       "anthropic-version": "2023-06-01",
     };
@@ -109,8 +112,11 @@ export class AnthropicProvider implements Provider {
 
     const offlineDeadline = Date.now() + this.cfg.offlineRetrySeconds * 1000;
     let httpAttempt = 0, netAttempt = 0, effortHealTried = false, maxTokensHealTried = false;
+    let wireAttempt = 0;
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
+      wireAttempt++;
+      await opts?.onAttempt?.({ type: "attempt_started", attempt: wireAttempt });
       // IDLE timeout (reset on every streamed chunk), NOT a total request cap: a long-but-healthy
       // generation (a big landing page legitimately streams for minutes) must not be killed while tokens
       // keep arriving; only a genuine STALL aborts. AbortSignal.timeout() capped the whole request and
@@ -130,8 +136,10 @@ export class AnthropicProvider implements Provider {
         if (signal?.aborted) throw error;
         if (Date.now() >= offlineDeadline) throw new Error(`anthropic completion failed: ${msgOf(error)}`);
         netAttempt++;
+        const waitMs = this.retryDelayMs(Math.min(netAttempt - 1, 4));
+        await opts?.onAttempt?.({ type: "retry_scheduled", attempt: wireAttempt, reason: "transport_unavailable", delayMs: waitMs });
         onDelta?.("(offline - waiting for the network to come back, retrying...)", "reasoning");
-        await sleep(this.retryDelayMs(Math.min(netAttempt - 1, 4)), signal);
+        await sleep(waitMs, signal);
         continue;
       }
       if (res.ok) {
@@ -154,8 +162,10 @@ export class AnthropicProvider implements Provider {
           if (signal?.aborted) throw streamErr;
           if (isRetryableStreamStall(streamErr) && httpAttempt < this.cfg.maxRetries) {
             httpAttempt++;
+            const waitMs = this.retryDelayMs(httpAttempt - 1);
+            await opts?.onAttempt?.({ type: "retry_scheduled", attempt: wireAttempt, reason: streamErr instanceof ProviderAttemptError ? streamErr.code : "stream_timeout", delayMs: waitMs, maxRetries: this.cfg.maxRetries });
             onDelta?.(`(stream stalled - retrying in a moment, ${httpAttempt}/${this.cfg.maxRetries})`, "reasoning");
-            await sleep(this.retryDelayMs(httpAttempt - 1), signal);
+            await sleep(waitMs, signal);
             continue;
           }
           throw streamErr;
@@ -222,6 +232,7 @@ export class AnthropicProvider implements Provider {
         httpAttempt++;
         const ra = res.headers.get("retry-after");
         const waitMs = ra ? Math.min(this.cfg.retryMaxDelaySeconds * 1000, Math.max(0, (Number(ra) || 1) * 1000)) : this.retryDelayMs(httpAttempt - 1);
+        await opts?.onAttempt?.({ type: "retry_scheduled", attempt: wireAttempt, reason: res.status === 429 ? "rate_limited" : "server_error", delayMs: waitMs, maxRetries: this.cfg.maxRetries });
         onDelta?.(`(${res.status === 429 ? "rate limited" : `HTTP ${res.status}`} - retrying in ${Math.round(waitMs / 1000)}s, ${httpAttempt}/${this.cfg.maxRetries})`, "reasoning");
         await sleep(waitMs, signal);
         continue;

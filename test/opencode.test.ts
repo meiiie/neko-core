@@ -256,3 +256,45 @@ test("CLI OpenCode login and logout keep the Zen key profile-scoped and never ec
   const cleared = JSON.parse(readFileSync(configPath, "utf8"));
   expect(cleared.profiles.opencode.api_key).toBeUndefined();
 }, 15_000);
+
+test("OpenCode account cancellation prevents catalog fetch when already aborted", async () => {
+  accountHome();
+  let calls = 0;
+  // SAFETY: the synthetic fetch always rejects and never makes a network request.
+  globalThis.fetch = (async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => { calls++; throw new Error("unexpected network request"); }) as typeof fetch;
+  const provider = new OpenCodeAccountProvider(accountConfig());
+  const controller = new AbortController();
+  controller.abort();
+  try {
+    await expect(provider.complete([{ role: "user", content: "probe" }], undefined, undefined, controller.signal))
+      .rejects.toMatchObject({ name: "AbortError" });
+    expect(calls).toBe(0);
+  } finally { await provider.dispose(); }
+});
+
+test("OpenCode account cancellation interrupts an in-flight catalog request", async () => {
+  accountHome();
+  let calls = 0;
+  let announceStarted!: () => void;
+  const started = new Promise<void>((resolve) => { announceStarted = resolve; });
+  // SAFETY: this fetch fixture returns a Response promise and models AbortSignal cancellation.
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    calls++;
+    announceStarted();
+    return await new Promise<Response>((_resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("catalog did not honor cancellation")), 250);
+      init?.signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(new DOMException("Cancelled", "AbortError"));
+      }, { once: true });
+    });
+  }) as typeof fetch;
+  const provider = new OpenCodeAccountProvider(accountConfig());
+  const controller = new AbortController();
+  const completion = provider.complete([{ role: "user", content: "probe" }], undefined, undefined, controller.signal);
+  const outcome = completion.then(() => null, (error) => error);
+  await started;
+  controller.abort();
+  try { expect(await outcome).toMatchObject({ name: "AbortError" }); expect(calls).toBe(1); }
+  finally { await provider.dispose(); }
+});

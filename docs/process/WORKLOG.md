@@ -5,6 +5,31 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-10-01 - OpenCode cancellation and headless retry visibility (candidate)
+
+OpenCode account completions now honor cancellation before catalog work and during
+catalog requests. A cancelled caller can stop waiting for the shared token refresh
+without cancelling another caller's refresh. Two regressions reproduced the prior
+failure; the focused OpenCode/auth/provider/abort checks pass after the fix.
+
+Headless CLI retries now print allowlisted provider lifecycle metadata on stderr:
+reason, attempt and delay. Successful first attempts remain quiet; provider response
+bodies, credentials and model reasoning are not printed by this status formatter.
+Real CLI child-process tests against a local HTTP fixture cover 429/503 recovery and
+stdout/stderr separation. This does not change retry budgets or execution authority.
+
+Further cross-provider regressions reproduced cancellation delays in the compatible,
+Anthropic and Responses credential resolvers. These now stop waiting on cancellation.
+Anthropic and Responses also emit the same payload-free retry lifecycle events.
+Responses idle timeout no longer replays after partial text or a tool call was emitted;
+the core receives the typed continuation error instead. Empty pre-output stalls remain
+retryable. This prevents a replay path; it is not an exactly-once guarantee for external tools.
+
+Validation: 126 tests across nine focused files on Linux/Bun 1.4.0; typecheck and lint.
+Full cross-platform CI remains an acceptance gate. This is not a release or a claim
+of verified long-session model quality, Windows desktop behavior, or live network
+policy resolution. Existing integration work is outside this focused upstream patch.
+
 ## 2026-09-22 - v1.7.0 released
 
 Published [v1.7.0](https://github.com/meiiie/neko-core/releases/tag/v1.7.0) from

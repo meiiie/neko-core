@@ -1,7 +1,8 @@
 /** Official API-key provider for the standard Responses API (xAI and compatible endpoints). */
+import { abortable, throwIfAborted } from "../shared/abort.ts";
 import { randomUUID } from "node:crypto";
 
-import type { CompleteOptions, DeltaHook, Provider, ProviderResponse } from "../core/ports.ts";
+import { ProviderAttemptError, type CompleteOptions, type DeltaHook, type Provider, type ProviderResponse } from "../core/ports.ts";
 import { VERSION } from "../shared/version.ts";
 import type { NekoConfig } from "./config.ts";
 import { parseResponsesStream, toResponsesInput, toResponsesTools } from "./chatgpt-provider.ts";
@@ -23,6 +24,7 @@ export class ResponsesProvider implements Provider {
   ) {}
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
+    throwIfAborted(signal);
     if (!this.cfg.baseUrl) throw new Error("responses provider needs a base_url.");
     if (!this.cfg.model) throw new Error("responses provider needs a model.");
     const url = `${this.cfg.baseUrl.replace(/\/+$/, "")}/responses`;
@@ -52,11 +54,12 @@ export class ResponsesProvider implements Provider {
 
     let activeKey = "";
     const requestHeaders = async () => {
-      const key = await this.resolveApiKey();
+      const key = await abortable(Promise.resolve(this.resolveApiKey()), signal);
       if (!key && !this.cfg.isLocalEndpoint) {
         throw new Error("No API key for the responses provider. Set the profile key environment variable or NEKO_API_KEY.");
       }
-      const headers = new Headers(await this.resolveHeaders());
+      throwIfAborted(signal);
+      const headers = new Headers(await abortable(Promise.resolve(this.resolveHeaders()), signal));
       headers.set("Accept", "text/event-stream");
       headers.set("Content-Type", "application/json");
       headers.set("User-Agent", `neko-core/${VERSION}`);
@@ -72,8 +75,11 @@ export class ResponsesProvider implements Provider {
     let healedReasoning = false;
     let healedCacheKey = false;
     let recoveredAuth = false;
+    let wireAttempt = 0;
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
+      wireAttempt++;
+      await opts?.onAttempt?.({ type: "attempt_started", attempt: wireAttempt });
       const idle = new AbortController();
       let idleTimer: ReturnType<typeof setTimeout> | undefined;
       const bumpIdle = () => {
@@ -94,8 +100,10 @@ export class ResponsesProvider implements Provider {
         if (idleTimer) clearTimeout(idleTimer);
         if (signal?.aborted) throw error;
         if (Date.now() >= offlineDeadline) throw new Error(`Responses completion failed: ${messageOf(error)}`);
+        const waitMs = this.retryDelayMs(Math.min(netAttempt++, 4));
+        await opts?.onAttempt?.({ type: "retry_scheduled", attempt: wireAttempt, reason: "transport_unavailable", delayMs: waitMs });
         onDelta?.("(offline - waiting for the network to come back, retrying...)", "reasoning");
-        await wait(this.retryDelayMs(Math.min(netAttempt++, 4)), signal);
+        await wait(waitMs, signal);
         continue;
       }
 
@@ -111,10 +119,14 @@ export class ResponsesProvider implements Provider {
           );
         } catch (error) {
           if (signal?.aborted) throw error;
-          if ((idle.signal.aborted || (!semanticActivity && isRetryableStreamFailure(error))) && httpAttempt < this.cfg.maxRetries) {
+          // The parser also tracks partial tool arguments before onToolCallReady fires.
+          const replaySafe = !semanticActivity && (!(error instanceof ProviderAttemptError) || (error.retryable && error.recovery === "replay"));
+          if (replaySafe && (idle.signal.aborted || isRetryableStreamFailure(error)) && httpAttempt < this.cfg.maxRetries) {
             httpAttempt++;
+            const waitMs = this.retryDelayMs(httpAttempt - 1);
+            await opts?.onAttempt?.({ type: "retry_scheduled", attempt: wireAttempt, reason: idle.signal.aborted ? "stream_timeout" : "stream_interrupted", delayMs: waitMs, maxRetries: this.cfg.maxRetries });
             onDelta?.(`(temporary Responses stream failure - retrying, ${httpAttempt}/${this.cfg.maxRetries})`, "reasoning");
-            await wait(this.retryDelayMs(httpAttempt - 1), signal);
+            await wait(waitMs, signal);
             continue;
           }
           throw error;
@@ -157,6 +169,7 @@ export class ResponsesProvider implements Provider {
         const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
           ? Math.min(retryAfter * 1000, this.cfg.retryMaxDelaySeconds * 1000)
           : this.retryDelayMs(httpAttempt - 1);
+        await opts?.onAttempt?.({ type: "retry_scheduled", attempt: wireAttempt, reason: response.status === 429 ? "rate_limited" : "server_error", delayMs: waitMs, maxRetries: this.cfg.maxRetries });
         onDelta?.(`(${response.status === 429 ? "rate limited" : `HTTP ${response.status}`} - retrying in ${Math.round(waitMs / 1000)}s, ${httpAttempt}/${this.cfg.maxRetries})`, "reasoning");
         await wait(waitMs, signal);
         continue;

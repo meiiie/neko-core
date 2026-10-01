@@ -1,4 +1,5 @@
 /** OpenCode account OAuth and Zen API-key adapters behind one provider-neutral core port. */
+import { throwIfAborted } from "../shared/abort.ts";
 import type { CompleteOptions, DeltaHook, Provider, ProviderResponse } from "../core/ports.ts";
 import { isJsonNumber, isJsonObject, isText, type JsonObject, type JsonValue } from "../shared/wire.ts";
 import { AnthropicProvider } from "./anthropic.ts";
@@ -189,16 +190,18 @@ export class OpenCodeAccountProvider implements Provider {
 
   constructor(private readonly config: NekoConfig) {}
 
-  private async account(): Promise<OpenCodeAccountConfig> {
+  private async account(signal?: AbortSignal): Promise<OpenCodeAccountConfig> {
+    throwIfAborted(signal);
     if (this.accountCache && this.accountCache.until > Date.now()) return this.accountCache.value;
-    const value = await loadOpenCodeAccountConfig();
+    const value = await loadOpenCodeAccountConfig(fetch, signal);
+    throwIfAborted(signal);
     this.accountCache = { until: Date.now() + 60_000, value };
     return value;
   }
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
     if (!this.config.model) throw new Error("OpenCode Console needs a model. Use /model to choose one.");
-    const target = accountTarget(await this.account(), this.config.model);
+    const target = accountTarget(await this.account(signal), this.config.model);
     const headerIdentity = JSON.stringify(Object.entries(target.headers).sort(([a], [b]) => a.localeCompare(b)));
     const key = `${target.transport}:${target.baseUrl}:${target.apiModelId}:${headerIdentity}`;
     let current = this.delegates.get(key);

@@ -6,6 +6,7 @@
  * nothing more than pointing base_url at a local server, so there is no in-process GGUF
  * provider in the TS build (that lives only in the Python reference).
  */
+import { abortable, throwIfAborted } from "../shared/abort.ts";
 import { randomUUID } from "node:crypto";
 import { NekoConfig } from "./config.ts";
 import type { MoaRef } from "./config.ts";
@@ -477,13 +478,14 @@ export class OpenAICompatProvider implements Provider {
   ) {}
 
   async complete(messages: any[], tools?: any[], onDelta?: DeltaHook, signal?: AbortSignal, opts?: CompleteOptions): Promise<ProviderResponse> {
+    throwIfAborted(signal);
     if (!this.cfg.baseUrl) {
       throw new Error("openai_compat needs a base_url (set base_url or pick a --profile).");
     }
     if (!this.cfg.model) {
       throw new Error("openai_compat needs a model (set model or pick a --profile).");
     }
-    const key = await this.resolveApiKey();
+    const key = await abortable(Promise.resolve(this.resolveApiKey()), signal);
     if (!key && !this.cfg.isLocalEndpoint) {
       const keyEnv = this.cfg.profile ? this.cfg.profiles[this.cfg.profile]?.key_env : undefined;
       throw new Error(
@@ -533,7 +535,8 @@ export class OpenAICompatProvider implements Provider {
     }
 
     const url = `${this.cfg.baseUrl}/chat/completions`;
-    const headers: any = { ...(await this.resolveHeaders()), "Content-Type": "application/json" };
+    throwIfAborted(signal);
+    const headers: any = { ...(await abortable(Promise.resolve(this.resolveHeaders()), signal)), "Content-Type": "application/json" };
     if (isOfficialOpenRouter(this.cfg.baseUrl)) Object.assign(headers, OPENROUTER_APP_HEADERS);
     if (key) headers.Authorization = `Bearer ${key}`; // local servers need no auth
 
