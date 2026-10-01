@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
-import { runSlashCommand } from "../src/ui/commands.ts";
+import { runSlashCommand, sandboxCommandStatus } from "../src/ui/commands.ts";
 
 const HOME = mkdtempSync(join(tmpdir(), "neko-sandbox-command-"));
 const OLD_HOME = process.env.HOME;
@@ -19,6 +19,14 @@ afterAll(() => {
   if (OLD_HOME === undefined) delete process.env.HOME; else process.env.HOME = OLD_HOME;
   if (OLD_USERPROFILE === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = OLD_USERPROFILE;
   rmSync(HOME, { recursive: true, force: true });
+});
+
+test("/sandbox status distinguishes missing local primitive from host and native backends", () => {
+  expect(sandboxCommandStatus(false, "none")).toBe("off");
+  expect(sandboxCommandStatus(true, "none")).toContain("bash FAILS CLOSED; no host fallback");
+  expect(sandboxCommandStatus(true, "bwrap")).toBe("on (bwrap)");
+  expect(sandboxCommandStatus(true, "none", "attested")).toBe("on (native backend-enforced)");
+  expect(sandboxCommandStatus(true, "none", "unattested")).toContain("bash FAILS CLOSED");
 });
 
 test("/sandbox network changes the live registry and persists the next-session policy", async () => {
@@ -44,6 +52,7 @@ test("/sandbox network changes the live registry and persists the next-session p
   expect(registry.sandboxDomains).toEqual(["example.com", "api.github.com"]);
 
   await runSlashCommand("/sandbox", ctx);
+  expect(lines.at(-1)).toContain("sandbox: off");
   expect(lines.at(-1)).toContain("allowlisted [example.com, api.github.com]");
   expect(lines.at(-1)).toContain("applies now");
 

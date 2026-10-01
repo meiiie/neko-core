@@ -1,7 +1,24 @@
+# neko-computer-input-policy-v1
 # Keyboard, scroll, wait, and launch primitives for Windows computer-use.
 # Unicode text uses SendInput/KEYEVENTF_UNICODE. Scroll delegates to touch injection, so the real mouse stays put.
 # Usage: input.ps1 type @utf8file 1 @namefile | key @utf8file 1 @namefile | scroll down 2 | wait '' 500 | open @utf8file
 param([string]$cmd="wait", [string]$arg="", [int]$amount=1, [string]$name="")
+# Hidden execution does not grant desktop input ownership; explicit foreground policy is required.
+$inputPolicy = [string]$env:NEKO_COMPUTER_INPUT_POLICY
+if(-not $inputPolicy){ $inputPolicy='background' }
+if($inputPolicy -notin @('background','foreground')){ Write-Output 'unsupported computer input policy; expected background or foreground'; exit 1 }
+$inputPolicy=$inputPolicy.ToLowerInvariant()
+if($inputPolicy -eq 'background' -and $cmd -ne 'wait'){
+  Write-Output "needs_interaction: computer $cmd requires foreground input policy"
+  exit 1
+}
+# Wait needs no DPI/native initialization, target file read, or presence overlay.
+if($cmd -eq "wait"){
+  if($amount -lt 0 -or $amount -gt 10000){ Write-Output "Error: wait must be 0..10000 ms."; exit 1 }
+  Start-Sleep -Milliseconds $amount
+  Write-Output ("waited " + $amount + " ms")
+  exit
+}
 
 # Scroll reads a window rectangle here, then hands those coordinates to the Per-Monitor-v2 touch process.
 # Join that same PHYSICAL pixel space before any geometry API runs; otherwise 125% scaling turns 1920 into
@@ -40,13 +57,7 @@ function Write-Audit([string]$detail) {
   } catch {}
 }
 
-# These actions need neither UI Automation nor SendInput; skip C# compilation and return quickly.
-if($cmd -eq "wait"){
-  if($amount -lt 0 -or $amount -gt 10000){ Write-Output "Error: wait must be 0..10000 ms."; exit 1 }
-  Start-Sleep -Milliseconds $amount
-  Write-Output ("waited " + $amount + " ms")
-  exit
-}
+# Opening a target needs neither UI Automation nor SendInput; skip C# compilation.
 if($cmd -eq "open"){
   Write-Audit "open target"
   Start-Process -FilePath $arg -ErrorAction Stop

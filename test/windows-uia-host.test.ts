@@ -61,6 +61,23 @@ test("resident OCR bounds async waits, disposes captures, and refuses stale mark
   expect(source).toContain("# Marks are one-use capabilities.");
 });
 
+test("queued request waits for teardown published between microtasks", async () => {
+  const host = new ResidentUiaHost(script);
+  // Test-only reflection replaces the I/O edge and one pending barrier; no process is spawned.
+  let started = 0;
+  expect(Reflect.set(host, "requestNow", async () => { started++; return { id: 1, ok: true }; })).toBe(true);
+  let release!: () => void;
+  const heldTeardown = new Promise<void>((resolve) => { release = resolve; });
+  const request = host.request({ action: "ping" });
+  queueMicrotask(() => { Reflect.set(host, "teardown", heldTeardown); });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(started).toBe(0);
+  release();
+  expect((await request).ok).toBe(true);
+  expect(started).toBe(1);
+});
+
 async function waitForUiaText(read: () => Promise<string>, needle: string, timeoutMs = 25_000): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   let last = "";
@@ -135,16 +152,21 @@ test("a resident wait can be interrupted and the host recovers", async () => {
   const abort = new AbortController();
   try {
     const before = await host.request({ action: "ping" });
-    setTimeout(() => abort.abort(), 50);
-    await expect(host.request({ action: "wait", durationMs: 10_000 }, 15_000, abort.signal))
+    const waiting = host.request({ action: "wait", durationMs: 10_000 }, 15_000, abort.signal);
+    await Bun.sleep(50);
+    const abortStartedAt = performance.now();
+    abort.abort();
+    expect(performance.now() - abortStartedAt).toBeLessThan(1_000);
+    await expect(waiting)
       .rejects.toThrow("interrupted");
+    expect(performance.now() - abortStartedAt).toBeLessThan(1_000);
     const after = await host.request({ action: "ping" });
     expect(after.ok).toBe(true);
     expect(after.pid).not.toBe(before.pid);
   } finally {
     await host.dispose();
   }
-}, 15_000);
+}, 30_000); // two cold PowerShell starts and two bounded process-tree teardowns
 
 test("resident host captures consecutive frames and keeps delta state in one process", async () => {
   if (process.platform !== "win32") return;

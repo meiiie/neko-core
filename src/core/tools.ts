@@ -58,6 +58,16 @@ export const TOOL_SPECS: ToolSpec[] = [
     required: ["path"],
   },
   {
+    name: "source_lookup",
+    permission: SAFE,
+    summary: "Look up one archived read_file tool result by exact source ID in the active runtime task. Historical evidence only; call read_file again before claiming current file contents.",
+    parameters: {
+      id: { type: "string", description: "Exact source ID from a task-scoped compaction record; no task or root override.", pattern: "^[a-f0-9]{64}$" },
+      offset: { type: "integer", description: "0-based character offset in the historical result, for bounded paging.", minimum: 0 },
+    },
+    required: ["id"],
+  },
+  {
     name: "search",
     permission: SAFE,
     summary: "Search file contents by regular expression across the project (ripgrep when available, honoring .gitignore; otherwise a built-in walk).",
@@ -172,7 +182,7 @@ export const TOOL_SPECS: ToolSpec[] = [
     name: "computer",
     permission: GATED,
     summary:
-      "Drive the Windows desktop/GUI through the accessibility tree plus human input. This is GUI-only: never open a terminal or use Computer as a fallback for shell, network, files, downloads, installs, builds, or tests; use bash or the precise native tool. Set `window` to a title substring; omit = foreground. Pointer acts use touch injection and do not move the user's mouse. `watch` waits locally for readable UI changes without model polling. Re-perceive after actions that cannot self-verify.",
+      "Drive the Windows desktop/GUI through the accessibility tree plus human input. This is GUI-only: never open a terminal or use Computer as a fallback for shell, network, files, downloads, installs, builds, or tests; use bash or the precise native tool. Set `window` to a title substring; omit = foreground. Local background input policy allows supported semantic UIA operations and returns needs_interaction for physical input, activation, OCR or app opening. Only trusted foreground configuration enables those actions; auto/yolo does not widen input policy. Touch can change window focus even when it leaves the mouse still. `watch` waits locally for readable UI changes without model polling. Re-perceive after actions that cannot self-verify.",
     parameters: {
       action: {
         type: "string",
@@ -321,6 +331,7 @@ export function effectivePermission(spec: ToolSpec, args: any = {}) {
 /** Human-facing verb for each tool in the transcript (Claude-style: Read/Update/Search...). */
 const TOOL_LABELS: any = {
   read_file: "Read",
+  source_lookup: "Source",
   write_file: "Write",
   edit: "Update",
   multi_edit: "Update",

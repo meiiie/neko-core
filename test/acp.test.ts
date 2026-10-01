@@ -195,6 +195,193 @@ test("ACP v1 maps Neko modes, permission gating, tool updates, and streaming", a
   expect(closed).toBe(true);
 }, 15_000);
 
+test("ACP rejected edit records one canonical result for provider follow-up and durable replay", async () => {
+  const root = tempRoot();
+  const home = tempRoot();
+  writeFileSync(join(root, "sample.txt"), "old", "utf8");
+  const cfg = loadConfig({ cwd: root, home });
+  cfg.data.mode = "default";
+  const toolId = "deny-edit-1";
+  const updates: acp.SessionUpdate[] = [];
+  let sessionId = "";
+  let permissionRequests = 0;
+  let providerCalls = 0;
+  let followUpHistory: any[] = [];
+
+  const app = createNekoAcpAgent({
+    config: cfg,
+    buildRuntime: async (runtimeConfig, options) => {
+      const registry = new ToolRegistry(options.root, options.mode, options.approval);
+      const provider: Provider = {
+        async complete(messages) {
+          providerCalls++;
+          if (providerCalls === 1) return {
+            content: null,
+            tool_calls: [{ id: toolId, name: "edit", arguments: {
+              path: "sample.txt", old_string: "old", new_string: "new",
+            } }],
+          };
+          followUpHistory = structuredClone(messages);
+          return { content: "Final: edit was denied; sample.txt remains old.", tool_calls: [] };
+        },
+      };
+      return {
+        agent: new Agent({
+          provider, tools: registry, maxSteps: 3,
+          onDelta: options.onDelta, onEvent: options.onEvent,
+          verifyBeforeExit: false, verifyStateChangesBeforeExit: false,
+        }),
+        registry,
+        config: runtimeConfig,
+        close: async () => {},
+      };
+    },
+  });
+  const client = acp.client({ name: "denial-result-once" })
+    .onRequest(acp.methods.client.session.requestPermission, ({ params }) => {
+      permissionRequests++;
+      expect(params.toolCall.toolCallId).toBe(toolId);
+      return { outcome: { outcome: "selected", optionId: "reject_once" } };
+    })
+    .onNotification(acp.methods.client.session.update, ({ params }) => { updates.push(params.update); });
+
+  await client.connectWith(app, async (ctx) => {
+    await ctx.request(acp.methods.agent.initialize, {
+      protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {},
+    });
+    sessionId = (await ctx.request(acp.methods.agent.session.new, { cwd: root, mcpServers: [] })).sessionId;
+    const result = await ctx.request(acp.methods.agent.session.prompt, {
+      sessionId, prompt: [{ type: "text", text: "Replace old with new in sample.txt only if approved." }],
+    });
+    expect(result.stopReason).toBe("end_turn");
+    expect(readFileSync(join(root, "sample.txt"), "utf8")).toBe("old");
+    expect(permissionRequests).toBe(1);
+    expect(providerCalls).toBe(2);
+
+    const providerResults = followUpHistory.filter((message) => message.role === "tool" && message.tool_call_id === toolId);
+    expect(providerResults).toHaveLength(1);
+    expect(String(providerResults[0].content)).toContain("Denied by user: edit");
+    const providerCallsForId = followUpHistory.flatMap((message) => message.role === "assistant"
+      ? (message.tool_calls ?? []).filter((call: { id?: string }) => call.id === toolId) : []);
+    expect(providerCallsForId).toHaveLength(1);
+
+    const saved = loadSession(sessionId);
+    expect(saved?.turnState).toMatchObject({ status: "idle", lastStopReason: "end_turn" });
+    const durableResults = saved?.messages.filter((message) => message.role === "tool" && message.tool_call_id === toolId) ?? [];
+    expect(durableResults).toHaveLength(1);
+    expect(String(durableResults[0].content)).toContain("Denied by user: edit");
+    const durableCalls = saved?.messages.flatMap((message) => message.role === "assistant"
+      ? (message.tool_calls ?? []).filter((call: { id?: string }) => call.id === toolId) : []) ?? [];
+    expect(durableCalls).toHaveLength(1);
+    expect(updates.filter((update) => update.sessionUpdate === "tool_call" && update.toolCallId === toolId)).toHaveLength(1);
+    const results = updates.filter((update) => update.sessionUpdate === "tool_call_update" && update.toolCallId === toolId);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ status: "failed" });
+    await ctx.request(acp.methods.agent.session.close, { sessionId });
+  });
+
+  let replayProviderCalls = 0;
+  let replayToolExecutions = 0;
+  const replayUpdates: acp.SessionUpdate[] = [];
+  const replayApp = createNekoAcpAgent({
+    config: cfg,
+    buildRuntime: async (runtimeConfig, options) => {
+      const registry = new ToolRegistry(options.root, options.mode, options.approval);
+      const originalExecute = registry.execute.bind(registry);
+      registry.execute = async (...args: Parameters<typeof originalExecute>) => {
+        replayToolExecutions++;
+        return originalExecute(...args);
+      };
+      return {
+        agent: new Agent({
+          provider: { async complete() {
+            replayProviderCalls++;
+            throw new Error("ACP load must not call the provider");
+          } },
+          tools: registry, onEvent: options.onEvent,
+          verifyBeforeExit: false, verifyStateChangesBeforeExit: false,
+        }),
+        registry,
+        config: runtimeConfig,
+        close: async () => {},
+      };
+    },
+  });
+  await acp.client({ name: "denial-result-replay" })
+    .onNotification(acp.methods.client.session.update, ({ params }) => { replayUpdates.push(params.update); })
+    .connectWith(replayApp, async (ctx) => {
+      await ctx.request(acp.methods.agent.initialize, {
+        protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {},
+      });
+      await ctx.request(acp.methods.agent.session.load, { sessionId, cwd: root, mcpServers: [] });
+      expect(replayUpdates.filter((update) => update.sessionUpdate === "tool_call" && update.toolCallId === toolId))
+        .toHaveLength(1);
+      const replayedResults = replayUpdates.filter((update) =>
+        update.sessionUpdate === "tool_call_update" && update.toolCallId === toolId);
+      expect(replayedResults).toHaveLength(1);
+      expect(replayedResults[0]).toMatchObject({ status: "failed" });
+      expect(replayProviderCalls).toBe(0);
+      expect(replayToolExecutions).toBe(0);
+      expect(readFileSync(join(root, "sample.txt"), "utf8")).toBe("old");
+      await ctx.request(acp.methods.agent.session.close, { sessionId });
+    });
+});
+
+test("ACP does not turn an unexpected provider error after edit denial into a successful turn", async () => {
+  const root = tempRoot();
+  const home = tempRoot();
+  writeFileSync(join(root, "sample.txt"), "old", "utf8");
+  const cfg = loadConfig({ cwd: root, home });
+  cfg.data.mode = "default";
+  let providerCalls = 0;
+  let permissionRequests = 0;
+  const app = createNekoAcpAgent({
+    config: cfg,
+    buildRuntime: async (runtimeConfig, options) => {
+      const registry = new ToolRegistry(options.root, options.mode, options.approval);
+      return {
+        agent: new Agent({
+          provider: { async complete() {
+            providerCalls++;
+            if (providerCalls === 1) return {
+              content: null,
+              tool_calls: [{ id: "deny-then-error", name: "edit", arguments: {
+                path: "sample.txt", old_string: "old", new_string: "new",
+              } }],
+            };
+            throw new Error("synthetic nonrecoverable provider error");
+          } },
+          tools: registry, maxSteps: 3,
+          onEvent: options.onEvent,
+          verifyBeforeExit: false, verifyStateChangesBeforeExit: false,
+        }),
+        registry,
+        config: runtimeConfig,
+        close: async () => {},
+      };
+    },
+  });
+  const client = acp.client({ name: "denial-follow-up-error" })
+    .onRequest(acp.methods.client.session.requestPermission, () => {
+      permissionRequests++;
+      return { outcome: { outcome: "selected", optionId: "reject_once" } };
+    });
+  await client.connectWith(app, async (ctx) => {
+    await ctx.request(acp.methods.agent.initialize, {
+      protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {},
+    });
+    const sessionId = (await ctx.request(acp.methods.agent.session.new, { cwd: root, mcpServers: [] })).sessionId;
+    await expect(ctx.request(acp.methods.agent.session.prompt, {
+      sessionId, prompt: [{ type: "text", text: "Edit sample.txt only if approved." }],
+    })).rejects.toThrow("Internal error");
+    expect(providerCalls).toBe(2);
+    expect(permissionRequests).toBe(1);
+    expect(readFileSync(join(root, "sample.txt"), "utf8")).toBe("old");
+    expect(loadSession(sessionId)?.turnState).toMatchObject({ status: "interrupted", lastStopReason: "error" });
+    await ctx.request(acp.methods.agent.session.close, { sessionId });
+  });
+});
+
 test("ACP advertises terminal auth only to capable clients", async () => {
   const app = createNekoAcpAgent();
   await acp.client({ name: "auth-capability-test" }).connectWith(app, async (ctx) => {
@@ -213,6 +400,68 @@ test("ACP advertises terminal auth only to capable clients", async () => {
     });
     const method = registryCompatible.authMethods?.[0];
     expect(method && "type" in method ? method.type : undefined).toBe("terminal");
+  });
+});
+
+test("ACP runtime failures retain their error checkpoint after abort cleanup", async () => {
+  const root = tempRoot();
+  const home = tempRoot();
+  const cfg = loadConfig({ cwd: root, home });
+  let providerCalls = 0;
+  let providerSignal: AbortSignal | undefined;
+  const streamed: string[] = [];
+
+  const agentApp = createNekoAcpAgent({
+    config: cfg,
+    buildRuntime: async (runtimeConfig, options) => {
+      const registry = new ToolRegistry(options.root, options.mode, options.approval);
+      const provider: Provider = {
+        complete: async (_messages, _tools, onDelta, signal) => {
+          providerCalls++;
+          providerSignal = signal;
+          onDelta?.("partial answer", "content");
+          throw new Error("fixture provider failure");
+        },
+      };
+      return {
+        agent: new Agent({
+          provider,
+          tools: registry,
+          maxSteps: 2,
+          onDelta: options.onDelta,
+          onEvent: options.onEvent,
+          verifyBeforeExit: false,
+        }),
+        registry,
+        config: runtimeConfig,
+        close: async () => {},
+      };
+    },
+  });
+  const client = acp.client({ name: "runtime-error-test" })
+    .onNotification(acp.methods.client.session.update, ({ params }) => {
+      if (params.update.sessionUpdate === "agent_message_chunk" && params.update.content.type === "text") {
+        streamed.push(params.update.content.text);
+      }
+    });
+
+  await client.connectWith(agentApp, async (ctx) => {
+    await ctx.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
+    const created = await ctx.request(acp.methods.agent.session.new, { cwd: root, mcpServers: [] });
+    await expect(ctx.request(acp.methods.agent.session.prompt, {
+      sessionId: created.sessionId,
+      prompt: [{ type: "text", text: "Fail after streaming." }],
+    })).rejects.toThrow("Internal error");
+    expect(loadSession(created.sessionId)?.turnState).toMatchObject({
+      status: "interrupted",
+      lastStopReason: "error",
+      activeToolCallIds: [],
+    });
+    expect(providerSignal?.aborted).toBe(true);
+    expect(providerCalls).toBe(1);
+    expect(streamed.join("")).toBe("partial answer");
+    await ctx.request(acp.methods.agent.session.close, { sessionId: created.sessionId });
+    expect(loadSession(created.sessionId)?.turnState?.lastStopReason).toBe("error");
   });
 });
 
@@ -256,6 +505,7 @@ test("ACP cancellation aborts an active Neko prompt and closes cleanly", async (
     await new Promise((resolve) => setTimeout(resolve, 10));
     await ctx.notify(acp.methods.agent.session.cancel, { sessionId: created.sessionId });
     expect((await prompting).stopReason).toBe("cancelled");
+    expect(loadSession(created.sessionId)?.turnState?.lastStopReason).toBe("cancelled");
     await ctx.request(acp.methods.agent.session.close, { sessionId: created.sessionId });
   });
 

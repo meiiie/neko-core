@@ -1,3 +1,4 @@
+# neko-computer-input-policy-v1
 # Persistent JSONL Windows UI Automation + input host. One process pays PowerShell/.NET/native startup once;
 # the TypeScript adapter keeps the existing one-shot scripts as a transport-failure fallback.
 $ErrorActionPreference = 'Stop'
@@ -140,7 +141,8 @@ foreach ($pat in @(
   [System.Windows.Automation.InvokePattern]::Pattern,
   [System.Windows.Automation.ValuePattern]::Pattern,
   [System.Windows.Automation.TogglePattern]::Pattern,
-  [System.Windows.Automation.SelectionItemPattern]::Pattern
+  [System.Windows.Automation.SelectionItemPattern]::Pattern,
+  [System.Windows.Automation.ExpandCollapsePattern]::Pattern
 )) { $cr.Add($pat) }
 $ctrlView = PC $A::IsControlElementProperty $true
 
@@ -587,10 +589,24 @@ function Invoke-Ocr($root) {
   return $lines.ToArray()
 }
 
+function Get-InputPolicy($request) {
+  $policy = [string]$request.inputPolicy
+  if (-not $policy) { $policy = [string]$env:NEKO_COMPUTER_INPUT_POLICY }
+  if (-not $policy) { $policy = 'background' }
+  if ($policy -notin @('background', 'foreground')) { throw 'unsupported computer input policy; expected background or foreground' }
+  return $policy.ToLowerInvariant()
+}
+
 function Invoke-UiaRequest($request) {
   $action = [string]$request.action
+  $inputPolicy = Get-InputPolicy $request
+  # Reject before target discovery, presence overlays, focus, or global input. Approval and input policy
+  # are independent: an approved command does not grant foreground ownership.
+  if ($inputPolicy -eq 'background' -and $action -in @('activate', 'type', 'key', 'click', 'stroke', 'scroll', 'ocr', 'open')) {
+    throw "needs_interaction: computer $action requires foreground input policy"
+  }
   Trace-Host "request action=$action"
-  if ($action -eq 'ping') { return "resident-ui-ready pid=$PID apartment=$([Threading.Thread]::CurrentThread.ApartmentState)" }
+  if ($action -eq 'ping') { return "resident-ui-ready neko-computer-input-policy-v1 pid=$PID apartment=$([Threading.Thread]::CurrentThread.ApartmentState)" }
   if ($action -eq 'wait') {
     $duration = if ($null -ne $request.durationMs) { [int]$request.durationMs } else { 500 }
     if ($duration -lt 0 -or $duration -gt 10000) { throw 'wait must be 0..10000 ms' }
@@ -639,7 +655,7 @@ function Invoke-UiaRequest($request) {
                 $element.GetCachedPropertyValue($A::IsSelectionItemPatternAvailableProperty) -or
                 $element.GetCachedPropertyValue($A::IsExpandCollapsePatternAvailableProperty)) { $verb = 'invoke' }
         if (-not $verb -and $keep -notcontains $type) { continue }
-        if (-not $verb) { $verb = 'invoke' }
+        if (-not $verb) { $verb = if ($inputPolicy -eq 'background') { 'needs_interaction' } else { 'invoke' } }
         $x = [int]($rect.X + $rect.Width / 2)
         $y = [int]($rect.Y + $rect.Height / 2)
         $lines.Add("[$type] '$label' ($verb) -> $x,$y")
@@ -704,7 +720,10 @@ function Invoke-UiaRequest($request) {
       $element = Find-ByName $root $name
       if (-not $element) { throw "not found: $name" }
       $vp = Get-Pattern $element ([System.Windows.Automation.ValuePattern]::Pattern)
-      if (-not $vp) { throw "no ValuePattern on: $name; this may be contenteditable - use computer type with the freshly observed element name" }
+      if (-not $vp) {
+        if ($inputPolicy -eq 'background') { throw "needs_interaction: no ValuePattern on: $name; background policy cannot type into this control" }
+        throw "no ValuePattern on: $name; this may be contenteditable - use computer type with the freshly observed element name"
+      }
       if ($vp.Current.IsReadOnly) { throw "setvalue: '$name' is READ-ONLY" }
       $vp.SetValue($value)
       Start-Sleep -Milliseconds 40
@@ -717,7 +736,10 @@ function Invoke-UiaRequest($request) {
       $element = Find-ByName $root $name
       if (-not $element) { throw "not found: $name" }
       $tp = Get-Pattern $element ([System.Windows.Automation.TogglePattern]::Pattern)
-      if (-not $tp) { throw "no TogglePattern on: $name" }
+      if (-not $tp) {
+        if ($inputPolicy -eq 'background') { throw "needs_interaction: no TogglePattern on: $name" }
+        throw "no TogglePattern on: $name"
+      }
       $before = $tp.Current.ToggleState
       $tp.Toggle()
       Start-Sleep -Milliseconds 40
@@ -743,6 +765,18 @@ function Invoke-UiaRequest($request) {
         if ($tp) { $tp.Toggle(); $did = 'toggled' }
       }
       if (-not $did) {
+        $ep = Get-Pattern $element ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+        if ($ep) {
+          $state = $ep.Current.ExpandCollapseState
+          if ($state -in @([System.Windows.Automation.ExpandCollapseState]::Collapsed, [System.Windows.Automation.ExpandCollapseState]::PartiallyExpanded)) {
+            $ep.Expand(); $did = 'expanded'
+          } elseif ($state -eq [System.Windows.Automation.ExpandCollapseState]::Expanded) {
+            $ep.Collapse(); $did = 'collapsed'
+          }
+        }
+      }
+      if (-not $did) {
+        if ($inputPolicy -eq 'background') { throw "needs_interaction: no supported UIA invoke pattern on: $name; background policy cannot fall back to a mouse click" }
         $rect = $element.Current.BoundingRectangle
         $x = [int]($rect.X + $rect.Width / 2)
         $y = [int]($rect.Y + $rect.Height / 2)

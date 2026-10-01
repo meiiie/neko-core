@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,6 +13,7 @@ import {
   memoryTool,
   setMemoryEnabled,
 } from "../src/core/memory.ts";
+import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import { runSlashCommand } from "../src/ui/commands.ts";
 
 // memory.ts resolves ~/.neko-core/memory via homedir(); point HOME at a temp dir per test.
@@ -139,12 +140,67 @@ test("empty index block when there are no memories", () => {
 });
 
 test("/memory with no argument shows status instead of usage", async () => {
-  freshHome();
+  const home = freshHome();
   const lines: string[] = [];
-  // SAFETY: /memory status uses only addLine from this focused command fixture.
-  const ctx = { addLine: (_kind: string, text: string) => lines.push(text) } as any;
+  // SAFETY: /memory status uses only the synthetic configured home and addLine.
+  const ctx = { cfg: { resolvedHome: home }, registry: new ToolRegistry(home, "default", () => true), addLine: (_kind: string, text: string) => lines.push(text) } as any;
   await runSlashCommand("/memory", ctx);
   expect(lines).toHaveLength(1);
   expect(lines[0]).toContain("Neko memory:");
   expect(lines[0]).not.toContain("usage: /memory");
+});
+
+test("slash memory commands use the configured home instead of the process home", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nk-memory-slash-home-"));
+  const homeA = join(root, "default-A");
+  const homeB = join(root, "configured-B");
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  mkdirSync(homeA);
+  mkdirSync(homeB);
+  process.env.HOME = homeA;
+  process.env.USERPROFILE = homeA;
+  try {
+    memoryTool({ action: "write", name: "prefs", content: "# A uses pnpm" }, homeA);
+    memoryTool({ action: "write", name: "prefs", content: "# B uses bun" }, homeB);
+    mkdirSync(join(homeA, ".neko-core"), { recursive: true });
+    mkdirSync(join(homeB, ".neko-core"), { recursive: true });
+    writeFileSync(join(homeA, ".neko-core", "NEKO.md"), "A");
+    writeFileSync(join(homeB, ".neko-core", "NEKO.md"), "B-only-id");
+    const lines: string[] = [];
+    // SAFETY: only the memory/remember/identity branches run; all paths are synthetic.
+    const ctx = { cfg: { resolvedHome: homeB }, registry: new ToolRegistry(root, "default", () => true), addLine: (_kind: string, line: string) => { lines.push(line); } } as any;
+    const info = async (command: string): Promise<string> => {
+      lines.length = 0;
+      await runSlashCommand(command, ctx);
+      expect(lines).toHaveLength(1);
+      return lines[0]!;
+    };
+
+    expect(await info("/memory list")).toContain("prefs.md: B uses bun");
+    expect(await info("/memory read prefs")).toContain("# B uses bun");
+    expect(await info("/memory identity")).toContain("~/.neko-core/NEKO.md (9 chars)");
+
+    setMemoryEnabled(false, homeA);
+    expect(await info("/memory")).toContain("Neko memory: on");
+    expect(await info("/memory off")).toContain("Neko memory is off");
+    expect(memoryEnabled(homeB)).toBe(false);
+    expect(await info("/memory on")).toContain("Neko memory is on");
+    expect(memoryEnabled(homeB)).toBe(true);
+    expect(memoryEnabled(homeA)).toBe(false);
+
+    setMemoryEnabled(true, homeA);
+    expect(await info("/remember --user prefers Bun in B")).toContain("Remembered in");
+    expect(readFileSync(join(homeB, ".neko-core", "memory", "user.md"), "utf-8")).toContain("prefers Bun in B");
+    expect(readFileSync(join(homeA, ".neko-core", "memory", "user.md"), "utf-8")).not.toContain("prefers Bun in B");
+    expect(await info("/memory forget prefs")).toContain("Deleted memory 'prefs.md'");
+    expect(readFileSync(join(homeA, ".neko-core", "memory", "prefs.md"), "utf-8")).toContain("A uses pnpm");
+    expect(existsSync(join(homeB, ".neko-core", "memory", "prefs.md"))).toBe(false);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    rmSync(root, { recursive: true, force: true });
+  }
 });

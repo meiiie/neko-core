@@ -1,8 +1,10 @@
+# neko-computer-input-policy-v1
 # Desktop control via Windows UI Automation (UIA) -- the OS accessibility tree, the desktop analogue of the
 # web DOM. A PLAIN TEXT model (gpt-oss) grounds + acts via STRUCTURE, not pixels: NO vision, NO GUI-trained
 # model, pixel/element-perfect, fast, private. Beyond a coordinate click, UIA INVOKES controls
 # programmatically (InvokePattern/ValuePattern/Toggle/Select) -- the path assistive tech uses: no cursor
-# movement, no focus stealing, works even when the window is occluded. This is how Windows-Use / UFO2 work.
+# movement or explicit foreground activation by Neko, works even when the window is occluded. A UIA
+# provider may still change its own focus. This is how Windows-Use / UFO2 work.
 #
 # PERFORMANCE (the SOTA bit): modern apps (WinUI/WPF) have huge UIA trees; a naive
 # FindAll(Descendants,TrueCondition) makes one cross-process COM round-trip PER node and TIMES OUT. We use a
@@ -11,7 +13,7 @@
 #
 # Usage:
 #   uia.ps1 list                         -> interactive elements: [role] 'name' -> click x,y
-#   uia.ps1 invoke   "<name>"            -> activate a button/link/menuitem (Invoke|Select|Toggle, else click)
+#   uia.ps1 invoke   "<name>"            -> Invoke|Select|Toggle|ExpandCollapse; mouse fallback only in foreground policy
 #   uia.ps1 setvalue "<name>" "<text>"   -> set a text field's value (ValuePattern)
 #   uia.ps1 toggle   "<name>"            -> toggle a checkbox/switch
 #   uia.ps1 get      "<name>"            -> read an element's current value/toggle state (verify an action)
@@ -19,6 +21,14 @@
 # NOTE: UWP apps (Calculator) suspend their UIA tree when fully hidden -- keep them visible. Classic Win32
 #       and WPF/WinForms apps keep their tree alive when backgrounded (best for automation).
 param([string]$cmd="list", [string]$name="", [string]$value="", [int]$max=120)
+# One-shot defense in depth: hidden PowerShell does not grant desktop input ownership.
+$inputPolicy = [string]$env:NEKO_COMPUTER_INPUT_POLICY
+if(-not $inputPolicy){ $inputPolicy='background' }
+if($inputPolicy -notin @('background','foreground')){ Write-Output 'unsupported computer input policy; expected background or foreground'; exit 1 }
+if($inputPolicy -eq 'background' -and $cmd -in @('activate','type','key','click','stroke','scroll','ocr','open')){
+  Write-Output "needs_interaction: computer $cmd requires foreground input policy"
+  exit 1
+}
 # DPI: PER-MONITOR-AWARE v2 so coordinates are TRUE physical pixels. CONFIRMED necessary: on a 125%-scaled
 # display, a DPI-UNAWARE acting process taps/clicks at virtualized coords (Windows scales them up ~1.25x) and
 # MISSES the target, while a DPI-aware read+click lands (verified: checkbox toggled). All five coordinate
@@ -60,7 +70,7 @@ $cr=New-Object System.Windows.Automation.CacheRequest
 foreach($p in @($A::NameProperty,$A::ControlTypeProperty,$A::BoundingRectangleProperty,$A::IsEnabledProperty,
   $A::IsInvokePatternAvailableProperty,$A::IsValuePatternAvailableProperty,$A::IsTogglePatternAvailableProperty,
   $A::IsSelectionItemPatternAvailableProperty,$A::IsExpandCollapsePatternAvailableProperty)){ $cr.Add($p) }
-foreach($pat in @([System.Windows.Automation.InvokePattern]::Pattern,[System.Windows.Automation.ValuePattern]::Pattern,[System.Windows.Automation.TogglePattern]::Pattern,[System.Windows.Automation.SelectionItemPattern]::Pattern)){ $cr.Add($pat) }
+foreach($pat in @([System.Windows.Automation.InvokePattern]::Pattern,[System.Windows.Automation.ValuePattern]::Pattern,[System.Windows.Automation.TogglePattern]::Pattern,[System.Windows.Automation.SelectionItemPattern]::Pattern,[System.Windows.Automation.ExpandCollapsePattern]::Pattern)){ $cr.Add($pat) }
 $ctrlView=PC $A::IsControlElementProperty $true   # Control view prunes raw-tree noise
 
 function AllControls(){ $h=$cr.Activate(); try { return $root.FindAll($TS::Descendants,$ctrlView) } finally { $h.Dispose() } }
@@ -113,7 +123,7 @@ switch($cmd){
       elseif($e.GetCachedPropertyValue($A::IsTogglePatternAvailableProperty)){ $act='toggle' }
       elseif($e.GetCachedPropertyValue($A::IsInvokePatternAvailableProperty) -or $e.GetCachedPropertyValue($A::IsSelectionItemPatternAvailableProperty) -or $e.GetCachedPropertyValue($A::IsExpandCollapsePatternAvailableProperty)){ $act='invoke' }
       if(-not $act -and ($keep -notcontains $ct)){ continue }   # no pattern + not an interactive type -> skip
-      if(-not $act){ $act='invoke' }
+      if(-not $act){ $act=if($inputPolicy -eq 'background'){'needs_interaction'}else{'invoke'} }
       Write-Output ("[$ct] '$nm' ($act) -> " + [int]($r.X+$r.Width/2) + "," + [int]($r.Y+$r.Height/2)); $n++
     }
     Write-Output "($n elements; act by name e.g. uia.ps1 invoke '<name>')"
@@ -143,6 +153,15 @@ switch($cmd){
     if(-not $did){ $sp=Pat $e ([System.Windows.Automation.SelectionItemPattern]::Pattern); if($sp){ $sp.Select(); $did='selected' } }
     if(-not $did){ $tp=Pat $e ([System.Windows.Automation.TogglePattern]::Pattern); if($tp){ $tp.Toggle(); $did='toggled' } }
     if(-not $did){
+      $ep=Pat $e ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+      if($ep){
+        $state=$ep.Current.ExpandCollapseState
+        if($state -in @([System.Windows.Automation.ExpandCollapseState]::Collapsed,[System.Windows.Automation.ExpandCollapseState]::PartiallyExpanded)){ $ep.Expand(); $did='expanded' }
+        elseif($state -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){ $ep.Collapse(); $did='collapsed' }
+      }
+    }
+    if(-not $did){
+      if($inputPolicy -eq 'background'){ Write-Output "needs_interaction: no supported UIA invoke pattern on: $name; background policy cannot fall back to a mouse click"; exit 1 }
       $r=$e.Current.BoundingRectangle; $cx=[int]($r.X+$r.Width/2); $cy=[int]($r.Y+$r.Height/2)
       [FG]::SetCursorPos($cx,$cy); Start-Sleep -Milliseconds 60; [FG]::mouse_event(0x0002,0,0,0,0); [FG]::mouse_event(0x0004,0,0,0,0); $did="clicked @ $cx,$cy"
     }
@@ -160,7 +179,11 @@ switch($cmd){
   }
   "setvalue" {
     $e=FindByName $name; if(-not $e){ Write-Output "not found: $name"; exit 1 }
-    $vp=Pat $e ([System.Windows.Automation.ValuePattern]::Pattern); if(-not $vp){ Write-Output "no ValuePattern on: $name; this may be contenteditable - use computer type with the freshly observed element name"; exit 1 }
+    $vp=Pat $e ([System.Windows.Automation.ValuePattern]::Pattern)
+    if(-not $vp){
+      if($inputPolicy -eq 'background'){ Write-Output "needs_interaction: no ValuePattern on: $name; background policy cannot type into this control"; exit 1 }
+      Write-Output "no ValuePattern on: $name; this may be contenteditable - use computer type with the freshly observed element name"; exit 1
+    }
     if($vp.Current.IsReadOnly){ Write-Output "FAIL setvalue: '$name' is READ-ONLY (cannot set)"; exit 1 }
     $vp.SetValue($value)
     # act -> VERIFY (deterministic): read the value back and confirm it landed. Catches input the field
@@ -173,7 +196,11 @@ switch($cmd){
   }
   "toggle" {
     $e=FindByName $name; if(-not $e){ Write-Output "not found: $name"; exit 1 }
-    $tp=Pat $e ([System.Windows.Automation.TogglePattern]::Pattern); if(-not $tp){ Write-Output "no TogglePattern on: $name"; exit 1 }
+    $tp=Pat $e ([System.Windows.Automation.TogglePattern]::Pattern)
+    if(-not $tp){
+      if($inputPolicy -eq 'background'){ Write-Output "needs_interaction: no TogglePattern on: $name"; exit 1 }
+      Write-Output "no TogglePattern on: $name"; exit 1
+    }
     $before=$tp.Current.ToggleState; $tp.Toggle(); Start-Sleep -Milliseconds 40; $after=$tp.Current.ToggleState
     # act -> VERIFY: the state must actually have changed.
     if($after -ne $before){ Write-Output "toggled+VERIFIED '$name': $before -> $after" }

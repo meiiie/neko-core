@@ -41,7 +41,10 @@ import { renderRecipes } from "../src/adapters/recipes.ts";
 import { applySkillPolicyForTurn, loadSkill, renderSkills } from "../src/adapters/skills.ts";
 import { PROCUREMENT_SOURCE_PLAN_USAGE, procurementSourcePlanCommand } from "../src/adapters/procurement-cli.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
+import { assertNoConfiguredCredentialInSourceEvents } from "../src/core/compaction-source.ts";
 import { buildAgentRuntime } from "../src/adapters/agent-runtime.ts";
+import type { AgentRuntime } from "../src/adapters/agent-runtime.ts";
+import { createTaskSession, importTaskSessionV1, loadTaskSession, taskSessionConfigId, type TaskRuntimeInput, type TaskSessionCoordinator, type TaskSessionRuntime } from "../src/adapters/task-session.ts";
 import { matchedTurnContext } from "../src/adapters/turn-context.ts";
 import { planTurnCapabilities } from "../src/adapters/turn-capabilities.ts";
 import {
@@ -75,6 +78,7 @@ interface Args {
   yolo: boolean;
   resume: boolean;
   resumeId?: string;
+  taskSessionId?: string;
   loop: boolean;
   once: boolean;
   noTools?: boolean;
@@ -116,6 +120,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--trials") args.trials = Number(argv[++i]) || 1;
     else if (a === "--max-steps") args.maxSteps = Number(argv[++i]) || undefined;
     else if (a === "--call-budget") args.callBudget = Number(argv[++i]);
+    else if (a === "--task-session") args.taskSessionId = argv[++i] ?? "";
     else if (a === "--profiles") args.profiles = String(argv[++i] ?? "").split(/[\s,]+/).map((value) => value.trim()).filter(Boolean);
     else if (a === "--task") { const id = String(argv[++i] ?? "").trim(); if (id) (args.taskIds ??= []).push(id); }
     else if (a === "--image" || a === "--img") { const p = argv[++i]; if (p) (args.images ??= []).push(p); }
@@ -273,6 +278,7 @@ Commands:
                 'setup ocr' installs the Vietnamese OCR pack so 'computer ocr' reads accented text
   chat          interactive session (default - same as bare 'neko' / 'neko core')
   run <task>    one-shot: run a single instruction
+  task-session  create, switch, inspect, or explicitly import v1 task labels in this root
   bench         run a tiny agentic-coding benchmark against the configured model (pass@1)
   bench hard    the higher-complexity regression tier (historically saturated)
   bench frontier  three hidden-oracle multi-file lifecycle/transaction tasks (calibration tier)
@@ -293,6 +299,7 @@ Options:
   --call-budget <n>  (bench contract) equal provider-call cap per task trial in both variants
   --profiles <a,b>   (bench campaign) comma-separated named provider profiles
   --task <id>        (bench campaign) select one task; repeat for a bounded subset
+  --task-session <id> (run) use the active task in an explicit opt-in session
   --no-tools         (run) expose no tools; a pure text completion (e.g. a judgment/review pass)
   --image <path>     (run) attach an image (repeatable); perception mode, no tools. Use a vision profile,
                      e.g. neko run --profile nvidia --image pkg.jpg "what is this?"
@@ -537,6 +544,10 @@ function cmdContext(): number {
 }
 
 async function cmdChat(args: Args): Promise<number> {
+  if (args.taskSessionId !== undefined) {
+    console.error("neko: error: use /task resume <id> inside chat for an opt-in task session");
+    return 2;
+  }
   // Lazy import: keep Ink/React out of the startup path for non-chat commands.
   const { runChat } = await import("../src/ui/chat.tsx");
   await runChat({ profile: args.profile, yolo: args.yolo, resume: args.resume, resumeId: args.resumeId });
@@ -1194,6 +1205,10 @@ function loadImageDataUrl(path: string): string {
 }
 
 async function cmdRun(args: Args): Promise<number> {
+  if (args.taskSessionId !== undefined && !/^[a-f0-9]{32}$/.test(args.taskSessionId)) {
+    console.error("neko: error: --task-session needs an exact task session id");
+    return 2;
+  }
   let instruction = args.positionals.join(" ").trim();
   if (!instruction) {
     console.error("neko: error: run needs an instruction, e.g. neko run \"add a test for X\"");
@@ -1203,27 +1218,83 @@ async function cmdRun(args: Args): Promise<number> {
   const originalImageCount = args.images?.length ?? 0;
   let streamed = 0;
   const cfg = load(args);
-  const { agent, registry, close } = await buildAgent(cfg, args.yolo, (t, kind) => {
+  const onDelta = (t: string, kind?: "content" | "reasoning" | "tool") => {
     if (kind === "reasoning" || kind === "tool") return; // CLI prints only the final content
     streamed += t.length;
     writeTerminalSafe(process.stdout, t);
-  }, !!args.noTools);
-  const plan = planTurnCapabilities({
-    rawUserText: originalInstruction,
-    source: "user",
-    imageCount: originalImageCount,
-    attachmentCount: 0,
-    root: registry.root,
-    home: cfg.resolvedHome,
-  });
-  const lease = registry.enterTurn({
-    name: plan.profile,
-    allowedTools: plan.allowedTools,
-    allowBackgroundBash: plan.allowBackgroundBash,
-    editTarget: plan.editTarget,
-    bashPolicy: plan.bashPolicy,
-    reason: plan.reason,
-  });
+  };
+  type CliTaskRuntime = AgentRuntime & TaskSessionRuntime;
+  let taskSession: TaskSessionCoordinator<CliTaskRuntime> | undefined;
+  let turnActive = false;
+  const runtime = args.taskSessionId
+    ? (taskSession = await loadTaskSession<CliTaskRuntime>({
+      home: cfg.resolvedHome,
+      root: process.cwd(),
+      authorityId: "local",
+      configId: taskSessionConfigId(cfg, args.yolo ? "auto" : cfg.mode),
+      sessionId: args.taskSessionId,
+      runtimeFactory: async ({ scope, messages, sourceEvents }) => {
+        const built = await buildAgentRuntime(cfg, {
+          root: process.cwd(),
+          taskScope: scope,
+          mode: args.yolo ? "auto" : cfg.mode,
+          yolo: args.yolo,
+          approval: promptApprove,
+          noTools: !!args.noTools,
+          onEvent: printEvent,
+          onDelta,
+          onCheckpoint: () => taskSession?.checkpoint(),
+        });
+        // The registry's trusted task scope is bound by buildAgentRuntime before archive admission.
+        built.agent.restoreCompactionSourceEvents(sourceEvents);
+        if (messages.length) {
+          // SAFETY: task-session validates every stored message at the wire boundary
+          // and clones the array before this trusted runtime factory receives it.
+          built.agent.messages = messages as Agent["messages"];
+          built.agent.refreshSystemPrompt();
+        }
+        return {
+          ...built,
+          getMessages: () => built.agent.messages,
+          getSourceEvents: () => {
+            const events = built.agent.compactionSourceEvents();
+            assertNoConfiguredCredentialInSourceEvents(events, cfg.apiKey);
+            return events;
+          },
+          assertQuiescent: () => { if (turnActive) throw new Error("CLI turn is still active"); },
+        };
+      },
+    })).active.runtime
+    : await buildAgent(cfg, args.yolo, onDelta, !!args.noTools);
+  const { agent, registry } = runtime;
+  let lease: ReturnType<ToolRegistry["enterTurn"]>;
+  try {
+    const plan = planTurnCapabilities({
+      rawUserText: originalInstruction,
+      source: "user",
+      imageCount: originalImageCount,
+      attachmentCount: 0,
+      root: registry.root,
+      home: cfg.resolvedHome,
+    });
+    lease = registry.enterTurn({
+      name: plan.profile,
+      allowedTools: plan.allowedTools,
+      allowBackgroundBash: plan.allowBackgroundBash,
+      editTarget: plan.editTarget,
+      bashPolicy: plan.bashPolicy,
+      reason: plan.reason,
+    });
+  } catch (setupError) {
+    try {
+      if (taskSession) await taskSession.close();
+      else await runtime.close();
+    } catch (cleanupError) {
+      throw new AggregateError([setupError, cleanupError], "CLI setup and task-session cleanup failed");
+    }
+    throw setupError;
+  }
+  turnActive = true;
   let images: string[] = [];
   let exitCode = 0;
   try {
@@ -1260,7 +1331,7 @@ async function cmdRun(args: Args): Promise<number> {
     // Perception endpoints reject tool schemas. This is decided after the optional caption bridge,
     // without weakening the conservative full capability plan derived from the original envelope.
     registry.noTools = images.length > 0 || !!args.noTools;
-    applySkillPolicyForTurn(registry, originalInstruction, registry.root, cfg.resolvedHome);
+    if (!taskSession) applySkillPolicyForTurn(registry, originalInstruction, registry.root, cfg.resolvedHome);
     // Non-interactive: every approval prompt auto-denies (no human to answer). Explicit --yolo has
     // no approval prompts; hard refusals remain refusals rather than becoming approval requests.
     const headlessApprovals = !process.stdin.isTTY && !registry.noTools && !args.yolo;
@@ -1300,12 +1371,72 @@ async function cmdRun(args: Args): Promise<number> {
       process.stderr.write(terminalSafeText(outcome.warning, { preserveLineBreaks: true }) + "\n");
     }
   } finally {
+    turnActive = false;
     registry.setSkillPolicyForTurn(undefined);
     lease.close();
     try { agent.clearTurnSystemContext(); } catch { /* cleanup must not replace the run outcome */ }
-    await close();
+    if (taskSession) await taskSession.close();
+    else await runtime.close();
   }
   return exitCode;
+}
+
+/** Task metadata commands do not start a provider or infer a task from the current folder. */
+async function cmdTaskSession(args: Args): Promise<number> {
+  const [action, sessionId, taskId] = args.positionals;
+  const cfg = load(args);
+  const root = process.cwd();
+  const base = { home: cfg.resolvedHome, root, authorityId: "local", configId: taskSessionConfigId(cfg) };
+  const runtimeFactory = ({ messages, sourceEvents }: TaskRuntimeInput): TaskSessionRuntime => {
+    const working = [...messages];
+    // Metadata-only task commands must preserve the archive even without constructing an Agent.
+    return {
+      getMessages: () => working,
+      getSourceEvents: () => {
+        assertNoConfiguredCredentialInSourceEvents(sourceEvents, cfg.apiKey);
+        return sourceEvents;
+      },
+      assertQuiescent: () => {}, close: () => {},
+    };
+  };
+  if (action === "new") {
+    const label = args.positionals.slice(1).join(" ").trim();
+    if (!label) { console.error("usage: neko task-session new <label>"); return 2; }
+    const session = await createTaskSession({ ...base, label, runtimeFactory });
+    try { console.log(JSON.stringify({ sessionId: session.id, activeTaskId: session.active.id })); }
+    finally { await session.close(); }
+    return 0;
+  }
+  if (action === "import-v1") {
+    if (!sessionId || taskId) {
+      console.error("usage: neko task-session import-v1 <v1-session-id>");
+      return 2;
+    }
+    const imported = await importTaskSessionV1({ ...base, sourceSessionId: sessionId });
+    console.log(JSON.stringify({ ...imported,
+      notice: "Only task labels and ancestry were imported. V1 transcript remains historical in the original file and is not resumed or sent to the model. The SHA-256 records the import-time snapshot; it is not a tamper-proof signature.",
+    }));
+    return 0;
+  }
+  if (!["add", "use", "status"].includes(action ?? "") || !sessionId) {
+    console.error("usage: neko task-session new <label> | add <session-id> <label> | use <session-id> <task-id> | status <session-id> | import-v1 <v1-session-id>");
+    return 2;
+  }
+  const session = await loadTaskSession({ ...base, sessionId, runtimeFactory });
+  try {
+    if (action === "add") {
+      const label = args.positionals.slice(2).join(" ").trim();
+      if (!label) { console.error("usage: neko task-session add <session-id> <label>"); return 2; }
+      console.log(JSON.stringify({ taskId: session.createTask(label) }));
+    } else if (action === "use") {
+      if (!taskId) { console.error("usage: neko task-session use <session-id> <task-id>"); return 2; }
+      await session.switchTask(taskId);
+      console.log(JSON.stringify({ sessionId, activeTaskId: session.active.id }));
+    } else {
+      console.log(JSON.stringify({ sessionId, activeTaskId: session.active.id, tasks: session.tasks }));
+    }
+    return 0;
+  } finally { await session.close(); }
 }
 
 /**
@@ -1627,6 +1758,7 @@ async function main(): Promise<number> {
         return 0;
       }
       case "run": return await cmdRun(args);
+      case "task-session": return await cmdTaskSession(args);
       case "setup": {
         if (args.positionals[0]?.toLowerCase() === "codex") return await cmdCodexSupport("install");
         if (args.positionals[0]?.toLowerCase() === "gemini") return await cmdGeminiSupport("install");

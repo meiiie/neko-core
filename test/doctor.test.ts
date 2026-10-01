@@ -193,15 +193,35 @@ test("doctor reports present-but-unhealthy SRT as fail-closed rather than unconf
   expect(`${mode.detail}\n${sandbox.detail}`).not.toContain("UNCONFINED AUTO");
 });
 
-test("doctor calls configured-but-unavailable sandbox unconfined in auto mode", () => {
-  const checks = collectChecks(
-    new NekoConfig({ mode: "auto", sandbox: true }, null, {}, ""),
+test("doctor reports configured-but-unavailable sandbox as fail-closed in auto and yolo", () => {
+  for (const explicitYolo of [false, true]) {
+    const checks = collectChecks(
+      new NekoConfig({ mode: "auto", sandbox: true }, null, {}, ""),
+      undefined,
+      undefined,
+      { kind: "none", live: false },
+      explicitYolo,
+    );
+    const mode = checks.find((check) => check.name === "mode")!;
+    const sandbox = checks.find((check) => check.name === "bash_sandbox")!;
+    expect(mode.detail).toContain("bash FAILS CLOSED");
+    expect(mode.detail).toContain("no trusted OS sandbox primitive");
+    expect(sandbox.status).toBe("warn");
+    expect(sandbox.detail).toContain("bash FAILS CLOSED");
+    expect(sandbox.detail).toContain("no host fallback");
+    expect(`${mode.detail}\n${sandbox.detail}`).not.toContain("UNCONFINED AUTO");
+    expect(`${mode.detail}\n${sandbox.detail}`).not.toContain("ordinary bash runs");
+  }
+});
+
+test("doctor reports missing configured sandbox in default mode", () => {
+  const sandbox = collectChecks(
+    new NekoConfig({ mode: "default", sandbox: true }, null, {}, ""),
     undefined,
     undefined,
     { kind: "none", live: false },
-  );
-  expect(checks.find((check) => check.name === "mode")?.detail).toContain("UNCONFINED AUTO");
-  expect(checks.find((check) => check.name === "bash_sandbox")?.detail).toContain("UNCONFINED AUTO");
+  ).find((check) => check.name === "bash_sandbox")!;
+  expect(sandbox).toMatchObject({ status: "warn", detail: expect.stringContaining("bash FAILS CLOSED") });
 });
 
 test("doctor distinguishes a source-run SRT Bun bridge from compiled Neko without an external toolchain", () => {

@@ -4,6 +4,10 @@ Neko implements stable Agent Client Protocol v1 over newline-delimited JSON-RPC 
 process owns Neko's configured provider, tools, project context, global skills, MCP servers, and safety
 policy. The editor is the client/UI; it does not replace Neko's tool runtime.
 
+The opt-in, versioned [task scope v1 candidate contract](ACP-TASK-PROTOCOL-V1.md) defines admission receipts
+for clients that require task isolation. An ACP client does not gain task isolation merely by sending a `cwd`.
+The additive [execution binding v1 candidate](ACP-EXECUTION-BINDING-V1.md) pins Bash placement and configured capabilities; its receipt does not attest OS authority.
+
 ## Start the server
 
 ```bash

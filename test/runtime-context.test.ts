@@ -126,16 +126,19 @@ test("runtime block defers an uncached SRT health probe instead of blocking the 
   expect(block).not.toContain("UNCONFINED AUTO");
 });
 
-test("runtime block calls disabled or unavailable sandbox unconfined in auto mode", () => {
+test("runtime block reports host Bash only when disabled and fails closed when a primitive is missing", () => {
   const disabled = dynamicToolRuntimeBlock(registry("auto"));
   expect(disabled).toContain("UNCONFINED AUTO");
 
   const unavailableRegistry = registry("auto");
   unavailableRegistry.sandboxBash = true;
   const unavailable = dynamicToolRuntimeBlock(unavailableRegistry, { kind: "none", live: false });
-  expect(unavailable).toContain("UNCONFINED AUTO");
-  expect(unavailable).toContain("requested but unavailable (host/unconfined)");
-  expect(unavailable).not.toContain("FAILS CLOSED");
+  expect(unavailable).toContain("FAILS CLOSED");
+  expect(unavailable).toContain("requested but unavailable (bash FAILS CLOSED; no host fallback)");
+  expect(unavailable).toContain("Shell execution target: none");
+  expect(unavailable).toContain("Bash egress unavailable");
+  expect(unavailable).not.toContain("UNCONFINED AUTO");
+  expect(unavailable).not.toContain("host PATH tools detected");
 });
 
 test("Neko skill catalog is absent when the Neko skill tool is not callable", () => {

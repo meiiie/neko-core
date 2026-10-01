@@ -36,6 +36,7 @@ export function openCodeZenTransport(model: string): OpenCodeZenTransport {
   if (/^(gpt-|grok-|muse-)/.test(id)) return "responses";
   if (/^(claude-|qwen)/.test(id)) return "anthropic";
   if (/^gemini-/.test(id)) return "unsupported";
+  if (id === "space-bunny-free") return "openai_compat";
   if (/^(deepseek-|glm-|minimax-|kimi-|big-pickle$|x-preview-|mimo-|hy3-|nemotron-|laguna-)/.test(id)) {
     return "openai_compat";
   }

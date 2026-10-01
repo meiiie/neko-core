@@ -2,6 +2,7 @@
 import { Agent, DEFAULT_SYSTEM_PROMPT } from "../core/agent.ts";
 import type { ComputerToolPort, DeltaHook, McpTools } from "../core/ports.ts";
 import { ToolRegistry, type ApprovalGate } from "../core/tool-runtime.ts";
+import type { TaskScope } from "../core/task-scope.ts";
 import { loadAgent } from "./agents.ts";
 import { startManagedBrowserBridge } from "./browser-bridge.ts";
 import type { NekoConfig } from "./config.ts";
@@ -24,6 +25,8 @@ export interface AgentRuntime {
 
 export interface BuildAgentRuntimeOptions {
   root: string;
+  /** Runtime-owned scope, validated against root before any memory enters context. */
+  taskScope?: TaskScope;
   mode?: ToolRegistry["mode"];
   yolo?: boolean;
   approval: ApprovalGate;
@@ -45,7 +48,7 @@ export async function buildAgentRuntime(
   cfg: NekoConfig,
   options: BuildAgentRuntimeOptions,
 ): Promise<AgentRuntime> {
-  ensureNekoHome();
+  if (!options.taskScope) ensureNekoHome(cfg.resolvedHome);
   if (options.hostProfile) {
     if (!options.hostTools) throw new Error("host profile requires an in-band host MCP connection");
     const requestedMode = options.mode ?? cfg.mode;
@@ -53,16 +56,22 @@ export async function buildAgentRuntime(
       ? requestedMode
       : options.hostProfile.allowedModes[0];
     const registry = new ToolRegistry(options.root, mode, options.approval, options.hostTools);
+    registry.memoryHome = cfg.resolvedHome;
     registry.allowOnlyTools(hostToolNames(options.hostProfile));
     registry.allowBackgroundBash = false;
     registry.readOutsideRoot = false;
     registry.explicitYolo = Boolean(options.yolo);
     registry.noTools = Boolean(options.noTools);
+    registry.sandboxBash = cfg.sandbox;
+    registry.computerInputPolicy = cfg.computerUseInputPolicy;
+    if (options.taskScope) registry.bindTaskScope(options.taskScope);
     const provider = getProvider(cfg);
     const agent = new Agent({
       provider,
       tools: registry,
       maxSteps: cfg.maxSteps,
+      maxContextTokens: cfg.contextWindow,
+      sourceArchiveCredential: () => cfg.apiKey,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       dynamicContext: () => options.hostProfile!.systemContext,
       onEvent: options.onEvent,
@@ -99,6 +108,7 @@ export async function buildAgentRuntime(
     cfg,
     { noTools: options.noTools },
   );
+  if (options.taskScope) registry.bindTaskScope(options.taskScope);
 
   registry.subagent = async (prompt, type, signal) => {
     const subagentType = type?.trim().toLowerCase();
@@ -135,6 +145,7 @@ export async function buildAgentRuntime(
         dynamicContext: () => subagentTurnContext(subReg, cfg.resolvedHome),
         maxSteps: cfg.maxSteps,
         maxContextTokens: cfg.contextWindow,
+        sourceArchiveCredential: () => cfg.apiKey,
         verifyBeforeExit: cfg.verifyBeforeExit,
         verifyStateChangesBeforeExit: true,
         adaptiveEffort: cfg.adaptiveEffort,
@@ -183,6 +194,8 @@ export async function buildAgentRuntime(
     provider,
     tools: registry,
     maxSteps: cfg.maxSteps,
+    maxContextTokens: cfg.contextWindow,
+    sourceArchiveCredential: () => cfg.apiKey,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     dynamicContext: () => productionTurnContext(registry, {
       model: cfg.model,

@@ -5,6 +5,38 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-10-01 - Task-scoped memory and execution integration (candidate)
+
+Transplant the reviewed integration handoff onto real upstream ancestry after PR #76,
+without importing the archive's synthetic Git history or deleting files omitted from
+its transfer. Preserve the provider cancellation/retry fixes already on main.
+
+- Opt-in task sessions bind explicit task identity, physical root, activation and
+  single-writer revisions across CLI/TUI/ACP. Task working history is distinct from
+  the user-visible timeline; wrong-root and stale activation inputs are rejected.
+- Compaction source lineage and scoped memory admission retain inspectable origin
+  records; this is not a guarantee of model recall accuracy.
+- Trusted launch-time execution/input receipts keep approval policy, host/sandbox
+  selection and computer interaction policy separate. Hidden helper windows and
+  background input admission do not establish OS-level desktop isolation.
+- Tool-result deduplication and typed writer errors retain failure outcomes rather
+  than replaying them as successful work. Unsupported Linux native computer actions
+  report the platform limitation before suggesting foreground interaction.
+
+Compatibility: task mode remains opt-in. Legacy v1 import copies task labels and
+ancestry only; it does not silently resume historical transcripts or global memory.
+Runtime configuration identity changes reject mismatched checkpoints; no automatic
+checkpoint migration is claimed. Existing host defaults remain unchanged.
+
+Validation: Linux/Bun 1.4.0 audited continuation scope, 177 files: 1,798 passed,
+0 failed, 27 skipped, 41 filtered. Inherited native/host exclusions remain explicit;
+this is not a full Windows/native acceptance result. Typecheck and lint pass.
+Live Bunny/OpenCode on the integration source completed a read/verify task,
+Alpha/Beta/Alpha fresh-process task isolation and recall smoke, and a code-edit demo
+with independently rerun 3/3 tests and unchanged test-file digest. These are short
+smokes, not a long-session accuracy benchmark. Full cross-platform CI is required.
+No Wiii native integration, SRT health repair or package release is asserted here.
+
 ## 2026-10-01 - OpenCode cancellation and headless retry visibility (candidate)
 
 OpenCode account completions now honor cancellation before catalog work and during

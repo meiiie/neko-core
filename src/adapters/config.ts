@@ -4,6 +4,7 @@ import { homeDir } from "../shared/home.ts";
 import { delimiter, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 import { isMode, type PermissionMode } from "../core/permissions.ts";
+import { parseComputerInputPolicy, type ComputerInputPolicy } from "../core/computer-input-policy.ts";
 import { isJsonArray, isJsonObject, isObjectValue, isText, type JsonValue } from "../shared/wire.ts";
 import type { McpServerConfig } from "./mcp.ts";
 import { inspectProjectTrust, type ProjectTrustSummary } from "./project-trust.ts";
@@ -29,6 +30,7 @@ export interface Profile {
   effort_ceiling?: string;
   adaptive_effort?: boolean;
   vision?: boolean;
+  computer_use_input_policy?: ComputerInputPolicy;
   image_long_edge?: number;
   image_max_bytes?: number;
   /** Some OpenAI-compatible reasoning endpoints also require a top-level `thinking` object. */
@@ -74,6 +76,7 @@ export const DEFAULTS: any = {
   auto_update_check: true, // check for a newer release at startup (daily-cached; set false to silence)
   auto_update: true, // AUTO-INSTALL that newer release in the background (claude-code style); false = notify only
   completion_sound: true, // branded native sound (terminal-bell fallback) after a durable turn
+  computer_use_input_policy: "background", // explicit global/env foreground opt-in; independent of approval
   // Credential paths remain refused even when reads may leave the project root.
   read_outside_root: true,
   additional_write_roots: [],
@@ -711,6 +714,8 @@ export class NekoConfig {
   get computerUseOverlay(): boolean { return Boolean(this.data.computer_use_overlay); }
   /** Keep one local PowerShell UIA/input/capture process warm. On by default; false preserves the one-shot adapter. */
   get computerUseResident(): boolean { return this.data.computer_use_resident !== false; }
+  /** Startup policy for local desktop input. Project config cannot widen it; auto/yolo changes only approval. */
+  get computerUseInputPolicy(): ComputerInputPolicy { return parseComputerInputPolicy(this.data.computer_use_input_policy); }
   /** Desktop input backend: "inject" = touch injection (the agent acts WITHOUT moving the user's mouse --
    * its own pointer channel); "sendinput" = legacy SendInput (moves the one system cursor). "auto"/unset
    * leaves each helper's default. A new backend is a config value, not a code change. */

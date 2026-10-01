@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { newSessionId, saveSession, setSessionsDir } from "../src/adapters/session.ts";
+import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import { runSlashCommand } from "../src/ui/commands.ts";
 
 const ROOT = mkdtempSync(join(tmpdir(), "neko-handoff-command-"));
@@ -55,6 +56,7 @@ function commandCtx(currentSessionId: string) {
   const ctx = {
     cfg: {},
     agent,
+    registry: new ToolRegistry(ROOT, "default", () => true),
     currentSessionId,
     persistSession: () => { calls.persisted++; },
     addLine: (kind: string, text: string) => calls.lines.push({ kind, text }),

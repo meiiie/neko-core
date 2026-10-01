@@ -702,6 +702,114 @@ test("compact keeps system + recent turns verbatim and summarizes the older ones
     expect(contents).not.toContain("OLD1"); // oldest turn folded into the summary
   });
 
+test("compact retains a correction appended while the summary request is pending", async () => {
+  let finish!: (value: any) => void;
+  const provider = { complete: () => new Promise<any>((resolve) => { finish = resolve; }) };
+  // SAFETY: no endpoint is contacted; this provider resolves only when the fixture says so.
+  const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "OLD FACT: package manager is pnpm" }, { role: "assistant", content: "noted" },
+    ...Array.from({ length: 5 }, (_, i) => [
+      { role: "user", content: `tail ${i}` }, { role: "assistant", content: `ack ${i}` },
+    ]).flat(),
+  ];
+  const before = agent.messages.slice();
+  const pending = agent.compact();
+  agent.messages.push({ role: "user", content: "CORRECTION: package manager is bun" });
+  finish({ content: "SUMMARY: use pnpm", tool_calls: [] });
+  await expect(pending).rejects.toThrow("Compaction discarded because conversation or model changed");
+  expect(agent.messages).toEqual([...before, { role: "user", content: "CORRECTION: package manager is bun" }]);
+  expect(agent.providerHistory().some((m: any) => String(m.content).includes("SUMMARY: use pnpm"))).toBe(false);
+});
+
+test("compact notices an in-place correction during an in-flight summary", async () => {
+  let finish!: (value: any) => void;
+  const provider = { complete: () => new Promise<any>((resolve) => { finish = resolve; }) };
+  // SAFETY: no endpoint is contacted; this provider resolves only when the fixture says so.
+  const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "A/config.ts uses pnpm" }, { role: "assistant", content: "noted" },
+    ...Array.from({ length: 5 }, (_, i) => [
+      { role: "user", content: `tail ${i}` }, { role: "assistant", content: `ack ${i}` },
+    ]).flat(),
+  ];
+  const pending = agent.compact();
+  agent.messages[1].content = "A/config.ts uses bun";
+  finish({ content: "SUMMARY: A uses pnpm", tool_calls: [] });
+  await expect(pending).rejects.toThrow("Compaction discarded because conversation or model changed");
+  expect(agent.messages[1].content).toBe("A/config.ts uses bun");
+  expect(agent.messages.some((m: any) => String(m.content).includes("SUMMARY: A uses pnpm"))).toBe(false);
+});
+
+test("compact preserves an appended tool call and its result as one raw boundary", async () => {
+  let finish!: (value: any) => void;
+  const provider = { complete: () => new Promise<any>((resolve) => { finish = resolve; }) };
+  // SAFETY: in-process deferred provider; the tool records are synthetic and never executed.
+  const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "read both configs" }, { role: "assistant", content: "working" },
+    ...Array.from({ length: 5 }, (_, i) => [
+      { role: "user", content: `tail ${i}` }, { role: "assistant", content: `ack ${i}` },
+    ]).flat(),
+  ];
+  const pending = agent.compact();
+  const call = { role: "assistant", content: "", tool_calls: [{ id: "read-b", name: "read_file", arguments: { path: "B/config.ts" } }] };
+  const result = { role: "tool", tool_call_id: "read-b", content: "B/config.ts: packageManager=bun" };
+  agent.messages.push(call, result);
+  finish({ content: "SUMMARY: only A/config.ts was read", tool_calls: [] });
+  await expect(pending).rejects.toThrow("Compaction discarded because conversation or model changed");
+  expect(agent.messages.slice(-2)).toEqual([call, result]);
+  expect(agent.providerHistory().some((m: any) => String(m.content).includes("only A/config.ts"))).toBe(false);
+});
+
+for (const change of ["provider", "model budget"] as const) {
+  test(`compact discards an in-flight summary after ${change} changes`, async () => {
+    let finish!: (value: any) => void;
+    const oldProvider = { complete: () => new Promise<any>((resolve) => { finish = resolve; }) };
+    // SAFETY: both providers are local stubs; neither performs inference or I/O.
+    const agent = new Agent({ provider: oldProvider as any, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
+    agent.messages = [
+      { role: "system", content: "base" },
+      { role: "user", content: "old model instructions" }, { role: "assistant", content: "noted" },
+      ...Array.from({ length: 5 }, (_, i) => [
+        { role: "user", content: `tail ${i}` }, { role: "assistant", content: `ack ${i}` },
+      ]).flat(),
+    ];
+    const before = agent.messages.slice();
+    const pending = agent.compact();
+    if (change === "provider") agent.setProvider({ complete: async () => ({ content: "unused", tool_calls: [] }) });
+    else agent.setMaxContextTokens(8192);
+    finish({ content: "SUMMARY FROM OLD MODEL", tool_calls: [] });
+    await expect(pending).rejects.toThrow("Compaction discarded because conversation or model changed");
+    expect(agent.messages).toEqual(before);
+  });
+}
+
+for (const failure of ["empty", "error", "truncated"] as const) {
+  test(`compact preserves raw history when summary is ${failure}`, async () => {
+    const provider = { async complete() {
+      if (failure === "error") throw new Error("synthetic provider failure");
+      return { content: failure === "empty" ? "  " : "partial summary", tool_calls: [], truncated: failure === "truncated" };
+    } };
+    // SAFETY: this provider is a deterministic in-process stub.
+    const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
+    agent.messages = [
+      { role: "system", content: "base" },
+      { role: "user", content: "RAW EVIDENCE: repo A uses pnpm" }, { role: "assistant", content: "noted" },
+      ...Array.from({ length: 5 }, (_, i) => [
+        { role: "user", content: `tail ${i}` }, { role: "assistant", content: `ack ${i}` },
+      ]).flat(),
+    ];
+    const before = agent.messages.slice();
+    await expect(agent.compact()).rejects.toThrow(failure === "error" ? "Compaction failed" : "Compaction returned no complete summary");
+    expect(agent.messages).toEqual(before);
+    expect(agent.providerHistory().some((m: any) => String(m.content).includes("RAW EVIDENCE"))).toBe(true);
+  });
+}
+
 test("compaction uses a structured capsule and a giant tool result cannot hide a later correction", async () => {
   let request: any[] = [];
   const provider = {
@@ -732,6 +840,127 @@ test("compaction uses a structured capsule and a giant tool result cannot hide a
   expect(request[1].content).toContain("TOOL-END");
   expect(request[1].content).toContain("CORRECTION: keep the public API backwards compatible");
   expect(request[1].content.length).toBeLessThanOrEqual(40_000);
+});
+
+test("compaction keeps tool paths attached to same-named file observations across tasks", async () => {
+  let source = "";
+  const deepAPath = `A/${"nested/".repeat(40)}config.ts`;
+  const provider = { async complete(messages: any[]) {
+    source = String(messages[1]?.content ?? "");
+    return { content: "## Goal\nReturn to project A", tool_calls: [] };
+  } };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+  const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "Inspect the config in project A" },
+    { role: "assistant", content: "", tool_calls: [{ id: "read-a", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: deepAPath, unused: "DO_NOT_COPY_ARGUMENTS" }) } }] },
+    { role: "tool", tool_call_id: "read-a", content: "    1  packageManager = 'pnpm'" },
+    { role: "user", content: "Inspect the config in project B" },
+    { role: "assistant", content: "", tool_calls: [{ id: "read-b", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: "B/config.ts" }) } }] },
+    { role: "tool", tool_call_id: "read-b", content: "    1  packageManager = 'bun'" },
+    { role: "user", content: "Correction in project A: use npm now; project B still uses bun" },
+    { role: "assistant", content: "Correction recorded" },
+    { role: "user", content: "Now return to A" },
+    { role: "assistant", content: "continuing" },
+    { role: "user", content: "tail 1" }, { role: "assistant", content: "a1" },
+    { role: "user", content: "tail 2" }, { role: "assistant", content: "a2" },
+    { role: "user", content: "tail 3" }, { role: "assistant", content: "a3" },
+    { role: "user", content: "tail 4" }, { role: "assistant", content: "a4" },
+  ];
+  await agent.compact();
+  expect(source).toContain("A/nested/");
+  expect(source).toContain(deepAPath.slice(-64));
+  expect(source).toContain("B/config.ts");
+  expect(source).toContain("read-a");
+  expect(source).toContain("read-b");
+  expect(source).toContain("packageManager = 'pnpm'");
+  expect(source).toContain("packageManager = 'bun'");
+  expect(source).toContain("Correction in project A: use npm now; project B still uses bun");
+  expect(source).not.toContain("DO_NOT_COPY_ARGUMENTS");
+});
+
+test("compaction reports tool-call provenance omitted by its per-message cap", async () => {
+  let source = "";
+  const provider = { async complete(messages: any[]) {
+    source = String(messages[1]?.content ?? "");
+    return { content: "## Goal\nContinue", tool_calls: [] };
+  } };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+  const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
+  const calls = Array.from({ length: 10 }, (_, i) => ({
+    id: `read-${i}`, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: `folder-${i}/config.ts` }) },
+  }));
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "Inspect the configs" },
+    { role: "assistant", content: "", tool_calls: calls },
+    ...calls.map((call) => ({ role: "tool", tool_call_id: call.id, content: "    1  ok" })),
+    ...Array.from({ length: 5 }, (_, i) => [
+      { role: "user", content: `tail ${i}` }, { role: "assistant", content: `a${i}` },
+    ]).flat(),
+  ];
+  await agent.compact();
+  expect(source).toContain("folder-0/config.ts");
+  expect(source).toContain("[2 tool calls omitted from compaction input]");
+});
+
+test("repeated compaction keeps the first request historical without nesting an internal summary", async () => {
+  let call = 0;
+  const provider = { async complete() {
+    call++;
+    return { content: call === 1 ? "## Goal\nWork in B now" : "## Goal\nContinue B", tool_calls: [] };
+  } };
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+  const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(process.cwd(), "auto", () => true) });
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "Task A: use pnpm" }, { role: "assistant", content: "a" },
+    { role: "user", content: "Switch to task B: use bun" }, { role: "assistant", content: "b" },
+    { role: "user", content: "tail 1" }, { role: "assistant", content: "a1" },
+    { role: "user", content: "tail 2" }, { role: "assistant", content: "a2" },
+    { role: "user", content: "tail 3" }, { role: "assistant", content: "a3" },
+    { role: "user", content: "tail 4" }, { role: "assistant", content: "a4" },
+  ];
+  await agent.compact();
+  const first = agent.messages.find((m: any) => m._neko_internal && String(m.content).startsWith("[Summary of earlier conversation]"));
+  expect(String(first?.content)).toContain("FIRST USER REQUEST (historical; may be superseded): Task A: use pnpm");
+  expect(String(first?.content)).not.toContain("ORIGINAL TASK (verbatim): Task A");
+  agent.messages.push(
+    { role: "user", content: "Keep working on B" }, { role: "assistant", content: "b1" },
+    { role: "user", content: "B detail 2" }, { role: "assistant", content: "b2" },
+    { role: "user", content: "B detail 3" }, { role: "assistant", content: "b3" },
+    { role: "user", content: "B detail 4" }, { role: "assistant", content: "b4" },
+    { role: "user", content: "B detail 5" }, { role: "assistant", content: "b5" },
+  );
+  await agent.compact();
+  const second = agent.messages.find((m: any) => m._neko_internal && String(m.content).startsWith("[Summary of earlier conversation]"));
+  expect(String(second?.content)).toContain("FIRST USER REQUEST (historical; may be superseded): Task A: use pnpm");
+  expect(String(second?.content)).not.toContain("FIRST USER REQUEST (historical; may be superseded): [Summary of earlier conversation]");
+  expect(String(second?.content)).not.toContain("ORIGINAL TASK (verbatim):");
+  expect(agent.providerHistory().find((m: any) => String(m.content).startsWith("[Summary of earlier conversation]"))).not.toHaveProperty("_neko_compaction_first_user");
+});
+
+test("compacting a legacy capsule without provenance does not invent a first request", async () => {
+  // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
+  const agent = new Agent({
+    provider: new ScriptedProvider([{ content: "## Goal\nContinue B", tool_calls: [] }]) as any,
+    tools: new ToolRegistry(process.cwd(), "auto", () => true),
+  });
+  agent.messages = [
+    { role: "system", content: "base" },
+    { role: "user", content: "[Summary of earlier conversation]\nORIGINAL TASK (verbatim): Task A", _neko_internal: true },
+    { role: "assistant", content: "old" },
+    { role: "user", content: "Task B" }, { role: "assistant", content: "b" },
+    { role: "user", content: "tail 1" }, { role: "assistant", content: "a1" },
+    { role: "user", content: "tail 2" }, { role: "assistant", content: "a2" },
+    { role: "user", content: "tail 3" }, { role: "assistant", content: "a3" },
+    { role: "user", content: "tail 4" }, { role: "assistant", content: "a4" },
+  ];
+  await agent.compact();
+  const capsule = agent.messages.find((m: any) => m._neko_internal && String(m.content).startsWith("[Summary of earlier conversation]"));
+  expect(String(capsule?.content)).not.toContain("FIRST USER REQUEST (historical; may be superseded):");
+  expect(String(capsule?.content)).toContain("## Goal\nContinue B");
 });
 
   test("compact clips a dense few-line tool result by char count (line guard alone misses it)", async () => {
@@ -1782,7 +2011,7 @@ test("temporal watchers may repeat without tripping the loop guard or completion
   expect(edited.length).toBe(7);
   expect(edited.every((p) => p === "src/x.ts")).toBe(true);
   // The broad nudge fired exactly ONCE, at the cap.
-  const broadNudges = agent.messages.filter((m: any) =>
+  const broadNudges = agent.providerHistory().filter((m: any) =>
     String(m.content).includes("[loop guard]") && String(m.content).includes("src/x.ts"));
   expect(broadNudges.length).toBe(1);
 });
@@ -1803,7 +2032,7 @@ test("BROAD loop guard does NOT trip on edits to DIFFERENT paths (no false posit
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 10 });
   await agent.run("go");
   expect(edited).toEqual(["a.ts", "b.ts", "c.ts"]); // all 3 ran — no false nudge on distinct paths
-  expect(agent.messages.some((m: any) => String(m.content).includes("[loop guard]"))).toBe(false);
+  expect(agent.providerHistory().some((m: any) => String(m.content).includes("[loop guard]"))).toBe(false);
 });
 
 test("BROAD loop guard trips on N CONSECUTIVE FAILING bash runs", async () => {
@@ -1820,7 +2049,7 @@ test("BROAD loop guard trips on N CONSECUTIVE FAILING bash runs", async () => {
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
   await agent.run("go");
-  const nudge = agent.messages.find((m: any) =>
+  const nudge = agent.providerHistory().find((m: any) =>
     String(m.content).includes("[loop guard]") && String(m.content).includes("empty or failed"));
   expect(nudge).toBeTruthy(); // the unproductive-streak nudge fired (failing bash counts as unproductive)
 });
@@ -1842,7 +2071,7 @@ test("BROAD loop guard resets the failing streak on a successful bash (no false 
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
   await agent.run("go");
-  expect(agent.messages.some((m: any) => String(m.content).includes("[loop guard]"))).toBe(false);
+  expect(agent.providerHistory().some((m: any) => String(m.content).includes("[loop guard]"))).toBe(false);
 });
 
 test("tool-error recovery fires ONCE on the first mutating failure, re-arms after a success", async () => {
@@ -1864,8 +2093,11 @@ test("tool-error recovery fires ONCE on the first mutating failure, re-arms afte
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 8 });
   await agent.run("go");
-  const recoveries = agent.messages.filter((m: any) => String(m.content).startsWith("[recovery]"));
-  expect(recoveries.length).toBe(2); // steps 1 and 4 - not step 2
+  const recoveries = agent.providerHistory().filter((m: any) => m.role === "tool" && String(m.content).includes("[recovery]"));
+  expect(recoveries.map((message: any) => message.tool_call_id)).toEqual(["b1", "b4"]); // steps 1 and 4 - not step 2
+  for (const id of ["b1", "b2", "b3", "b4"]) {
+    expect(agent.messages.filter((message: any) => message.role === "tool" && message.tool_call_id === id)).toHaveLength(1);
+  }
   expect(String(recoveries[0].content)).toContain("DIAGNOSE"); // recovery-oriented, not just "reconsider"
 });
 
@@ -1878,7 +2110,7 @@ test("tool-error recovery ignores read-tool misses (benign exploration, not a fa
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 4 });
   await agent.run("go");
-  expect(agent.messages.some((m: any) => String(m.content).startsWith("[recovery]"))).toBe(false);
+  expect(agent.providerHistory().some((m: any) => String(m.content).includes("[recovery]"))).toBe(false);
 });
 
 test("max_steps cap fires", async () => {
@@ -2032,7 +2264,7 @@ test("unproductive-result guard nudges after N empty/failed results in a row (an
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
   const agent = new Agent({ provider: new ScriptedProvider(script) as any, tools: tools as any, maxSteps: 12 });
   await agent.run("go");
-  const nudges = agent.messages.filter((m: any) =>
+  const nudges = agent.providerHistory().filter((m: any) =>
     String(m.content).includes("[loop guard]") && String(m.content).includes("empty or failed"));
   expect(nudges.length).toBeGreaterThanOrEqual(1); // fired at the 3rd empty result in a row
 });
@@ -2074,7 +2306,7 @@ test("broad loop counters reset between independent Agent.run calls", async () =
   const agent = new Agent({ provider: provider as any, tools: tools as any, maxSteps: 5 });
   expect(await agent.run("one")).toBe("first");
   expect(await agent.run("two")).toBe("second");
-  const guard = agent.messages.filter((m: any) => String(m.content).includes("last 3 tool results"));
+  const guard = agent.providerHistory().filter((m: any) => String(m.content).includes("last 3 tool results"));
   expect(guard).toHaveLength(0);
 });
 
@@ -2199,7 +2431,7 @@ test("pre-flight validation does NOT reject a call whose required args are all p
   expect(String(agent.messages.find((m: any) => m.role === "tool").content)).toBe("content"); // ran normally
 });
 
-test("compact() carries the ORIGINAL task verbatim ahead of the summary (survives the prune)", async () => {
+test("compact() carries the first user request as historical context ahead of the summary", async () => {
   const agent = new Agent({
     // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
     provider: new ScriptedProvider([{ content: "SUMMARY", tool_calls: [] }]) as any,
@@ -2217,7 +2449,7 @@ test("compact() carries the ORIGINAL task verbatim ahead of the summary (survive
   ];
   await agent.compact();
   const summ = agent.messages.find((m: any) => String(m.content).includes("SUMMARY"));
-  expect(String(summ.content)).toContain("ORIGINAL TASK (verbatim): Build me a landing page"); // task preserved by CODE, not the summarizer
+  expect(String(summ.content)).toContain("FIRST USER REQUEST (historical; may be superseded): Build me a landing page"); // history preserved by CODE, not the summarizer
 });
 
 test("compact() carries the current todo plan deterministically", async () => {

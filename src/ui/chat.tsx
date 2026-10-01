@@ -82,8 +82,11 @@ import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { isMode, modeDetail, nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
 import { AsyncSessionWriter, latestSession, loadSession, newSessionId, renameSession, type Session } from "../adapters/session.ts";
+import { createTaskSession, loadTaskSession, taskSessionConfigId, TaskSwitchCommittedError, type TaskRuntimeInput, type TaskSessionRuntime, type TaskSessionCoordinator } from "../adapters/task-session.ts";
 import { applySkillPolicyForTurn, matchesSkill } from "../adapters/skills.ts";
 import { ToolRegistry } from "../core/tool-runtime.ts";
+import { assertNoConfiguredCredentialInSourceEvents } from "../core/compaction-source.ts";
+import { memoryTool } from "../core/memory.ts";
 import { WEB_EXTRACT_PROMPT } from "../adapters/web.ts";
 import { configureToolRegistry, inheritToolRegistrySettings, restrictToolRegistryForSubagent } from "../adapters/tool-registry.ts";
 import { matchedTurnContext, productionTurnContext, subagentTurnContext } from "../adapters/turn-context.ts";
@@ -110,6 +113,7 @@ import { describeToolCall, toolSchemas } from "../core/tools.ts";
 import { createCompletionSupervisor } from "../adapters/completion-supervisor.ts";
 
 import { isText } from "../shared/wire.ts";
+import { terminalSafeText } from "../shared/terminal-text.ts";
 import { chromeModeChip } from "./chrome-glyphs.ts";
 
 export { ApprovalBox, type Approval }; // re-exported for tests
@@ -122,6 +126,11 @@ const MODE_COLOR = {
   plan: "blue",
   auto: "red",
 };
+
+export interface ChatTaskLifecycle {
+  activeSessionId: string | null;
+  shutdown: () => Promise<void>;
+}
 
 interface ChatProps {
   profile?: string;
@@ -156,6 +165,13 @@ interface ChatProps {
     onPrompt: ((prompt: string) => void) | null;
     onSnapshot: (() => void) | null;
   };
+  /** RunChat awaits this shutdown barrier before printing a resumable task-session handoff. */
+  taskLifecycle?: ChatTaskLifecycle;
+}
+
+interface ChatTaskRuntime extends TaskSessionRuntime {
+  agent: Agent;
+  registry: ToolRegistry;
 }
 
 /** Live-tail pump cadence: deltas accumulate in refs and the screen syncs at most every STREAM_PUMP_MS
@@ -174,7 +190,7 @@ export const STREAM_PUMP_SCROLLED_MS = 300;
 export const shouldStreamPump = (now: number, lastPump: number, scrolledAway: boolean): boolean =>
   now - lastPump >= (scrolledAway ? STREAM_PUMP_SCROLLED_MS : STREAM_PUMP_MS);
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, prepareChatGptSupport = provider ? undefined : prepareChatGptRequest, completionAlert, bridgeHolder }: ChatProps) {
+export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, prepareChatGptSupport = provider ? undefined : prepareChatGptRequest, completionAlert, bridgeHolder, taskLifecycle }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -234,12 +250,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const historyPos = useRef(0);
   const multilineRef = useRef("");
   const queueRef = useRef<string[]>([]);
+  const drainingQueuedRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
   const feedbackRequestRef = useRef<AbortController | null>(null);
   useEffect(() => () => { feedbackRequestRef.current?.abort(); feedbackRequestRef.current = null; }, []);
   const verbRef = useRef(VERBS[0]); // playful "thinking" verb, repicked each turn
   const startRef = useRef(0);
   const resumedRef = useRef<Session | null>(resumedSession ?? (resume ? latestSession(process.cwd()) : null));
+  const activeSessionCwdRef = useRef(resumedRef.current?.cwd ?? process.cwd());
   // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   const initialFullscreen = fullscreenOverride ?? (cfg.fullscreen && canFullscreen((stdout as any) ?? process.stdout));
   const sessionIdRef = useRef(sessionId ?? resumedRef.current?.id ?? newSessionId());
@@ -378,8 +396,6 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const interruptedBannerShownRef = useRef(false);
   useEffect(() => {
     setApprovalHover(null);
-    approvalArmedRef.current = true;
-    if (approvalArmTimer.current) { clearTimeout(approvalArmTimer.current); approvalArmTimer.current = null; }
   }, [approval]);
   const approvalSeqRef = useRef(0);
   const remoteApprovalRef = useRef<{ id: string; approval: Approval } | null>(null);
@@ -419,7 +435,24 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [todos, setTodos] = useState<{ content: string; status: string }[]>(() =>
     resumedRef.current ? recoverTodos(resumedRef.current.messages) : [],
   );
-  const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [overlay, setOverlayState] = useState<Overlay | null>(null);
+  const overlayOpenRef = useRef(false);
+  const queuePausedForPickerRef = useRef(false);
+  const queuePauseNoticeShownRef = useRef(false);
+  const setOverlay = (next: Overlay | null) => {
+    const closed = overlayOpenRef.current && !next;
+    // A picker can receive Esc before the awaiting drain loop resumes. Mark the held queue now,
+    // while the queued command opens it, so cancellation cannot release the next task on old state.
+    if (next && drainingQueuedRef.current && queueRef.current.length) queuePausedForPickerRef.current = true;
+    overlayOpenRef.current = !!next;
+    setOverlayState(next);
+    if (closed && queuePausedForPickerRef.current) queueMicrotask(() => {
+      if (!overlayOpenRef.current && queuePausedForPickerRef.current && queueRef.current.length && !queuePauseNoticeShownRef.current) {
+        queuePauseNoticeShownRef.current = true;
+        addLine("info", `${queueRef.current.length} queued input(s) held. Session ${sessionIdRef.current} transcript: ${terminalSafeText(activeSessionCwdRef.current, { maxChars: 180 })}; tool root: ${terminalSafeText(process.cwd(), { maxChars: 180 })}. Use /queue resume to run here, or /queue discard to drop them.`);
+      }
+    });
+  };
   // Fullscreen is fixed at mount; incapable terminals stay inline.
   const [fullscreen] = useState<boolean>(initialFullscreen);
   const fullscreenRef = useRef(fullscreen);
@@ -651,6 +684,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const next = gateChain.current.then(() => new Promise<boolean>((resolve) => {
       const request = { toolName, args, resolve, queueRemaining: gatePending.current };
       remoteApprovalRef.current = { id: `a${++approvalSeqRef.current}`, approval: request };
+      // Arm this request before it can paint. A passive effect may run after a user types a
+      // non-decision key, and must not undo that key's 750ms composing guard.
+      approvalArmedRef.current = true;
+      if (approvalArmTimer.current) { clearTimeout(approvalArmTimer.current); approvalArmTimer.current = null; }
       // Completion is pleasant feedback even while watched; approval is an attention request, so it
       // sounds only after the terminal has reported that the user switched away.
       if (cfg.completionSound && !terminalFocusedRef.current) ringCompletion();
@@ -773,20 +810,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     });
   };
   const agentRef = useRef<Agent | null>(null);
-  if (!agentRef.current) {
-    agentRef.current = new Agent({
+  const createAgentForRegistry = (registry: ToolRegistry): Agent => new Agent({
       provider: provider ?? getProvider(cfg),
-      tools: registryRef.current,
+      tools: registry,
       maxSteps: cfg.maxSteps,
       maxContextTokens: cfg.contextWindow,
+      sourceArchiveCredential: () => cfg.apiKey,
       verifyBeforeExit: cfg.verifyBeforeExit,
       verifyStateChangesBeforeExit: true,
       adaptiveEffort: cfg.adaptiveEffort,
-      completionSupervisor: provider ? undefined : createCompletionSupervisor(cfg, registryRef.current),
+      completionSupervisor: provider ? undefined : createCompletionSupervisor(cfg, registry),
       onCheckpoint: () => persistRef.current(),
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // Refreshed each turn so a mid-session /model switch or NEKO.md edit is reflected at once.
-      dynamicContext: () => productionTurnContext(registryRef.current!, {
+      dynamicContext: () => productionTurnContext(registry, {
         model: cfg.model,
         provider: cfg.provider,
         home: cfg.resolvedHome,
@@ -872,6 +909,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         }
       },
     });
+  if (!agentRef.current) {
+    agentRef.current = createAgentForRegistry(registryRef.current);
     if (resumedRef.current) {
       agentRef.current.messages = [...resumedRef.current.messages];
       agentRef.current.restoreCompletionContract(resumedRef.current.completionContract);
@@ -880,10 +919,60 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     }
   }
 
+  const taskSessionRef = useRef<TaskSessionCoordinator<ChatTaskRuntime> | null>(null);
+  const taskTransitionRef = useRef(false);
+  if (taskLifecycle) taskLifecycle.shutdown = async () => {
+    const session = taskSessionRef.current;
+    if (!session) return;
+    await session.close();
+    taskSessionRef.current = null;
+  };
+  const createTaskRuntime = ({ scope, messages, sourceEvents }: TaskRuntimeInput): ChatTaskRuntime => {
+    // A fresh registry and Agent are required on EVERY activation, including A -> B -> A.
+    // Bind the runtime-owned scope before constructing the Agent or reading any context.
+    const registry = configureToolRegistry(new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub), cfg);
+    registry.explicitYolo = yolo;
+    registry.memoryHome = cfg.resolvedHome;
+    registry.bindTaskScope(scope);
+    registry.disabled.add("workflow");
+    registry.disabled.add("playbook");
+    const agent = createAgentForRegistry(registry);
+    agent.restoreCompactionSourceEvents(sourceEvents);
+    // SAFETY: the task coordinator validates and clones every stored message before calling this factory.
+    agent.messages = messages as Agent["messages"];
+    return {
+      agent,
+      registry,
+      getMessages: () => agent.messages,
+      getSourceEvents: () => {
+        const events = agent.compactionSourceEvents();
+        assertNoConfiguredCredentialInSourceEvents(events, cfg.apiKey);
+        return events;
+      },
+      assertQuiescent: () => {
+        if (busyRef.current || compactingRef.current || drainingQueuedRef.current
+          || queueRef.current.length || queuePausedForPickerRef.current || overlayOpenRef.current
+          || controllerRef.current || gatePending.current || remoteApprovalRef.current
+          || inflightRef.current.length || registry.bashRunning() || voiceRef.current
+          || feedbackRequestRef.current) {
+          throw new Error("Finish the active turn, approval, voice, picker, and queued input before switching tasks");
+        }
+      },
+      close: async () => {
+        if (!provider) await agent.currentProvider().dispose?.();
+      },
+    };
+  };
+
   // Production creates the main provider inside ChatApp. Dispose the final live instance on unmount;
   // Agent.setProvider already disposes every superseded instance. An explicitly injected provider is
   // caller-owned (tests and embedders rely on that seam), so never close it here.
   useEffect(() => () => {
+    const taskSession = taskSessionRef.current;
+    if (taskSession) {
+      if (!taskLifecycle) void taskSession.close().catch(() => { /* a failed lock remains fail-closed */ });
+      return;
+    }
     if (provider) return;
     try {
       const disposed = agentRef.current?.currentProvider().dispose?.();
@@ -895,7 +984,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } catch { /* terminal teardown must not be blocked by provider cleanup */ }
   }, [provider]);
 
-  const persist = () => sessionWriterRef.current!.save({
+  const persist = () => taskSessionRef.current
+    ? Promise.resolve(taskSessionRef.current.checkpoint())
+    : sessionWriterRef.current!.save({
       id: sessionIdRef.current,
       createdAt: createdAtRef.current,
       updatedAt: new Date().toISOString(),
@@ -911,6 +1002,49 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       usage: agentRef.current!.cost.snapshot(),
     });
   persistRef.current = persist;
+
+  // Standalone compaction and resumed sessions can collect several queued slash commands. Await
+  // each handler before starting the next; a model turn's own finally yields to this drain.
+  const drainQueued = async () => {
+    if (overlayOpenRef.current) {
+      if (queueRef.current.length) queuePausedForPickerRef.current = true;
+      return;
+    }
+    if (queuePausedForPickerRef.current || drainingQueuedRef.current || busyRef.current || compactingRef.current || taskTransitionRef.current) return;
+    drainingQueuedRef.current = true;
+    try {
+      while (queueRef.current.length && !busyRef.current && !compactingRef.current) {
+        const next = queueRef.current.shift()!;
+        setQueued(queueRef.current.length);
+        try { await handle(next); }
+        catch (error) { addLine("error", error instanceof Error ? error.message : String(error)); }
+        if (overlayOpenRef.current) {
+          if (queueRef.current.length) queuePausedForPickerRef.current = true;
+          break;
+        }
+      }
+    } finally {
+      drainingQueuedRef.current = false;
+    }
+  };
+  const resumePausedQueue = () => {
+    if (!queuePausedForPickerRef.current || overlayOpenRef.current) return false;
+    queuePausedForPickerRef.current = false;
+    queuePauseNoticeShownRef.current = false;
+    void drainQueued();
+    return true;
+  };
+  const discardPausedQueue = (reason: string) => {
+    if (!queuePausedForPickerRef.current) return false;
+    const count = queueRef.current.length;
+    queueRef.current.length = 0; // keep the array handed to any in-flight slash-command context
+    setQueued(0);
+    queuePausedForPickerRef.current = false;
+    queuePauseNoticeShownRef.current = false;
+    addLine("info", `${count} queued input(s) discarded ${reason}; no queued task was run.`);
+    return true;
+  };
+  const queueActionUnavailable = () => addLine("info", "No picker-held queue is ready; finish the picker before resuming, if one is open.");
 
   // Standalone compaction also serves /compact and resume-from-summary without setting turn busy state.
   const runCompaction = async (reason: "manual" | "auto" | "resume"): Promise<string> => {
@@ -931,16 +1065,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } finally {
       compactingRef.current = false;
       setCompacting(null);
-      // Drain input queued DURING a standalone compaction (/compact or resume-from-summary). For "auto"
-      // the compaction runs inside handle(), whose own finally drains - draining here too would run two
-      // turns at once on the same messages array.
-      if (reason !== "auto" && !busyRef.current) {
-        const next = queueRef.current.shift();
-        if (next !== undefined) {
-          setQueued(queueRef.current.length);
-          void handle(next).catch((e) => addLine("error", e instanceof Error ? e.message : String(e)));
-        }
-      }
+      // /compact drains here. Resume drains after replay, so queued input cannot run against a
+      // half-restored screen; "auto" runs inside handle(), whose own finally drains.
+      if (reason === "manual") void drainQueued();
     }
   };
 
@@ -951,6 +1078,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     agentRef.current!.cost.restore(target.usage);
     agentRef.current!.refreshSystemPrompt();
     sessionIdRef.current = target.id;
+    activeSessionCwdRef.current = target.cwd;
     createdAtRef.current = target.createdAt;
     const fu = target.messages.find((m) => m.role === "user");
     const tname = target.title || (isText(fu?.content) ? fu.content.replace(/\s+/g, " ").trim() : "");
@@ -966,7 +1094,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // Static is append-only; a raw screen wipe would desynchronize Ink.
     if (mode === "summary") {
       setLines((prev) => [...prev, { id: idRef.current++, kind: "info", text: `-- resuming ${target.id} from a summary (${target.messages.length} messages) --` }]);
-      await runCompaction("resume");
+      try {
+        await runCompaction("resume");
+      } catch (error) {
+        // A failed summary leaves Agent.messages intact. Resume from the raw checkpoint instead of
+        // dropping replay through an unobserved rejection from the picker/startup effect.
+        const message = error instanceof Error ? error.message : String(error);
+        addLine("error", `Could not summarize resumed session (${message}); replaying full saved history.`);
+      }
     } else {
       setLines((prev) => [...prev, { id: idRef.current++, kind: "info", text: `-- resumed ${target.id} (${target.messages.length} messages) --` }]);
     }
@@ -980,6 +1115,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (left) replay.push({ id: idRef.current++, kind: "info", text: `Picking up where you left off - ${left} task${left > 1 ? "s" : ""} still open. Just tell me to keep going (in your own words), or /continue.` });
     setLines((prev) => [...prev, ...replay]);
     relayRef.current?.publish({ type: "snapshot", lines: replay.map((line) => ({ ...line, text: line.text.slice(0, 200_000) })) }, { durable: true, reset: true });
+    // Input typed while the summary was pending runs only after the saved history is replayed.
+    void drainQueued();
   };
 
   const openTranscript = () => {
@@ -1528,6 +1665,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   useInput(
     (_char, key) => {
       if (key.tab && key.shift) {
+        if (registryRef.current?.taskScope) {
+          flashCopyNote("Task mode fixes permission mode for this session; start a new task session to change it.", 1800);
+          return;
+        }
         const nm = nextMode(registryRef.current!.mode);
         registryRef.current!.mode = nm;
         setMode(nm);
@@ -1975,17 +2116,138 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             setBusy(false);
             officeInstallFailedRef.current = true; // don't re-offer on the next matching prompt (no loop)
             keepRequest(`Office Support Pack failed: ${error instanceof Error ? error.message : error}. Continuing without it - submit again to proceed, or retry with /support office install.`);
-            const next = queueRef.current.shift();
-            setQueued(queueRef.current.length);
-            if (next !== undefined) void handle(next).catch((nextError) => addLine("error", nextError instanceof Error ? nextError.message : String(nextError)));
+            void drainQueued();
           });
       },
     });
   };
 
+  const activateTask = (session: TaskSessionCoordinator<ChatTaskRuntime>) => {
+    const { agent, registry } = session.active.runtime;
+    // Approval grants belong to the preceding task's interactive lifetime, not this one.
+    alwaysApproved.current.clear();
+    gateChain.current = Promise.resolve();
+    agentRef.current = agent;
+    registryRef.current = registry;
+    modeRef.current = registry.mode;
+    setMode(registry.mode);
+    taskSessionRef.current = session;
+    if (taskLifecycle) taskLifecycle.activeSessionId = session.id;
+    sessionIdRef.current = session.id;
+    activeSessionCwdRef.current = session.active.root;
+    pinnedTitleRef.current = "";
+    titleLockedRef.current = false;
+    titleTaskRef.current = trunc(session.active.label, 40);
+    tabTitle(titleTaskRef.current, false);
+    historyRef.current.length = 0;
+    historyPos.current = 0;
+    multilineRef.current = "";
+    setPendingMulti(false);
+    setInput("");
+    pastedContentsRef.current.clear();
+    pastedImagesRef.current.clear();
+    browserRequestBypassRef.current = null;
+    officeRequestBypassRef.current = null;
+    browserSetupTaskRef.current = undefined;
+    inflightRef.current = [];
+    syncInflight();
+    streamRef.current = "";
+    reasoningRef.current = "";
+    setTodos(recoverTodos(agent.messages));
+    setStarted(true);
+    const next: Line[] = [
+      { id: idRef.current++, kind: "info", text: `Task ${session.active.label} (${session.active.id}) · session ${session.id}` },
+      ...buildReplayLines(agent.messages, () => idRef.current++, { mode: "resume", columns: cols }),
+    ];
+    setLines(next);
+    // Ink Static is append-only. Remount it so the prior task's visible transcript cannot linger.
+    setResizeKey((value) => value + 1);
+    relayRef.current?.publish({ type: "snapshot", lines: next.map((line) => ({ ...line, text: line.text.slice(0, 200_000) })) }, { durable: true, reset: true });
+    relayRef.current?.refresh();
+  };
+
+  const runTaskCommand = async (text: string) => {
+    const [, operation = "status", ...arguments_] = text.trim().split(/\s+/);
+    const argument = arguments_.join(" ").trim();
+    const current = taskSessionRef.current;
+    if (operation === "status") {
+      return addLine("info", current
+        ? `task session ${current.id}; active ${current.active.id} (${current.active.label}); root ${current.active.root}`
+        : "No active task session. /task new <label> starts one; /task resume <session-id> restores one.");
+    }
+    if (operation === "list") {
+      return addLine("info", current
+        ? current.tasks.map((task) => `${task.id === current.active.id ? "*" : " "} ${task.id}  ${task.label}`).join("\n")
+        : "No active task session. Use /task resume <session-id> to restore a saved task session.");
+    }
+    if (!["new", "use", "resume"].includes(operation) || !argument) {
+      return addLine("info", "usage: /task new <label> | use <task-id> | list | status | resume <session-id>");
+    }
+    if (taskTransitionRef.current || busyRef.current || compactingRef.current || drainingQueuedRef.current
+      || queueRef.current.length || queuePausedForPickerRef.current || overlayOpenRef.current
+      || controllerRef.current || gatePending.current || remoteApprovalRef.current
+      || inflightRef.current.length || registryRef.current!.bashRunning() || voiceRef.current
+      || feedbackRequestRef.current || awaitingKey) {
+      return addLine("error", "Task switch blocked: finish the active turn, approval, voice, picker, and queued input first.");
+    }
+    taskTransitionRef.current = true;
+    try {
+      if (operation === "use") {
+        if (!current) throw new Error("No active task session; use /task resume <session-id> first");
+        await current.switchTask(argument);
+        activateTask(current);
+      } else if (operation === "new" && current) {
+        const id = current.createTask(argument);
+        await current.switchTask(id);
+        activateTask(current);
+      } else {
+        if (current) throw new Error("A task session is already active; use /task new or /task use");
+        // Legacy sessions stay in their own store. No old transcript or summary enters this task session.
+        if (agentRef.current!.messages.length) await persist();
+        await sessionWriterRef.current!.flush();
+        const previousAgent = agentRef.current!;
+        const options = {
+          home: cfg.resolvedHome, root: process.cwd(), authorityId: "local",
+          configId: taskSessionConfigId(cfg, yolo ? "auto" : cfg.mode), runtimeFactory: createTaskRuntime,
+        };
+        const session = operation === "new"
+          ? await createTaskSession({ ...options, label: argument })
+          : await loadTaskSession({ ...options, sessionId: argument });
+        activateTask(session);
+        if (!provider) await previousAgent.currentProvider().dispose?.();
+      }
+    } catch (error) {
+      if (error instanceof TaskSwitchCommittedError && current) {
+        // The coordinator identifies the one post-commit failure: old runtime teardown.
+        // Refresh from its trusted active state; never keep driving the now-inactive Agent.
+        activateTask(current);
+        addLine("error", `Task switched, but previous runtime cleanup failed: ${error.message}`);
+      } else {
+        addLine("error", `Task transition failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } finally {
+      taskTransitionRef.current = false;
+      // Inputs typed during an asynchronous switch require an explicit decision before they run
+      // against the newly selected task. The old queue must never cross tasks automatically.
+      if (queueRef.current.length) {
+        queuePausedForPickerRef.current = true;
+        queuePauseNoticeShownRef.current = true;
+        addLine("info", `${queueRef.current.length} queued input(s) held after task transition. Use /queue resume or /queue discard.`);
+      }
+    }
+  };
+
   const handle = async (text: string, internal = false) => {
+    if (taskTransitionRef.current) {
+      addLine("error", "Task transition is in progress; input was not run.");
+      return;
+    }
+    if (/^\/task(?:\s|$)/.test(text)) return runTaskCommand(text);
     if (text.startsWith("#")) {
-      addLine("info", rememberNote(text.slice(1)));
+      const scope = registryRef.current!.taskScope;
+      addLine("info", scope
+        ? memoryTool({ action: "append", name: "notes.md", content: text.slice(1) }, registryRef.current!.memoryHome, scope)
+        : rememberNote(text.slice(1)));
       return;
     }
     if (text === "/paste") {
@@ -2178,12 +2440,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return addLine("info", "usage: /voice [start|stop|mute|unmute|status]");
     }
     if (text === "/login") {
+      if (taskSessionRef.current) return addLine("info", "Login changes are unavailable in a scoped task session; exit and resume it with a matching profile.");
       // Provider first, auth route second. OpenAI deliberately appears ONCE here; only after choosing
       // it do we distinguish ChatGPT subscription OAuth from pay-as-you-go API-key auth.
       const activate = (profile: string) => {
         setActiveProfile(profile);
         cfg.adopt(loadConfig({ profile }));
         agentRef.current?.setProvider(getProvider(cfg));
+        agentRef.current?.setMaxContextTokens(cfg.contextWindow);
       };
       async function withLogin<T>(label: string, task: (signal: AbortSignal) => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
         const controller = new AbortController();
@@ -2341,6 +2605,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       return;
     }
     if (text === "/logout") {
+      if (taskSessionRef.current) return addLine("info", "Logout changes are unavailable in a scoped task session; exit it first, then use /logout.");
       if (voiceRef.current) await stopVoice("logout", false);
       if (cfg.usesChatGptAuth) {
         addLine("info", `${clearChatGptCredentials()} OpenAI API keys were left untouched.`);
@@ -2460,9 +2725,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
               feedbackRequestRef.current = null;
               busyRef.current = false;
               setBusy(false);
-              const next = queueRef.current.shift();
-              setQueued(queueRef.current.length);
-              if (next !== undefined) void handle(next).catch((error) => addLine("error", error instanceof Error ? error.message : String(error)));
+              void drainQueued();
             }
           }
         },
@@ -2709,14 +2972,13 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         }
       }
       if (turnCompleted && persisted && cfg.completionSound && !voiceTurnRef.current) ringCompletion();
-      const next = queueRef.current.shift();
-      setQueued(queueRef.current.length);
-      if (next !== undefined) void handle(next).catch((e) => addLine("error", e instanceof Error ? e.message : String(e))); // drain queued input
+      void drainQueued();
     }
   };
 
   voiceTurnRunnerRef.current = async (text: string) => {
     if (busyRef.current) throw new Error("Neko is still handling the previous voice turn");
+    if (compactingRef.current || drainingQueuedRef.current || overlayOpenRef.current || queuePausedForPickerRef.current) throw new Error("Neko is still handling queued input");
     const before = agentRef.current!.messages.length;
     voiceTurnRef.current = true;
     try {
@@ -2734,9 +2996,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   if (bridgeHolder) bridgeHolder.onPrompt = (prompt: string) => {
     const text = prompt.trim();
     if (!text) return;
-    if (busyRef.current || compactingRef.current) {
+    if (text === "/queue resume") { if (!resumePausedQueue()) queueActionUnavailable(); return; }
+    if (text === "/queue discard") { if (!discardPausedQueue("by request")) queueActionUnavailable(); return; }
+    if (busyRef.current || compactingRef.current || drainingQueuedRef.current || overlayOpenRef.current || queuePausedForPickerRef.current) {
       queueRef.current.push(text);
       setQueued(queueRef.current.length);
+      if (overlayOpenRef.current) queuePausedForPickerRef.current = true;
       addLine("info", `queued: ${trunc(text, 60)}`);
       return;
     }
@@ -2849,6 +3114,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     onVoiceOffer: handleVoiceOffer,
     run: async (msg, onDelta, onAct) => {
       if (msg === "\u0000neko:cycle-mode") {
+        if (taskSessionRef.current) return { reply: "Task mode fixes permission mode for this session." };
         const next = nextMode(modeRef.current);
         modeRef.current = next;
         setMode(next);
@@ -2925,6 +3191,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (!waiting || waiting.id !== action.id) return false;
         if (action.decision === "cancel") {
           remoteOverlayRef.current = null;
+          discardPausedQueue("when the picker was cancelled");
           setOverlay(null);
           if (waiting.overlay.onCancel) waiting.overlay.onCancel();
           else addLine("info", "(cancelled)");
@@ -2974,15 +3241,31 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const text = (multilineRef.current + value).trim();
     multilineRef.current = "";
     setPendingMulti(false);
+    if (queuePausedForPickerRef.current && !overlayOpenRef.current) {
+      if (text === "/queue resume") {
+        resumePausedQueue();
+      } else if (text === "/queue discard") {
+        discardPausedQueue("by request");
+      } else if (text) {
+        queueRef.current.push(text);
+        setQueued(queueRef.current.length);
+        addLine("info", `queued: ${trunc(text, 60)} (use /queue resume or /queue discard)`);
+      } else {
+        addLine("info", "Queued input remains held. Use /queue resume or /queue discard.");
+      }
+      return;
+    }
+    if (text === "/queue resume" || text === "/queue discard") { queueActionUnavailable(); return; }
     if (!text) return;
     setExpandedId(null); // a new turn: drop any ctrl+o peek panel
     historyRef.current.push(text);
     historyPos.current = historyRef.current.length;
-    if (busyRef.current || compactingRef.current) {
+    if (busyRef.current || compactingRef.current || drainingQueuedRef.current || overlayOpenRef.current || taskTransitionRef.current) {
       // Queue input typed while a turn is running OR a compaction is in flight (a turn must not mutate
       // agent.messages while compact() is rewriting it); drained when the current work finishes.
       queueRef.current.push(text);
       setQueued(queueRef.current.length);
+      if (overlayOpenRef.current) queuePausedForPickerRef.current = true;
       addLine("info", `queued: ${trunc(text, 60)}`);
       return;
     }
@@ -3604,7 +3887,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         }} />
       ) : overlay ? (
         overlay.textInput ? <TextPrompt key={overlay.title} title={overlay.title} description={overlay.description}
-          options={overlay.textInput} cols={contentCols} onCancel={() => { setOverlay(null); overlay.onCancel?.(); }} /> : <SelectList
+          options={overlay.textInput} cols={contentCols} onCancel={() => { discardPausedQueue("when the picker was cancelled"); setOverlay(null); overlay.onCancel?.(); }} /> : <SelectList
           key={overlay.title}
           title={overlay.title}
           description={overlay.description}
@@ -3618,6 +3901,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           onRename={overlay.onRename}
           getPreview={overlay.getPreview}
           onCancel={() => {
+            discardPausedQueue("when the picker was cancelled");
             setOverlay(null);
             if (overlay.onCancel) overlay.onCancel();
             else addLine("info", "(cancelled)");
@@ -3811,8 +4095,11 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     }
   }
   const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
+  const taskLifecycle: ChatTaskLifecycle = {
+    activeSessionId: null, shutdown: async () => {},
+  };
   const app = render(
-    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} completionAlert={completionAlert} bridgeHolder={bridgeHolder} />,
+    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} completionAlert={completionAlert} bridgeHolder={bridgeHolder} taskLifecycle={taskLifecycle} />,
     {
       exitOnCtrlC: false,
       // Explicit: Ink otherwise consults is-in-ci and DISABLES interactive rendering (stops writing
@@ -3831,6 +4118,9 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     // Let the deferred React unmount disposer run after Ink's final erase writes. Without this one
     // turn, the primary shell can be restored first and then overwritten by Ink's trailing cleanup.
     await new Promise<void>((resolveDone) => setTimeout(resolveDone, 0));
+    let taskShutdownError: unknown;
+    try { await taskLifecycle.shutdown(); }
+    catch (error) { taskShutdownError = error; }
     differ?.dispose();
     disposeClipboardImageReader();
     emergencyRestore();
@@ -3842,8 +4132,14 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     // bin/neko.ts intentionally owns the final process exit code. Wait until the handoff bytes have
     // reached the terminal before returning to it; an immediate process.exit can otherwise discard a
     // queued TTY write on the fallback renderer even though the alternate screen was restored correctly.
+    const handoff = taskShutdownError
+      ? `Task session ${taskLifecycle.activeSessionId ?? "(unknown)"} was not safely closed. Resume is blocked until the checkpoint/lock error is resolved: ${terminalSafeText(taskShutdownError instanceof Error ? taskShutdownError.message : String(taskShutdownError), { maxChars: 400, ascii: true })}`
+      : taskLifecycle.activeSessionId
+        ? `Resume this task session with:\r\n  neko chat\r\n  /task resume ${taskLifecycle.activeSessionId}`
+        : `Resume this session with:\r\n  neko --resume ${id}`;
     await new Promise<void>((resolveWrite) => {
-      process.stdout.write(`\r\n\r\nResume this session with:\r\n  neko --resume ${id}\r\n`, "utf8", () => resolveWrite());
+      process.stdout.write(`\r\n\r\n${handoff}\r\n`, "utf8", () => resolveWrite());
     });
+    if (taskShutdownError) throw taskShutdownError;
   }
 }

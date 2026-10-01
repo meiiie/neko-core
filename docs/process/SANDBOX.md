@@ -24,6 +24,10 @@ structured-file boundaries, and catastrophic-command seatbelt, but it is not fil
 containment. Set `sandbox: true` when the checkout or command requires an OS boundary. A configured
 sandbox makes the filesystem read-only except the workspace, explicit additional write roots and
 temporary storage, with network egress blocked unless explicitly granted.
+If `sandbox: true` is set but no trusted OS primitive is available, Bash fails closed before
+approval or launch. There is no direct-host fallback, including in `auto` or `--yolo`. Other
+tools keep their own permission rules. `neko doctor`, `neko policy`, and `/sandbox` report the
+missing boundary; changing the network allowlist cannot make blocked Bash runnable.
 
 Proof-grade exact-file turns are stricter. They expose only `read_file`, target-bound `edit`, and
 foreground-validator `bash`. The validator accepts test/typecheck/lint/check/verify shapes only and
@@ -140,8 +144,8 @@ of the whole posture, framed by the wren.wtf "Stop Using OpenCode" critique).
 | macOS | **sandbox-exec** (Seatbelt) — SBPL profile | write + network confinement; broad host reads |
 | Windows | **Anthropic sandbox-runtime** (`srt`) — dedicated `srt-sandbox` user, restricted token in a job object, NTFS ACLs, WFP egress fence | write + allowlist egress confinement; broad permitted reads; Windows support is alpha |
 
-`neko doctor` shows the resolved state, e.g. `bash_sandbox: off (host shell)` or
-`on (bwrap)`.
+`neko doctor` shows the resolved state, e.g. `bash_sandbox: off (host shell)`,
+`on (bwrap)`, or `requested but unavailable ... bash FAILS CLOSED`.
 
 ### Windows
 Windows has no bwrap/Seatbelt-style namespace primitive; the ecosystem answer (Codex CLI's
@@ -166,7 +170,7 @@ bash **fails closed**, not `UNCONFINED AUTO`. A health probe that itself reaches
 under host load is treated differently: Neko attempts the real command once through the same exact
 `srt.exe` + settings boundary. That attempt either succeeds or reports its own failure; it never falls
 back to a host shell.
-That latter label is the normal direct-host state unless the user enables the sandbox.
+`UNCONFINED AUTO` describes the direct-host state only when the user has disabled the sandbox.
 Alternatives remain: run Neko inside WSL (bwrap) or a container/dev-container.
 
 Mechanics worth knowing (verified on Windows 11 Home, srt 1.0.0):

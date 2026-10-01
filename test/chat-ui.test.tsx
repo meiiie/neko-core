@@ -15,6 +15,9 @@ import { buildReplayLines, clampToRows, collapsedToolResultExpandable, contentTo
   shouldAppendFinalAssistant,
 } from "../src/ui/chat-lines.ts";
 import { saveChatGptCredentials } from "../src/adapters/chatgpt-auth.ts";
+import { loadConfig } from "../src/adapters/config.ts";
+import { saveSession, setSessionsDir } from "../src/adapters/session.ts";
+import { Agent } from "../src/core/agent.ts";
 import { setModel } from "../src/adapters/project.ts";
 import type { ChatGptVoiceControl, ChatGptVoiceOptions, VoiceSnapshot } from "../src/adapters/chatgpt-voice.ts";
 import type { BrowserVoiceOptions } from "../src/adapters/browser-voice.ts";
@@ -474,6 +477,206 @@ test("resume re-renders the prior conversation", () => {
   expect(out).toContain("earlier reply"); // prior assistant turn replayed
   unmount();
 });
+
+test("failed resume summary reports the error and replays the intact raw session", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-resume-summary-failure-"));
+  mkdirSync(join(home, ".neko-core"));
+  writeFileSync(join(home, ".neko-core", "config.json"), JSON.stringify({
+    context_window: 2048, model_context: { "local-model": 2048 },
+  }));
+  process.env.HOME = home; delete process.env.USERPROFILE;
+  setSessionsDir(join(home, "sessions"));
+  const originalCompact = Agent.prototype.compact;
+  let compactAgent: Agent | undefined;
+  let rejectSummary!: (error: Error) => void;
+  Agent.prototype.compact = function () {
+    compactAgent = this;
+    return new Promise<string>((_resolve, reject) => { rejectSummary = reject; });
+  };
+  const messages = Array.from({ length: 12 }, (_, i) => [
+    { role: "user", content: `request ${i}` },
+    { role: "assistant", content: `earlier result ${i}: ${"x".repeat(900)}` },
+  ]).flat().concat([{ role: "user", content: "RAW RESUME TAIL: use bun in folder B" }]);
+  const resumed = {
+    id: "summary-failure", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    cwd: process.cwd(), model: "local-model", messages,
+  };
+  const provider = new MockProvider([{ content: "should not be called", tool_calls: [] }]);
+  let unmountApp: (() => void) | undefined;
+  try {
+    const rendered = render(
+      // SAFETY: synthetic session fixture contains only public message fields controlled by this test.
+      <ChatApp fullscreen={false} yolo profile="local" provider={provider} resumedSession={resumed as any} sessionId={resumed.id} />,
+    );
+    unmountApp = rendered.unmount;
+    const { stdin, lastFrame } = rendered;
+    expect(await until(() => (lastFrame() ?? "").includes("Resume from a summary"))).toBe(true);
+    stdin.write("\r"); // choose the first, recommended summary option
+    expect(await until(() => (lastFrame() ?? "").includes("Compacting conversation"))).toBe(true);
+    stdin.write("/cost"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("queued: /cost"))).toBe(true);
+    stdin.write("/usage"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("queued: /usage"))).toBe(true);
+    rejectSummary(new Error("synthetic summary failure"));
+    expect(await until(() => (lastFrame() ?? "").includes("synthetic summary failure"))).toBe(true);
+    expect(await until(() => (lastFrame() ?? "").includes("session cumulative:"))).toBe(true);
+    expect(await until(() => (lastFrame() ?? "").includes("subscription quota is available"), 1500)).toBe(true);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("replaying full saved history");
+    expect(frame).toContain("RAW RESUME TAIL: use bun in folder B");
+    expect(frame.indexOf("RAW RESUME TAIL: use bun in folder B")).toBeLessThan(frame.indexOf("session cumulative:"));
+    expect(frame.indexOf("session cumulative:")).toBeLessThan(frame.indexOf("subscription quota is available"));
+    expect(compactAgent?.messages.filter((message) => message.role !== "system")).toEqual(messages);
+    expect(provider.index).toBe(0); // summary failure never starts a normal model turn
+    expect(frame).not.toContain("Compacting conversation"); // standalone spinner was cleared
+  } finally {
+    unmountApp?.();
+    Agent.prototype.compact = originalCompact;
+    setSessionsDir(null);
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15_000);
+
+test.each(["resume", "discard", "side-panel resume"] as const)("queued instruction waits for resume picker until explicit %s", async (action) => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-resume-picker-queue-"));
+  mkdirSync(join(home, ".neko-core"));
+  writeFileSync(join(home, ".neko-core", "config.json"), JSON.stringify({
+    context_window: 32768, model_context: { "local-model": 32768 },
+  }));
+  process.env.HOME = home; delete process.env.USERPROFILE;
+  setSessionsDir(join(home, "sessions"));
+  const now = new Date().toISOString();
+  saveSession({
+    id: "picked-target", createdAt: now, updatedAt: now, cwd: process.cwd(), model: "local-model",
+    messages: [{ role: "user", content: "TARGET SESSION FACT: use bun" }],
+  });
+  const originalCompact = Agent.prototype.compact;
+  let rejectSummary!: (error: Error) => void;
+  Agent.prototype.compact = function () {
+    return new Promise<string>((_resolve, reject) => { rejectSummary = reject; });
+  };
+  const oldMessages = Array.from({ length: 12 }, (_, i) => [
+    { role: "user", content: `old request ${i}` },
+    { role: "assistant", content: `old result ${i}: ${"x".repeat(6000)}` },
+  ]).flat().concat([{ role: "user", content: "OLD SESSION FACT: use pnpm" }]);
+  const oldSession = { id: "old-active", createdAt: now, updatedAt: now, cwd: process.cwd(), model: "local-model", messages: oldMessages };
+  const provider = new MockProvider([{ content: "mock answer", tool_calls: [] }]);
+  const holder: any = { current: { pushPanel: () => {} }, onPrompt: null, onSnapshot: null };
+  let unmountApp: (() => void) | undefined;
+  try {
+    const rendered = render(
+      // SAFETY: synthetic session fixture contains only message fields controlled by this test.
+      <ChatApp fullscreen={false} yolo profile="local" provider={provider} resumedSession={oldSession as any} sessionId={oldSession.id} bridgeHolder={holder} />,
+    );
+    unmountApp = rendered.unmount;
+    const { stdin, lastFrame } = rendered;
+    expect(await until(() => (lastFrame() ?? "").includes("Resume from a summary"))).toBe(true);
+    stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Compacting conversation"))).toBe(true);
+    stdin.write("/resume"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("queued: /resume"))).toBe(true);
+    stdin.write("synthetic instruction after picker"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("queued: synthetic instruction after picker"))).toBe(true);
+    rejectSummary(new Error("synthetic summary failure"));
+    expect(await until(() => (lastFrame() ?? "").includes("Resume session"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("TARGET SESSION FACT: use bun");
+    await tick(80);
+    expect(provider.index).toBe(0); // queued instruction cannot run against the old session
+    stdin.write("TARGET SESSION FACT");
+    await tick(80); // wait for the picker filter to retain only the named target
+    expect(lastFrame() ?? "").toContain("search: TARGET SESSION FACT");
+    expect(lastFrame() ?? "").toContain("Resume session (1 of 1)");
+    expect(lastFrame() ?? "").toContain("> TARGET SESSION FACT: use bun");
+    stdin.write("\r"); // select the target even if startup also persisted the old session
+    expect(await until(() => (lastFrame() ?? "").includes("queued input(s) held. Session picked-target"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("tool root:");
+    expect(lastFrame() ?? "").toContain("TARGET SESSION FACT: use bun");
+    expect(provider.index).toBe(0); // selection alone does not grant queued instructions authority
+    stdin.write("\r"); // blank Enter must not silently release work after a context switch
+    await tick(60);
+    expect(provider.index).toBe(0);
+    if (action === "side-panel resume") holder.onPrompt("/queue resume");
+    else { stdin.write(`/queue ${action}`); await tick(20); stdin.write("\r"); }
+    if (action !== "discard") {
+      expect(await until(() => provider.index === 1)).toBe(true);
+      const sent = JSON.stringify(provider.messages);
+      expect(sent).toContain("TARGET SESSION FACT: use bun");
+      expect(sent).toContain("synthetic instruction after picker");
+      expect(sent).not.toContain("OLD SESSION FACT: use pnpm");
+    } else {
+      expect(await until(() => (lastFrame() ?? "").includes("queued input(s) discarded by request"))).toBe(true);
+      expect(provider.index).toBe(0);
+    }
+  } finally {
+    unmountApp?.();
+    Agent.prototype.compact = originalCompact;
+    setSessionsDir(null);
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15_000);
+
+test("cancelling a queued resume picker discards the pending instruction", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-resume-picker-cancel-"));
+  mkdirSync(join(home, ".neko-core"));
+  writeFileSync(join(home, ".neko-core", "config.json"), JSON.stringify({
+    context_window: 2048, model_context: { "local-model": 2048 },
+  }));
+  process.env.HOME = home; delete process.env.USERPROFILE;
+  setSessionsDir(join(home, "sessions"));
+  const now = new Date().toISOString();
+  saveSession({ id: "cancel-target", createdAt: now, updatedAt: now, cwd: process.cwd(), model: "local-model",
+    messages: [{ role: "user", content: "CANCEL TARGET FACT" }] });
+  const originalCompact = Agent.prototype.compact;
+  let rejectSummary!: (error: Error) => void;
+  Agent.prototype.compact = function () {
+    return new Promise<string>((_resolve, reject) => { rejectSummary = reject; });
+  };
+  const messages = Array.from({ length: 12 }, (_, i) => [
+    { role: "user", content: `old request ${i}` },
+    { role: "assistant", content: `old result ${i}: ${"x".repeat(900)}` },
+  ]).flat().concat([{ role: "user", content: "OLD FACT stays after cancel" }]);
+  const resumed = { id: "cancel-active", createdAt: now, updatedAt: now, cwd: process.cwd(), model: "local-model", messages };
+  const provider = new MockProvider([{ content: "should not be called", tool_calls: [] }]);
+  let unmountApp: (() => void) | undefined;
+  try {
+    const rendered = render(
+      // SAFETY: synthetic session fixture contains only message fields controlled by this test.
+      <ChatApp fullscreen={false} yolo profile="local" provider={provider} resumedSession={resumed as any} sessionId={resumed.id} />,
+    );
+    unmountApp = rendered.unmount;
+    const { stdin, lastFrame } = rendered;
+    expect(await until(() => (lastFrame() ?? "").includes("Resume from a summary"))).toBe(true);
+    stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("Compacting conversation"))).toBe(true);
+    stdin.write("/resume"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("queued: /resume"))).toBe(true);
+    stdin.write("instruction must be discarded"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("queued: instruction must be discarded"))).toBe(true);
+    rejectSummary(new Error("synthetic summary failure"));
+    expect(await until(() => (lastFrame() ?? "").includes("Resume session (") && (lastFrame() ?? "").includes("CANCEL TARGET FACT"))).toBe(true);
+    expect(provider.index).toBe(0);
+    stdin.write("\u001b");
+    expect(await until(() => (lastFrame() ?? "").includes("1 queued input(s) discarded when the picker was cancelled"))).toBe(true);
+    expect(lastFrame() ?? "").toContain("OLD FACT stays after cancel");
+    stdin.write("/queue resume"); await tick(20); stdin.write("\r");
+    expect(await until(() => (lastFrame() ?? "").includes("No picker-held queue is ready"))).toBe(true);
+    expect(provider.index).toBe(0);
+  } finally {
+    unmountApp?.();
+    Agent.prototype.compact = originalCompact;
+    setSessionsDir(null);
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15_000);
 
 test("header + input + status bar render on start", () => {
   const provider = new MockProvider([{ content: "", tool_calls: [] }]);
@@ -987,10 +1190,24 @@ test("/login opens the official OpenCode Zen key page and captures the key throu
 test("/login connects an OpenCode Console account through official device OAuth", async () => {
   const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE, oldFetch = globalThis.fetch;
   const home = mkdtempSync(join(tmpdir(), "neko-opencode-oauth-ui-"));
+  const configDir = join(home, ".neko-core");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "config.json"), JSON.stringify({
+    active_profile: "local",
+    model_context: { "local-model": 32768, "opencode/space-bunny-free": 8192 },
+    profiles: { "opencode-account": { model: "opencode/space-bunny-free" } },
+  }));
   // Keep Neko's credential file isolated without teaching Windows networking that the disposable
   // directory is a real user profile. Undici can otherwise materialize protected INetCache
   // junctions there, which makes the test-only teardown fail with EPERM on Windows.
   process.env.HOME = home; delete process.env.USERPROFILE;
+  const originalSetProvider = Agent.prototype.setProvider;
+  let activatedAgent: Agent | undefined;
+  Agent.prototype.setProvider = function (nextProvider: Provider) {
+    activatedAgent = this;
+    originalSetProvider.call(this, nextProvider);
+  };
+  let unmountApp: (() => void) | undefined;
   let opened = "";
   // SAFETY: test-built fetch fixture implements the fetch arguments and returns a Response for every path.
   globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
@@ -1010,25 +1227,34 @@ test("/login connects an OpenCode Console account through official device OAuth"
     return Response.json({});
   }) as typeof fetch;
   try {
+    expect(loadConfig({ profile: "local" }).contextWindow).toBe(32768);
+    expect(loadConfig({ profile: "opencode-account" }).contextWindow).toBe(8192);
     const provider = new MockProvider([{ content: "", tool_calls: [] }]);
-    const { stdin, frames, lastFrame, unmount } = render(
+    const rendered = render(
       <ChatApp fullscreen={false} yolo provider={provider} openUrl={(url) => { opened = url; }} />,
     );
+    unmountApp = rendered.unmount;
+    const { stdin, frames, lastFrame } = rendered;
     stdin.write("/login"); await tick(30); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("Sign in - choose a provider"))).toBe(true);
     stdin.write("opencode"); await tick(40); stdin.write("\r");
     expect(await until(() => (lastFrame() ?? "").includes("OpenCode - choose how to sign in"))).toBe(true);
     stdin.write("\r");
     expect(await until(() => frames.join("\n").includes("OpenCode Console connected as user@example.com"))).toBe(true);
+    expect(activatedAgent).toBeDefined();
+    if (!activatedAgent) throw new Error("OpenCode login did not activate an Agent");
+    expect(Object.getOwnPropertyDescriptor(activatedAgent, "maxContextTokens")?.value).toBe(8192);
     expect(opened).toBe("https://opencode.ai/console/device?user_code=ABCD-EFGH&client_id=opencode-cli");
     expect(readFileSync(join(home, ".neko-core", "opencode-auth.json"), "utf8")).toContain("refresh-secret");
     expect(frames.join("\n")).not.toContain("device-secret");
-    unmount();
   } finally {
-    globalThis.fetch = oldFetch;
-    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
-    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
-    rmSync(home, { recursive: true, force: true });
+    try { unmountApp?.(); } finally {
+      Agent.prototype.setProvider = originalSetProvider;
+      globalThis.fetch = oldFetch;
+      if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+      if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+      rmSync(home, { recursive: true, force: true });
+    }
   }
 }, 15000);
 

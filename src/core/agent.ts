@@ -9,7 +9,20 @@
  * The maxSteps cap is load-bearing: an agent without one can loop forever and burn money.
  * Tool observations (errors + denials) are fed back so the model adapts rather than crash.
  */
+import { createHash } from "node:crypto";
 import { CostTracker, type Usage } from "./cost.ts";
+import {
+  appendCompactionSourceEvent,
+  assertNoConfiguredCredentialInSourceEvents,
+  createCompactionSourceEvent,
+  isReadFileCall,
+  requestedReadPath,
+  sourceProjectionDigest,
+  sourceProjectionMatches,
+  validateCompactionSourceEvents,
+  type CompactionSourceEvent,
+  type TrustedReadFileSource,
+} from "./compaction-source.ts";
 import { ProviderAttemptError, type CompleteOptions, type DeltaHook, type Provider, type ToolCall } from "./ports.ts";
 import { todosContextBlock, type ToolRegistry } from "./tool-runtime.ts";
 import { taskDelegatesReadOnly } from "./tools.ts";
@@ -115,6 +128,14 @@ function cleanProviderMessages(messages: any[]): any[] {
     delete clean._neko_internal;
     delete clean._neko_inflight;
     delete clean._neko_acp_message_id;
+    delete clean._neko_compaction_first_user;
+    delete clean._neko_compaction_source_ids;
+    delete clean._neko_compaction_source_digest;
+    delete clean._neko_source_event_id;
+    delete clean._neko_source_projection_digest;
+    delete clean._neko_source_clipped;
+    delete clean._neko_source_unavailable;
+    delete clean._neko_tool_guidance;
     return clean;
   });
 }
@@ -131,7 +152,31 @@ function compactionSource(messages: any[], budget = 40_000): string {
     return `${raw.slice(0, limit - tail)}\n... [${omitted} chars omitted for compaction] ...\n${raw.slice(-tail)}`;
   };
   const source = messages.map((message) => {
-    const raw = isText(message.content) ? message.content : JSON.stringify(message.content);
+    // A tool result only carries its call id and observation. The file path lives on the
+    // preceding assistant tool call, so keep bounded call identity/path data alongside the
+    // observation without copying whole arguments (which may contain file contents/secrets).
+    const callCount = message.role === "assistant" && Array.isArray(message.tool_calls) ? message.tool_calls.length : 0;
+    const calls = callCount
+      ? message.tool_calls.slice(0, 8).map((call: any) => {
+        let args = call?.function?.arguments ?? call?.arguments;
+        if (isText(args)) { try { args = JSON.parse(args); } catch { args = null; } }
+        return {
+          id: String(call?.id ?? "").slice(0, 80),
+          name: String(call?.function?.name ?? call?.name ?? "").slice(0, 80),
+          ...(isText(args?.path) ? { path: clip(args.path, 256) } : undefined),
+        };
+      })
+      : [];
+    const callTrace = calls.length
+      ? `${callCount > calls.length ? `[${callCount - calls.length} tool calls omitted from compaction input]\n` : ""}tool_calls (recorded path arguments): ${JSON.stringify(calls)}\n`
+      : "";
+    const resultId = message.role === "tool" && isText(message.tool_call_id)
+      ? `tool_call_id: ${JSON.stringify(message.tool_call_id.slice(0, 80))}\n` : "";
+    // Compaction consumes durable raw observations, so explicitly carry any provider-facing
+    // runtime guidance into its bounded source without inventing another tool result.
+    const advice = message.role === "tool" && isText(message._neko_tool_guidance)
+      ? `\nNeko runtime guidance: ${message._neko_tool_guidance}` : "";
+    const raw = callTrace + resultId + (isText(message.content) ? message.content : JSON.stringify(message.content)) + advice;
     const roleCap = message.role === "tool" ? 1200 : 3000;
     return `${message.role}: ${clip(raw, Math.min(roleCap, perMessage))}`;
   }).join("\n");
@@ -221,6 +266,15 @@ export function classifyToolObservation(obs: any): ToolObservationClass {
     : "productive";
 }
 
+/** Refusal and terminal budget outcomes did not execute the mutation, even though they are failed
+ * observations for telemetry and loop guards. Execution-repair advice would be misleading here. */
+function isNonExecutionFailure(obs: any): boolean {
+  return isText(obs) && (
+    /^(?:Blocked(?::| by)|Denied by user:|Refused:|The user did NOT approve\b|Tool '[^']+' is (?:disabled|not available|restricted)|\[denied\])/mi.test(obs)
+    || obs.startsWith("Error: Harbor finalization budget exhausted; remote tool work is closed.")
+  );
+}
+
 /** Build one multimodal user turn without losing the semantic position of numbered pasted images.
  * Plain string attachments are CLI `--image` inputs and keep the legacy text-then-images layout. */
 export function imageContent(instruction: string, images: ImageAttachment[]): any[] {
@@ -260,6 +314,10 @@ export class Agent {
   private readonly onDelta?: DeltaHook;
   private readonly dynamicContext?: () => string;
   private maxContextTokens: number;
+  /** Invalidate in-flight summaries when a host changes the provider/model context. */
+  private compactionConfigRevision = 0;
+  private sourceEvents: CompactionSourceEvent[] = [];
+  private readonly readFileSources = new WeakMap<object, TrustedReadFileSource>();
   private readonly verifyBeforeExit: boolean;
   private readonly verifyStateChangesBeforeExit: boolean;
   private readonly adaptiveEffort: boolean;
@@ -310,6 +368,12 @@ export class Agent {
     this.adaptiveEffort = Boolean(opts.adaptiveEffort);
     this.completionSupervisor = opts.completionSupervisor;
     this.workDeadlineAt = Number.isSafeInteger(opts.workDeadlineAt) ? opts.workDeadlineAt : undefined;
+    const scope = this.tools.taskScope;
+    if (scope && opts.sourceArchiveCredential) this.tools.bindCompactionSourceLookup(scope, (id) => {
+      const event = this.compactionSourceEvent(id);
+      if (event) assertNoConfiguredCredentialInSourceEvents([event], opts.sourceArchiveCredential?.());
+      return event;
+    });
   }
 
   /** Deterministic controller verdict for automation. It says only whether known validation debt is
@@ -387,6 +451,7 @@ export class Agent {
   setProvider(provider: Provider): void {
     const previous = this.provider;
     this.provider = provider;
+    this.compactionConfigRevision++;
     try {
       const disposed = previous.dispose?.();
       // SAFETY: the host hook hands back a promise-like; member access is guarded before use.
@@ -398,7 +463,104 @@ export class Agent {
 
   /** Keep overflow/compaction guards accurate after a live /model or /provider switch. */
   setMaxContextTokens(tokens: number): void {
-    if (Number.isFinite(tokens) && tokens > 0) this.maxContextTokens = tokens;
+    if (Number.isFinite(tokens) && tokens > 0) {
+      this.maxContextTokens = tokens;
+      this.compactionConfigRevision++;
+    }
+  }
+
+  /** Restore only evidence bound to this runtime-owned task/root; never infer it from a summary. */
+  restoreCompactionSourceEvents(events: CompactionSourceEvent[]): void {
+    const scope = this.tools.taskScope;
+    if (!scope) throw new Error("Read-file source archive requires a runtime task scope");
+    this.sourceEvents = validateCompactionSourceEvents(events, scope.id, scope.canonicalRoot);
+    this.compactionConfigRevision++; // invalidate any summary started before archive replacement
+  }
+
+  /** Defensive copy for the task-session coordinator's single revision-checked checkpoint. */
+  compactionSourceEvents(): CompactionSourceEvent[] {
+    const scope = this.tools.taskScope;
+    if (!scope) return [];
+    return validateCompactionSourceEvents(this.sourceEvents, scope.id, scope.canonicalRoot);
+  }
+
+  /** Deterministic, task-scoped raw observation fallback by source ID. */
+  compactionSourceEvent(id: string): CompactionSourceEvent | undefined {
+    return this.compactionSourceEvents().find((event) => event.id === id);
+  }
+
+  /** Only the Agent's executed tool-result boundary may mint a task source record. */
+  private appendToolObservation(call: { id?: string; name: string; arguments: any }, observation: string | any[], guidance?: string): Error | undefined {
+    const result: any = {
+      role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation),
+      ...(guidance ? { _neko_tool_guidance: guidance } : undefined),
+    };
+    this.messages.push(result);
+    const scope = this.tools.taskScope;
+    if (!scope || call.name !== "read_file") return;
+    try {
+      // requestedPath came from the model's request. It is not a resolved or current file path.
+      const path = requestedReadPath({ name: call.name, arguments: call.arguments });
+      const source = this.readFileSources.get(call);
+      this.readFileSources.delete(call);
+      const event = createCompactionSourceEvent(scope, this.sourceEvents.length + 1, result.tool_call_id, path, result, source);
+      this.sourceEvents = appendCompactionSourceEvent(this.sourceEvents, event);
+      result._neko_source_event_id = event.id;
+      result._neko_source_projection_digest = sourceProjectionDigest(result);
+    } catch (error) {
+      // The completed tool outcome must checkpoint before this provenance failure aborts the turn.
+      result._neko_source_unavailable = true;
+      return new Error("Read-file source archive unavailable; raw result retained and compaction blocked.", { cause: error });
+    }
+  }
+
+  /** Reject unmarked/restored transcript records; they are not proof of tool execution. */
+  private assertReadFileSources(): void {
+    const scope = this.tools.taskScope;
+    if (!scope) return; // legacy/unscoped history keeps its existing compaction behavior
+    for (let i = 0; i < this.messages.length; i++) {
+      const result = this.messages[i];
+      if (result?.role !== "tool" || !isText(result.tool_call_id)) continue;
+      if (result._neko_source_event_id !== undefined) {
+        const event = this.sourceEvents.find((row) => row.id === result._neko_source_event_id);
+        if (!event || !sourceProjectionMatches(event, result)) {
+          throw new Error("Read-file source marker does not match task evidence");
+        }
+        continue;
+      }
+      let readCall = false;
+      for (let j = i - 1; j >= 0 && this.messages[j]?.role !== "user"; j--) {
+        const assistant = this.messages[j];
+        if (assistant?.role !== "assistant" || !Array.isArray(assistant.tool_calls)) continue;
+        const call = assistant.tool_calls.find((candidate: any) => candidate?.id === result.tool_call_id);
+        if (call) { readCall = isReadFileCall(call); break; }
+      }
+      if (readCall) throw new Error("Read-file transcript has no trusted result marker; raw history retained");
+    }
+  }
+
+  private compactedSourceIds(head: any[]): string[] {
+    const ids = new Set<string>();
+    for (const message of head) {
+      if (message?._neko_source_event_id !== undefined) {
+        if (!isText(message._neko_source_event_id)) throw new Error("Invalid read-file source marker");
+        ids.add(message._neko_source_event_id);
+      }
+      if (message?._neko_compaction_source_ids !== undefined) {
+        if (!Array.isArray(message._neko_compaction_source_ids)) throw new Error("Invalid compaction source references");
+        const digest = createHash("sha256").update(JSON.stringify(message._neko_compaction_source_ids)).digest("hex");
+        if (message._neko_compaction_source_digest !== digest) throw new Error("Compaction source references changed");
+        for (const id of message._neko_compaction_source_ids) {
+          if (!isText(id)) throw new Error("Invalid compaction source ID");
+          ids.add(id);
+        }
+      }
+    }
+    const available = new Set(this.compactionSourceEvents().map((event) => event.id));
+    for (const id of ids) if (!available.has(id)) {
+      throw new Error("Compaction source reference is missing or outside the active task");
+    }
+    return this.sourceEvents.filter((event) => ids.has(event.id)).map((event) => event.id);
   }
 
   /** App-owned model sessions (for example realtime voice) use the exact same tool boundary as a
@@ -430,37 +592,78 @@ export class Agent {
     const tail = convo.slice(cut);
     if (!head.length) return ""; // nothing old enough to compact
 
-    const text = compactionSource(head);
-    // Compaction must still free context when the summarizer fails.
-    let summary: string;
+    this.assertReadFileSources();
+    const sourceIds = this.compactedSourceIds(head);
+    // Messages are public/resumable and may be appended or edited while the provider awaits.
+    // Hash the full serialized state before replacing history; identity/length misses an
+    // in-place correction. Only a digest, not a duplicate transcript, survives the await.
+    const snapshotDigest = () => createHash("sha256").update(JSON.stringify(this.messages)).digest("hex");
+    let inputDigest: string;
+    try { inputDigest = snapshotDigest(); }
+    catch { throw new Error("Compaction cannot snapshot conversation; original history is intact."); }
+    const configRevision = this.compactionConfigRevision;
+    // The summarizer sees bounded excerpts; runtime-owned IDs are reattached deterministically
+    // after summarization so a model-written summary cannot erase source lookup references.
+    const shown = sourceIds.slice(-8);
+    const sourceRefs = shown.length
+      ? `\n[historical read_file tool-result IDs for source_lookup: ${shown.join(", ")}${sourceIds.length > shown.length ? `; ${sourceIds.length - shown.length} earlier IDs omitted` : ""}. These are historical evidence only; use a fresh read_file for current contents.]`
+      : "";
+    const text = compactionSource(head, 40_000 - sourceRefs.length) + sourceRefs;
+    let res: Awaited<ReturnType<Provider["complete"]>>;
     try {
-      const res = await this.completeMeasured(cleanProviderMessages([
+      res = await this.completeMeasured(cleanProviderMessages([
         { role: "system", content: COMPACTION_PROMPT },
         { role: "user", content: text, _neko_internal: true },
       ]), undefined, undefined, undefined, undefined, "compact");
-      this.cost.add(res.usage);
-      summary = res.content ?? "";
-    } catch {
-      summary = "(earlier conversation elided to fit the context window; the summary call failed, but the recent turns below are intact)";
+    } catch (error) {
+      throw new Error("Compaction failed; original history is intact.", { cause: error });
     }
-      // Bound retained tool output by lines and characters, including dense minified payloads.
-      const leanTail = tail.map((m) => {
-        if (m.role !== "tool" || !isText(m.content)) return m;
-        const lines = m.content.split("\n");
-        if (lines.length > 40) return { ...m, content: lines.slice(0, 40).join("\n") + `\n... (${lines.length - 40} more lines clipped on compaction)` };
-        if (m.content.length > LEAN_TAIL_CHARS) {
-          const head = m.content.slice(0, LEAN_TAIL_CHARS);
-          return { ...m, content: head + `\n... (${m.content.length - LEAN_TAIL_CHARS} more chars clipped on compaction)` };
-        }
-        return m;
-      });
-    // Preserve the original user instruction verbatim when it moves into the summarized head.
-    const firstUser = head.find((m) => m.role === "user");
-    const task = isText(firstUser?.content) ? firstUser.content.slice(0, 600) : "";
+    this.cost.add(res.usage);
+    if (!isText(res.content) || !res.content.trim() || res.truncated || res.tool_calls?.length) {
+      throw new Error("Compaction returned no complete summary; original history is intact.");
+    }
+    const summary = res.content;
+    let currentDigest: string;
+    try {
+      currentDigest = snapshotDigest();
+    } catch { throw new Error("Compaction cannot verify conversation snapshot; original history is intact."); }
+    if (this.compactionConfigRevision !== configRevision || currentDigest !== inputDigest) {
+      throw new Error("Compaction discarded because conversation or model changed; original history is intact.");
+    }
+    // Bound retained tool output by lines and characters, including dense minified payloads.
+    const leanTail = tail.map((m) => {
+      if (m.role !== "tool" || !isText(m.content)) return m;
+      const lines = m.content.split("\n");
+      let clipped: string | undefined;
+      if (lines.length > 40) clipped = lines.slice(0, 40).join("\n") + `\n... (${lines.length - 40} more lines clipped on compaction)`;
+      if (m.content.length > LEAN_TAIL_CHARS) {
+        const head = m.content.slice(0, LEAN_TAIL_CHARS);
+        if (clipped === undefined) clipped = head + `\n... (${m.content.length - LEAN_TAIL_CHARS} more chars clipped on compaction)`;
+      }
+      if (clipped === undefined) return m;
+      const lean = { ...m, content: clipped };
+      if (lean._neko_source_event_id) {
+        lean._neko_source_clipped = true;
+        lean._neko_source_projection_digest = sourceProjectionDigest(lean);
+      }
+      return lean;
+    });
+    // Carry the first real request across repeated compactions. An earlier capsule is an
+    // internal user-shaped message, never a new user request. Keep this request explicitly
+    // historical: later turns can switch tasks or correct it.
+    const priorCapsule = head.find((m) => m.role === "user" && isInternalUserMessage(m)
+      && isText(m.content) && m.content.startsWith("[Summary of earlier conversation]"));
+    const firstUser = priorCapsule ? undefined : head.find((m) => m.role === "user" && !isInternalUserMessage(m));
+    const firstRequest = (isText(priorCapsule?._neko_compaction_first_user)
+      ? priorCapsule._neko_compaction_first_user
+      : isText(firstUser?.content) ? firstUser.content : "").slice(0, 600);
     const plan = todosContextBlock(this.tools.todos);
     this.messages = [
       ...sys,
-      { role: "user", content: `[Summary of earlier conversation]\n${task ? `ORIGINAL TASK (verbatim): ${task}\n\n` : ""}${plan ? `${plan}\n\n` : ""}${summary}`, _neko_internal: true },
+      { role: "user", content: `[Summary of earlier conversation]\n${firstRequest ? `FIRST USER REQUEST (historical; may be superseded): ${firstRequest}\n\n` : ""}${plan ? `${plan}\n\n` : ""}${summary}${sourceRefs}`, _neko_internal: true,
+        ...(firstRequest ? { _neko_compaction_first_user: firstRequest } : undefined),
+        ...(sourceIds.length ? { _neko_compaction_source_ids: sourceIds,
+          _neko_compaction_source_digest: createHash("sha256").update(JSON.stringify(sourceIds)).digest("hex") } : undefined) },
       ...leanTail,
     ];
     return summary;
@@ -494,6 +697,11 @@ export class Agent {
     // meaningful chunk; the emergency overflow path passes zero and always frees whatever it can.
     if (imageSavings + textSavings < minSavingsChars) return false;
 
+    this.assertReadFileSources(); // never mask an unmarked historical read_file result
+    if (oldImageIdx.some((i) => this.messages[i]._neko_source_event_id !== undefined)) {
+      throw new Error("Read-file image evidence cannot be masked; raw history retained");
+    }
+
     let shrank = false;
     for (const i of oldImageIdx) {
       const m = this.messages[i];
@@ -513,6 +721,10 @@ export class Agent {
     for (const i of oldTextIdx) {
       const m = this.messages[i];
       m.content = m.content.slice(0, CLIP) + `\n... [${m.content.length - CLIP} ${MARK}] ...`;
+      if (m._neko_source_event_id) {
+        m._neko_source_clipped = true;
+        m._neko_source_projection_digest = sourceProjectionDigest(m);
+      }
       shrank = true;
     }
     return shrank;
@@ -529,7 +741,19 @@ export class Agent {
 
   /** A provider-safe history projection. Local durability/control markers remain in `messages`. */
   providerHistory(): any[] {
-    const clean = cleanProviderMessages(this.messages);
+    // Runtime guidance is model-facing advice, not a second tool observation. Keep the durable
+    // result and ACP live/replay status tied to the raw outcome, while the next provider request
+    // still receives the nudge inside the one matching tool result.
+    const projected = this.messages.map((message) => {
+      if (message?.role !== "tool" || !isText(message._neko_tool_guidance)) return message;
+      const content = isText(message.content)
+        ? clampObservation(`${message.content}\n${message._neko_tool_guidance}`)
+        : Array.isArray(message.content)
+          ? [...message.content, { type: "text", text: message._neko_tool_guidance }]
+          : message.content;
+      return { ...message, content };
+    });
+    const clean = cleanProviderMessages(projected);
     if (!this.turnSystemContext) return clean;
     const system = clean.find((message) => message?.role === "system" && isText(message.content));
     if (system) system.content = `${system.content}\n\n${this.turnSystemContext}`;
@@ -978,7 +1202,9 @@ export class Agent {
         return `Error: argument validation failed for ${call.name} - missing required ${hint}. Re-emit the call with the missing argument(s) filled in.`;
       }
       try {
-        return await this.tools.execute(call.name, args, signal);
+        return await this.tools.execute(call.name, args, signal,
+          call.name === "read_file" && this.tools.taskScope
+            ? (source) => this.readFileSources.set(call, source) : undefined);
       } catch (error) {
         return `Error running ${call.name}: ${error instanceof Error ? error.message : String(error)}`;
       }
@@ -1322,8 +1548,8 @@ export class Agent {
         // Clip old observations before paying for a summarizer call in a single long turn.
         if (!this.shrinkOldObservations()) {
           this.emit("compact", "auto");
-          await this.compact();
-          this.emit("compact_done", "auto");
+          try { await this.compact(); }
+          finally { this.emit("compact_done", "auto"); }
         }
       }
       // Eager execution is limited to the read-only prefix and shares the turn's abort signal.
@@ -1394,9 +1620,10 @@ export class Agent {
           await this.durableCheckpoint();
           const observation = await executeAdmittedTool(call);
           noteTool(call, observation);
-          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
+          const sourceError = this.appendToolObservation(call, observation);
           this.emit("tool_result", { call, observation });
           await this.durableCheckpoint(); // completed outcome is durable before the managed provider continues
+          if (sourceError) throw sourceError;
           return observation;
         });
         managedToolChain = task.then(() => undefined, () => undefined);
@@ -1627,13 +1854,16 @@ export class Agent {
         lastSig = ""; // a parallel fan-out breaks any single-call repeat chain
         toolCalls.forEach((call) => this.emit("tool_call", call));
         const observations = await Promise.all(toolCalls.map((call) => eager.get(eagerKey(call)) ?? executeAdmittedTool(call)));
+        const sourceErrors: Error[] = [];
         toolCalls.forEach((call, i) => {
           noteTool(call, observations[i]);
           if (Agent.isUnproductiveResult(observations[i])) stepHadUnproductiveResult = true;
-          this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observations[i]) });
+          const sourceError = this.appendToolObservation(call, observations[i]);
+          if (sourceError) sourceErrors.push(sourceError);
           this.emit("tool_result", { call, observation: observations[i] });
         });
         await this.durableCheckpoint();
+        if (sourceErrors.length) throw sourceErrors[0];
       } else {
         for (const call of toolCalls) {
           if (signal?.aborted) return "[interrupted]"; // stop promptly between tools on Esc
@@ -1644,7 +1874,6 @@ export class Agent {
             repeats = !repeatableWait && sig === lastSig ? repeats + 1 : 0;
             lastSig = repeatableWait ? "" : sig;
             // Distinct edits to one path are counted separately from exact repeats.
-            const broad = this.broadLoopNudge(call);
             const circuitBlocked = toolchainCircuitOpen && Agent.isToolchainCommand(call);
             let observation = circuitBlocked
               ? "[capability circuit] The sandbox/runtime already failed three independent Bun/Node/package-manager attempts. " +
@@ -1654,6 +1883,9 @@ export class Agent {
               ? "[loop guard] You already made this exact tool call 3 times with the same result. Stop repeating it: try a different approach/tool, or give your final answer now."
               : await (eager.get(eagerKey(call)) ?? executeAdmittedTool(call));
             noteTool(call, observation);
+            // Count only edits that produced a usable result. A rejected or failed edit did
+            // not change the file and must not become "you've edited it N times" advice.
+            const broad = Agent.isUnproductiveResult(observation) ? null : this.broadLoopNudge(call);
             if (Agent.isToolchainCommand(call) && !circuitBlocked) {
               if (Agent.isToolchainCapabilityFailure(call, observation)) {
                 toolchainCapabilityFailures++;
@@ -1669,23 +1901,26 @@ export class Agent {
             if (Agent.isUnproductiveResult(observation)) stepHadUnproductiveResult = true;
             // A productive result resets the consecutive empty-or-failed streak.
             this.consecutiveUnproductive = Agent.isUnproductiveResult(observation) ? this.consecutiveUnproductive + 1 : 0;
-            this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: clampObservation(observation) });
-            this.emit("tool_result", { call, observation });
-            await this.durableCheckpoint();
-            // Give recovery guidance on the first mutating failure; success re-arms the edge trigger.
+            // One assistant tool call must have exactly one matching tool result. Keep runtime
+            // advice as local metadata projected into that one result for the next provider
+            // request; extra role=tool messages break strict trajectories and ACP replay.
+            const advisories: string[] = [];
+            // Give recovery guidance on the first *executed* mutating failure; a user denial
+            // remains failed for telemetry, but has no partial edit to repair.
             const mutFailed = MUTATING_TOOLS.has(call.name) && isText(observation) &&
+              !isNonExecutionFailure(observation) &&
               (observation.startsWith(`Error running ${call.name}`) || Agent.isFailedRunResult(observation));
             if (mutFailed && !mutErrored && repeats < 2) {
-              this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content:
+              advisories.push(
                 `[recovery] That ${call.name} FAILED. Don't blindly re-run it, and don't delete partial ` +
                 "work it may still need. Recover deliberately: (1) DIAGNOSE - read the error above and " +
                 "inspect the actual state (the file, the directory, the command output); (2) REPAIR - fix " +
                 "the root cause or recreate the missing artifact; (3) VALIDATE - re-run the failed check " +
-                "and confirm it passes; then continue the task." });
+                "and confirm it passes; then continue the task.");
             }
             if (MUTATING_TOOLS.has(call.name)) mutErrored = mutFailed;
             // Warn once after repeated distinct edits; exact repeats are handled above.
-            if (broad !== null && repeats < 2) this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: broad });
+            if (broad !== null && repeats < 2) advisories.push(broad);
             // Nudge once after enough consecutive empty or failed results.
             if (this.consecutiveUnproductive >= UNPRODUCTIVE_CAP) {
               const nudge = "[loop guard] The last " + this.consecutiveUnproductive + " tool results in a row " +
@@ -1693,9 +1928,13 @@ export class Agent {
                 "varying the same call. Step back and try a DIFFERENT tool/strategy (for a web page or feed, " +
                 "the accessibility snapshot or a markdown read is far more reliable than DOM selectors), or " +
                 "answer with what you already have.";
-              this.messages.push({ role: "tool", tool_call_id: call.id || call.name, content: nudge });
+              advisories.push(nudge);
               this.consecutiveUnproductive = 0; // reset so it fires once, then re-accumulates
             }
+            const sourceError = this.appendToolObservation(call, observation, advisories.length ? advisories.join("\n") : undefined);
+            this.emit("tool_result", { call, observation });
+            await this.durableCheckpoint();
+            if (sourceError) throw sourceError;
           }
       }
       // Lower effort only after a sustained read-only pattern; the feature remains opt-in.

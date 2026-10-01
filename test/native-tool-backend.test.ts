@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test, expect } from "bun:test";
 
 import { Agent } from "../src/core/agent.ts";
+import { dynamicToolRuntimeBlock } from "../src/adapters/tool-registry.ts";
 import {
   ToolRegistry,
   type NativeToolBackend,
@@ -61,6 +62,31 @@ test("remote ownership reuses each existing native schema exactly once", () => {
   for (const name of ["read_file", "edit", "bash"]) {
     expect(names.filter((candidate) => candidate === name)).toHaveLength(1);
   }
+});
+
+test("attested native Bash stays available without a local sandbox primitive", async () => {
+  const backend = new FakeNativeBackend(["bash"], () => "(exit 0)\nremote");
+  const reg = registry(backend);
+  reg.sandboxBash = true;
+  const runtime = dynamicToolRuntimeBlock(reg, { kind: "none", live: false });
+  expect(runtime).toContain("native backend-enforced");
+  expect(runtime).toContain("Shell execution target: attested native backend");
+  expect(runtime).not.toContain("bash FAILS CLOSED");
+  expect(await reg.execute("bash", { command: "echo synthetic" })).toStartWith("(exit 0)");
+  expect(backend.calls).toHaveLength(1);
+});
+
+test("native Bash with Neko sandbox disabled is not reported as fail-closed", async () => {
+  const backend = new FakeNativeBackend(["bash"], () => "(exit 0)\nremote");
+  const reg = registry(backend);
+  reg.sandboxBash = false;
+  const runtime = dynamicToolRuntimeBlock(reg, { kind: "none", live: false });
+  expect(runtime).toContain("sandbox=off in Neko config (native backend-owned");
+  expect(runtime).toContain("Shell execution target: native backend (Neko sandbox disabled)");
+  expect(runtime).not.toContain("FAILS CLOSED");
+  expect(runtime).not.toContain("bash runs on the host");
+  expect(await reg.execute("bash", { command: "echo synthetic" })).toStartWith("(exit 0)");
+  expect(backend.calls).toHaveLength(1);
 });
 
 test("backend construction fails closed without the full confinement and quiescence attestation", () => {

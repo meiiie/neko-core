@@ -140,8 +140,12 @@ export interface Capability {
   detail: string;
 }
 
-export function collectCapabilities(config: NekoConfig, explicitYolo = false): Capability[] {
+export function collectCapabilities(config: NekoConfig, explicitYolo = false, sandboxRuntime?: SandboxRuntimeStatus): Capability[] {
   const auto = config.mode === "auto";
+  // This CLI capability reports the local shell. Native backends have their own attestation.
+  const missingPrimitive = config.sandbox && (sandboxRuntime?.kind ?? detectSandbox()) === "none";
+  const liveSandbox = () => config.sandbox && !missingPrimitive &&
+    (sandboxRuntime?.live ?? sandboxActive());
   return [
     { name: "agent_loop", klass: "agent", status: "enabled", detail: `complete -> tool-calls -> observe, capped at max_steps=${config.maxSteps}` },
     { name: "model_completion", klass: "agent", status: "enabled", detail: `${config.provider}: ${config.model || "(model unset)"}` },
@@ -160,19 +164,21 @@ export function collectCapabilities(config: NekoConfig, explicitYolo = false): C
     {
       name: "shell",
       klass: "tool",
-      status: "enabled",
+      status: missingPrimitive ? "unavailable" : "enabled",
       // "Gated-but-sandboxed" is a NAMED state like mode=auto: the gate stays in the contract,
       // the prompt is skipped only while confinement is LIVE (primitive + provisioning).
       // Under product-default auto, ordinary bash is approval-free; destructive still asks in the run path.
-      detail: explicitYolo
-        ? config.sandbox && sandboxActive()
+      detail: missingPrimitive
+        ? "bash unavailable: configured OS sandbox has no trusted primitive; bash FAILS CLOSED with no host fallback"
+        : explicitYolo
+        ? liveSandbox()
           ? "bash (approval-free under explicit --yolo; OS-sandboxed; hard seatbelts remain)"
           : "bash (approval-free under explicit --yolo when runnable; doctor reports confinement; hard seatbelts remain)"
         : auto
-          ? config.sandbox && config.sandboxAutoApprove && sandboxActive()
+          ? config.sandboxAutoApprove && liveSandbox()
             ? `bash (mode=auto; OS-sandboxed auto-approve: writes confined to workspace/temp plus explicit additional_write_roots; destructive still asks; sandbox_auto_approve=false to prompt)`
             : "bash (mode=auto: ordinary commands without approval; workspace-destructive still asks once; hard seatbelts remain)"
-          : config.sandbox && config.sandboxAutoApprove && sandboxActive()
+          : config.sandboxAutoApprove && liveSandbox()
             ? `bash (gated; explicitly auto-approved while OS-sandboxed: writes confined to workspace/temp plus explicit additional_write_roots, host reads remain available; sandbox_auto_approve=false to prompt)`
             : "bash (gated: needs approval)",
     },
@@ -272,6 +278,15 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
     }
   }
 
+  if (config.sandbox && sandboxKind === "none" && config.mode !== "auto") {
+    findings.push({
+      severity: "warn",
+      code: "sandbox_primitive_unavailable",
+      subject: "bash+sandbox",
+      message: "BASH FAILS CLOSED: sandbox:true was requested but no trusted OS sandbox primitive is available; Neko refuses bash execution with no host fallback.",
+    });
+  }
+
   if (config.mode === "auto") {
     findings.push({
       severity: "warn",
@@ -281,7 +296,7 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
         ? "explicit --yolo: approval prompts are disabled. Hard credential/system/catastrophic seatbelts remain."
         : "mode=auto: gated coding tools, ordinary outside writes, and host computer run without prompting; workspace-destructive bash still asks once; hard seatbelts remain. Named state, not an LLM classifier.",
     });
-    if (!config.sandbox || sandboxKind === "none") {
+    if (!config.sandbox) {
       findings.push({
         severity: "warn",
         code: "auto_without_live_sandbox",
@@ -302,7 +317,9 @@ export function evaluatePolicy(config: NekoConfig, sandboxRuntime?: SandboxRunti
         severity: "warn",
         code: "auto_with_unusable_sandbox",
         subject: "bash+sandbox",
-        message: `BASH FAILS CLOSED: the configured ${sandboxKind} sandbox is present but unusable, so Neko refuses bash execution instead of falling back to the host. Other gated tools remain in auto mode.`,
+        message: sandboxKind === "none"
+          ? "BASH FAILS CLOSED: sandbox:true was requested but no trusted OS sandbox primitive is available, so Neko refuses bash execution with no host fallback. Other gated tools remain in auto mode."
+          : `BASH FAILS CLOSED: the configured ${sandboxKind} sandbox is present but unusable, so Neko refuses bash execution instead of falling back to the host. Other gated tools remain in auto mode.`,
       });
     }
   }

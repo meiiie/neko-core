@@ -83,6 +83,68 @@ test("production turn context follows registry root/home and restores full catal
   }
 });
 
+test("production turn context recalls the configured home memory index, not the process home", () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-turn-memory-home-")));
+  const root = join(base, "project");
+  const processHome = join(base, "process-home");
+  const configuredHome = join(base, "configured-home");
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  try {
+    mkdirSync(root, { recursive: true });
+    for (const home of [processHome, configuredHome]) {
+      mkdirSync(join(home, ".neko-core", "memory"), { recursive: true });
+    }
+    writeFileSync(join(processHome, ".neko-core", "memory", "project.md"), "# PROCESS_HOME_MEMORY_SENTINEL\n", "utf8");
+    writeFileSync(join(configuredHome, ".neko-core", "memory", "project.md"), "# CONFIGURED_HOME_MEMORY_SENTINEL\n", "utf8");
+    process.env.HOME = processHome;
+    process.env.USERPROFILE = processHome;
+
+    const registry = new ToolRegistry(root, "auto", () => true);
+    const context = productionTurnContext(registry, {
+      model: "fixture-model", provider: "fixture-provider", home: configuredHome,
+    });
+    expect(context).toContain("project.md: CONFIGURED_HOME_MEMORY_SENTINEL");
+    expect(context).not.toContain("PROCESS_HOME_MEMORY_SENTINEL");
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+test("production turn context honors the configured-home memory disable flag", () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-turn-memory-disabled-")));
+  const root = join(base, "project");
+  const processHome = join(base, "process-home");
+  const configuredHome = join(base, "configured-home");
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  try {
+    mkdirSync(root, { recursive: true });
+    mkdirSync(join(processHome, ".neko-core", "memory"), { recursive: true });
+    mkdirSync(join(configuredHome, ".neko-core", "memory"), { recursive: true });
+    writeFileSync(join(processHome, ".neko-core", "memory", "project.md"), "# PROCESS_HOME_MEMORY_SENTINEL\n", "utf8");
+    writeFileSync(join(configuredHome, ".neko-core", "memory", ".disabled"), "disabled\n", "utf8");
+    process.env.HOME = processHome;
+    process.env.USERPROFILE = processHome;
+
+    const registry = new ToolRegistry(root, "auto", () => true);
+    const context = productionTurnContext(registry, {
+      model: "fixture-model", provider: "fixture-provider", home: configuredHome,
+    });
+    expect(context).not.toContain("Saved memories");
+    expect(context).not.toContain("PROCESS_HOME_MEMORY_SENTINEL");
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("a preparation throw closes the turn lease and removes provider-only context", async () => {
   const registry = new ToolRegistry(".", "auto", () => true);
   const agent = new Agent({

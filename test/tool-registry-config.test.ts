@@ -34,6 +34,50 @@ test("shared composition provisions the global research ledger and canonical exp
   }
 });
 
+test("configured memory home governs read, search, write, disable, and child registry", async () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "neko-memory-home-compose-")));
+  const root = join(base, "project");
+  const processHome = join(base, "process-home");
+  const configuredHome = join(base, "configured-home");
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  try {
+    mkdirSync(root, { recursive: true });
+    for (const home of [processHome, configuredHome]) {
+      mkdirSync(join(home, ".neko-core", "memory"), { recursive: true });
+    }
+    writeFileSync(join(processHome, ".neko-core", "memory", "project.md"), "# Process home only\nA_MARKER\nAUNIQUEFACT\n", "utf8");
+    writeFileSync(join(configuredHome, ".neko-core", "memory", "project.md"), "# Configured home only\nB_MARKER\nBUNIQUEFACT\n", "utf8");
+    process.env.HOME = processHome;
+    process.env.USERPROFILE = processHome;
+    const cfg = new NekoConfig({}, null, {}, "", null, [], { state: "none", files: [] }, configuredHome);
+    const parent = configureToolRegistry(new ToolRegistry(root, "auto", () => true), cfg);
+
+    expect(await parent.execute("memory", { action: "read", name: "project" })).toContain("B_MARKER");
+    expect(await parent.execute("memory", { action: "search", query: "BUNIQUEFACT" })).toContain("project.md");
+    expect(await parent.execute("memory", { action: "search", query: "AUNIQUEFACT" })).toContain("no memory matches");
+    expect(await parent.execute("memory", { action: "write", name: "fresh", content: "# B-only note" })).toContain("Saved memory");
+    expect(await parent.execute("memory", { action: "read", name: "fresh" })).toContain("B-only note");
+    expect(existsSync(join(configuredHome, ".neko-core", "memory", "fresh.md"))).toBe(true);
+    expect(existsSync(join(processHome, ".neko-core", "memory", "fresh.md"))).toBe(false);
+
+    const child = inheritToolRegistrySettings(new ToolRegistry(root, "auto", () => true), parent);
+    expect(await child.execute("memory", { action: "read", name: "project" })).toContain("B_MARKER");
+    writeFileSync(join(configuredHome, ".neko-core", "memory", ".disabled"), "disabled\n", "utf8");
+    expect(await parent.execute("memory", { action: "read", name: "project" })).toContain("Memory is off");
+    expect(await child.execute("memory", { action: "read", name: "project" })).toContain("Memory is off");
+
+    const denied = configureToolRegistry(new ToolRegistry(root, "default", () => false), cfg);
+    expect(await denied.execute("memory", { action: "write", name: "denied", content: "no write" })).toContain("Denied by user");
+    expect(existsSync(join(configuredHome, ".neko-core", "memory", "denied.md"))).toBe(false);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    rmSync(base, { recursive: true, force: true });
+  }
+});
 test("shared composition refuses missing configured write roots", () => {
   const base = mkdtempSync(join(tmpdir(), "neko-write-missing-"));
   const home = join(base, "home");

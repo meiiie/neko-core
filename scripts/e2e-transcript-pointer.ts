@@ -102,6 +102,9 @@ async function stableTranscriptPosition(stableMs = 150, timeoutMs = 3000): Promi
 let openMs = 0, wheelMs = 0, searchMs = 0;
 try {
   await waitFor("interactive prompt", () => vt.text().includes("shift+tab to cycle"));
+  // The composer can paint before Ink finishes mounting input and the boot effects. Wait for
+  // the effect-owned yolo notice so the command echo assertion measures live input, not startup.
+  await waitFor("mounted input", () => vt.text().includes("launched with --yolo"), 15_000);
 
   const openStart = performance.now();
   term.write("/transcript");

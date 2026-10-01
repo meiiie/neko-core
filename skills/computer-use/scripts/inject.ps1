@@ -1,3 +1,4 @@
+# neko-computer-input-policy-v1
 # Independent-pointer desktop input via Windows TOUCH INJECTION (InitializeTouchInjection/InjectTouchInput).
 # The agent acts on the VISIBLE desktop -- tap/double-tap/drag/draw on ANY touch-aware app -- WITHOUT moving
 # the user's mouse cursor (a separate pointer channel). VERIFIED: drew in Paint while the real mouse stayed put.
@@ -12,6 +13,15 @@
 # touch/pen (Paint, browsers, most modern apps do; a few legacy mouse-only apps ignore it -> use mouse.ps1).
 # This is the visible-desktop "don't hijack my mouse" path; controlling a HIDDEN/background app needs isolation.
 param([string]$cmd="tap")
+# Hidden execution does not grant desktop input ownership; explicit foreground policy is required.
+$inputPolicy = [string]$env:NEKO_COMPUTER_INPUT_POLICY
+if(-not $inputPolicy){ $inputPolicy='background' }
+if($inputPolicy -notin @('background','foreground')){ Write-Output 'unsupported computer input policy; expected background or foreground'; exit 1 }
+$inputPolicy=$inputPolicy.ToLowerInvariant()
+if($inputPolicy -eq 'background'){
+  Write-Output "needs_interaction: touch helper requires foreground input policy"
+  exit 1
+}
 $a=$args
 # DPI: PER-MONITOR-AWARE v2 so injected touch coordinates are physical pixels, matching uia.ps1's reported
 # coords. CONFIRMED: without this, a DPI-virtualized process taps the wrong spot on a scaled (125%) display.

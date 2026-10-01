@@ -33,6 +33,7 @@ function mockCtx() {
   const calls = { overlays: [] as any[], lines: [] as string[], resumed: [] as string[] };
   const ctx: any = {
     cfg: {}, agent: { messages: [] },
+    registry: new ToolRegistry(process.cwd(), "default", () => true),
     addLine: (_kind: string, text: string) => calls.lines.push(text),
     setOverlay: (o: any) => { if (o) calls.overlays.push(o); },
     resumeInto: (s: any) => calls.resumed.push(s.id),

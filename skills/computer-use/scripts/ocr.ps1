@@ -1,3 +1,4 @@
+# neko-computer-input-policy-v1
 # OCR perception for apps UIA cannot see (Chromium/Electron: Zalo, Discord, Slack, VS Code...).
 # Captures the target window and runs the BUILT-IN Windows OCR engine (Windows.Media.Ocr) locally -
 # no vision model, no download, no network. Emits each text line with the SCREEN-PIXEL centre so a
@@ -11,6 +12,15 @@
 # Vietnamese note: reads Latin text with whatever recognizer is installed; accents need the Windows
 # Vietnamese OCR language pack (Settings > Language). Without it, unaccented Latin still reads.
 param()
+# Hidden execution does not grant desktop input ownership; explicit foreground policy is required.
+$inputPolicy = [string]$env:NEKO_COMPUTER_INPUT_POLICY
+if(-not $inputPolicy){ $inputPolicy='background' }
+if($inputPolicy -notin @('background','foreground')){ Write-Output 'unsupported computer input policy; expected background or foreground'; exit 1 }
+$inputPolicy=$inputPolicy.ToLowerInvariant()
+if($inputPolicy -eq 'background'){
+  Write-Output "needs_interaction: ocr helper requires foreground input policy"
+  exit 1
+}
 $ErrorActionPreference = "Stop"
 
 # PerMonitorV2 so capture + coordinates are true physical pixels (matches inject/screenshot).
