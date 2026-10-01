@@ -25,13 +25,17 @@ for (const early of [true, false]) for (const yolo of [false, true]) {
   const vt = new VirtualTerminal(118, 30);
   const marker = "startup_input_kept";
   const started = performance.now();
+  let startupBytes = "";
   let sent: number | null = null, composer: number | null = null, echoed: number | null = null;
   const term = new Bun.Terminal({ cols: 118, rows: 30, data(terminal, bytes) {
     const text = new TextDecoder().decode(bytes);
+    if (sent === null) startupBytes = (startupBytes + text).slice(-16_384);
     vt.write(text);
     const screen = vt.text();
     if (composer === null && screen.includes('Try: "explain src/agent.ts"')) composer = performance.now() - started;
-    if (sent === null && (early ? text.includes("\x1b]2;") : composer !== null)) {
+    // ConPTY may normalize OSC 2 (window title) to OSC 0 (icon + window title).
+    // Accumulate fragments: a transport chunk is not an escape-sequence boundary.
+    if (sent === null && (early ? /\x1b\](?:0|2);/.test(startupBytes) : composer !== null)) {
       sent = performance.now() - started;
       terminal.write(marker);
     }
@@ -40,7 +44,7 @@ for (const early of [true, false]) for (const yolo of [false, true]) {
   const proc = Bun.spawn({ cmd: [...command, ...(yolo ? ["--yolo"] : [])], cwd: home, terminal: term, env });
   try {
     while (echoed === null && performance.now() - started < 8_000) await sleep(10);
-    if (echoed === null) throw new Error(`startup input lost or stalled: early=${early}, yolo=${yolo}, screen=${vt.text()}`);
+    if (echoed === null) throw new Error(`startup input lost or stalled: early=${early}, yolo=${yolo}, sentMs=${sent}, composerMs=${composer}, startup=${JSON.stringify(startupBytes.slice(0, 300))}, screen=${vt.text()}`);
     console.log(JSON.stringify({ early, yolo, composerMs: composer, sentMs: sent, echoMs: echoed }));
     // Verify the draft survives a later input/render, rather than mistaking the PTY's pre-raw
     // local echo for text owned by the composer. The first input above has no readiness delay.
