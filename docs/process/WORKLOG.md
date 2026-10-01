@@ -737,3 +737,9 @@ on dot Linux/Bun 1.4.0. Focused sync/text-input checks: 28 pass; typecheck, lint
 raw-keyboard, and startup/exit checks pass. Six baseline isolated-home launches painted in
 345–397 ms; four candidate cases in 229–247 ms. Small local samples, not Windows or percentile
 benchmarks. No provider requests were made; OpenCode execution-environment egress remains separate.
+
+Cross-platform CI caught remaining pre-composer input loss on macOS after removing the probe.
+Startup now enters raw mode before emitting the terminal title, leaving queued bytes for Ink
+instead of transitioning from a partially typed canonical line at mount. Normal teardown and
+the exit hook restore the previous raw mode. Linux typecheck/lint and the complete build gate
+pass with this change; cross-platform CI must pass before merge.

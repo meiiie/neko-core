@@ -4064,12 +4064,18 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     const pathOnClipboard = setup.mode === "unpacked" && !!setup.path && copyToClipboard(setup.path);
     return browserExtensionSetupMessage(setup, { pathOnClipboard, profilePicker: chromeHasMultipleProfiles() });
   };
-  // The synchronous exit hook is the last terminal-state restore if React teardown is bypassed.
+  // Arm raw input before announcing startup. On macOS the canonical-to-raw transition can
+  // discard a partial line typed between the title and Ink's input effect. Do not drain stdin:
+  // queued bytes stay available for Ink's normal reader. Restore even if rendering throws.
+  const previousRawMode = process.stdin.isRaw;
+  const restoreRawMode = () => { try { process.stdin.setRawMode(previousRawMode ?? false); } catch { /* terminal may be gone */ } };
   const onProcessExit = () => {
+    restoreRawMode();
     disposeClipboardImageReader();
     try { emergencyRestore(); } catch { /* nothing left to protect */ }
   };
   process.once("exit", onProcessExit);
+  process.stdin.setRawMode(true);
   saveTitle();
   // Pre-render and mounted title writes cover terminals that enable VT at different times.
   setTerminalTitle(brandTitle(resumed?.title || "Neko Core"));
@@ -4125,6 +4131,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     emergencyRestore();
     browserBridge?.close();
     await hub.close();
+    restoreRawMode();
     // The last-resort hook must not run AFTER this handoff text: another LEAVE_ALT can restore the
     // primary cursor over text we just printed. CRLF also anchors output at column zero on Windows.
     process.off("exit", onProcessExit);
