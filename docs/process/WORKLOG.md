@@ -722,3 +722,24 @@ isolation, and the complete clean run used an outside-repository TEMP on E:.
 The harness objective and stopping rules are in [HARNESS-GOAL.md](HARNESS-GOAL.md).
 Execution is paused; current progress belongs in ROADMAP and EVALUATION. No SOTA or
 general-lift statement is allowed before the public claim gate is met.
+
+## 2026-10-01 — Preserve type-ahead during TUI startup
+
+Removed the pre-Ink DEC-2026 stdin probe from chat startup. On unknown terminals it consumed
+ordinary keystrokes typed before the composer mounted. Known terminal support and NEKO_SYNC
+are retained; unknown terminals now conservatively use ordinary output. Windows already skipped
+this probe, so this change does not establish a fix for a reported Windows ten-second input delay.
+
+Added a real-PTY startup-input gate to the build: both normal and --yolo, typing at the startup
+title and at the first composer frame, subsequent edit retention, and clean exit. The prior
+compiled binary failed the early-input case; source and compiled candidate pass all four cases
+on dot Linux/Bun 1.4.0. Focused sync/text-input checks: 28 pass; typecheck, lint, compiled UI,
+raw-keyboard, and startup/exit checks pass. Six baseline isolated-home launches painted in
+345–397 ms; four candidate cases in 229–247 ms. Small local samples, not Windows or percentile
+benchmarks. No provider requests were made; OpenCode execution-environment egress remains separate.
+
+Cross-platform CI caught remaining pre-composer input loss on macOS after removing the probe.
+Startup now enters raw mode before emitting the terminal title, leaving queued bytes for Ink
+instead of transitioning from a partially typed canonical line at mount. Normal teardown and
+the exit hook restore the previous raw mode. Linux typecheck/lint and the complete build gate
+pass with this change; cross-platform CI must pass before merge.
