@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -74,7 +74,8 @@ test("config composition and child inheritance preserve input policy independent
 });
 
 test("trusted project config and its selected profile cannot opt into foreground input", () => {
-  const base = mkdtempSync(join(tmpdir(), "neko-input-policy-trust-"));
+  // macOS tmpdir can traverse /var -> /private/var; trust requires direct ancestors.
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), "neko-input-policy-trust-")));
   const root = join(base, "project");
   const home = join(base, "home");
   mkdirSync(root);

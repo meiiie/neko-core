@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import * as acp from "@agentclientprotocol/sdk";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -109,8 +109,9 @@ test("ACP v1 fixed task requires echoes and tags pre-response updates, permissio
         });
         const receipt = taskReceipt(created._meta?.["neko.task"]);
         expect(receipt.label).toBe("Task A");
-        // Windows realpath canonicalizes drive and directory casing.
-        expect(receipt.root.toLowerCase()).toBe(root.toLowerCase());
+        // Receipts bind the physical root, including macOS /var aliases and Windows casing.
+        const physicalRoot = realpathSync.native(root);
+        expect(receipt.root).toBe(process.platform === "win32" ? physicalRoot.toLowerCase() : physicalRoot);
         expect(updates.length).toBeGreaterThan(0); // attach emitted these before the new response.
         expect(updates.every((params) => params.sessionId === created.sessionId
           && JSON.stringify(params._meta?.["neko.task"]) === JSON.stringify(receipt))).toBe(true);

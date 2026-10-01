@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 
@@ -54,7 +54,8 @@ test("new active task captures a fresh environment snapshot in the same root", (
 });
 
 test("active task excludes legacy global context while retaining trusted project instructions", () => {
-  const base = mkdtempSync(join(tmpdir(), "neko-task-global-"));
+  // Match the direct-root trust contract even when the system temp directory is aliased.
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), "neko-task-global-")));
   const root = join(base, "app");
   const home = join(base, "home");
   const previousHome = process.env.HOME;
@@ -94,7 +95,7 @@ test("active task excludes legacy global context while retaining trusted project
     else process.env.HOME = previousHome;
     if (previousUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = previousUserProfile;
-    const tempRoot = resolve(tmpdir()) + sep;
+    const tempRoot = realpathSync.native(tmpdir()) + sep;
     if (!resolve(base).startsWith(tempRoot) || !basename(base).startsWith("neko-task-global-")) {
       throw new Error("Refusing to remove fixture outside the task temp directory");
     }
