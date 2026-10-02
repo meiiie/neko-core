@@ -63,3 +63,14 @@ test("fullscreen flex siblings cannot shrink individual transcript rows out of v
     for (let i = 88; i < 100; i++) expect(c.lastFrame()).toContain(`ROW_${i}`);
   } finally { c.unmount(); }
 });
+
+test("oversized search paste is rejected visibly without changing the existing query", async () => {
+  const c = render(<TranscriptViewer lines={[{id: 1, kind: "assistant", text: "NEEDLE"}]} cols={100} rows={20} onClose={() => {}} />);
+  try {
+    await tick(); c.stdin.write("NEEDLE"); await tick();
+    c.stdin.write("a".repeat(10_000)); await tick();
+    expect(c.lastFrame()).toContain("Search too long");
+    expect(c.lastFrame()).toContain("found 1");
+    expect(c.lastFrame()).toContain("NEEDLE");
+  } finally { c.unmount(); }
+});

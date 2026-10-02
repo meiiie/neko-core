@@ -49,3 +49,8 @@ test("large asynchronous preparation yields and is cancellable", async () => {
   const ready = await TranscriptLayout.create([{id: 2, kind: "assistant", text: "first\nlast"}], 80, new AbortController().signal);
   expect(ready.window(1, 1)[0].text).toContain("last");
 });
+
+test("large pasted literal queries cannot throw regexp compilation errors", () => {
+  const layout = new TranscriptLayout([{id: 1, kind: "assistant", text: "small text"}], 80);
+  expect(layout.find("a".repeat(1_000_000))).toEqual([]);
+});
