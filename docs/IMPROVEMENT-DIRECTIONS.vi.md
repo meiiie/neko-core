@@ -101,6 +101,75 @@ Trước khi công bố hướng dẫn cho một route, kiểm tra tài liệu n
 phân biệt rõ subscription với API billing, rồi xác nhận bằng `doctor`, catalog/model
 metadata và một smoke test có ngân sách giới hạn.
 
+
+### 6. Ưu tiên phiên dài: kết hợp quản lý ngữ cảnh và trí nhớ dài hạn
+
+Trước khi tối ưu batch tool hay cache, ưu tiên kiểm chứng việc giữ đúng nhiệm vụ,
+thông tin đã được sửa, nguồn bằng chứng và khả năng tiếp tục sau gián đoạn. Số lượt
+hội thoại tự nó không chứng minh trí nhớ chính xác.
+
+Hai hướng tham khảo bổ sung:
+
+- [Context Language Models, v1 ngày 29/09/2026](https://arxiv.org/html/2609.37725v1):
+  cho model chỉnh sửa ngữ cảnh đang sử dụng thay vì chỉ nối thêm hoặc tóm tắt định kỳ.
+  [Bộ chuyển đổi context của mã tham khảo](https://github.com/facebookresearch/context-language-models/blob/18dc11115f50f261233c5bba7937834491e307e8/clm/clm_harness/context_utils/context_string.py)
+  giữ phần system và nhiệm vụ ban đầu, nhưng không bảo toàn cấu trúc tool call sau
+  khi tái dựng văn bản. Vì vậy không dùng bản ngữ cảnh chỉnh sửa làm nhật ký hiệu ứng.
+  Suffix Cache Reuse cần hỗ trợ ở tầng phục vụ model; không thể giả định bật được
+  bằng thay đổi trong client gọi API.
+- [Hindsight](https://github.com/vectorize-io/hindsight) bổ sung hướng retain, recall,
+  reflect và [truy hồi kết hợp](https://hindsight.vectorize.io/developer/retrieval).
+  [Observations](https://hindsight.vectorize.io/developer/observations) gợi ý cách
+  tổng hợp kiến thức có bằng chứng. Khi tích hợp, runtime phải quyết định bank và
+  phạm vi; không coi tag do model cung cấp là quyền truy cập. Trong
+  [mã lọc tag](https://github.com/vectorize-io/hindsight/blob/0be6c02b2aafc2b6bdb188ef1842ac507e0cfa2b/hindsight-api-slim/hindsight_api/engine/search/tags.py),
+  các chế độ any/all có thể gồm dữ liệu không gắn tag trong cùng bank; cần lựa chọn
+  phạm vi và kiểm thử rõ ràng cho từng đường truy hồi.
+
+#### Thiết kế thử nghiệm cho Neko
+
+Đây là định hướng, chưa phải hợp đồng tính năng đã triển khai:
+
+1. **Bằng chứng gốc:** lưu sự kiện, nội dung nguồn và kết quả công cụ tách khỏi bản
+   context model được chỉnh. Không biến bản tóm tắt thành bằng chứng rằng một
+   mutation đã thành công.
+2. **Ngữ cảnh làm việc:** thử một bản nhìn có thể chỉnh sửa, gắn với đúng task/root
+   và phiên bản. Áp dụng bản sửa theo compare-and-swap; sửa trên phiên bản cũ phải bị
+   từ chối. Giữ khả năng kiểm tra diff và hoàn tác bản nhìn.
+3. **Giới hạn quyền sửa:** model có thể tổ chức nội dung làm việc, nhưng không tự
+   đổi host authority, danh tính task, permission, kết quả công cụ gốc hoặc nâng
+   dữ liệu bên ngoài thành chỉ dẫn của người dùng.
+4. **Trí nhớ dài hạn:** phân biệt sự kiện, suy luận và thông tin đã bị thay thế;
+   giữ nguồn, thời điểm và phạm vi áp dụng. Chia sẻ giữa task/project cần một
+   đường chuyển giao tường minh, không trộn tự động theo độ giống ngữ nghĩa.
+5. **Một lõi dùng chung:** logic thuộc Neko Core; Wiii trình bày nguồn, phạm vi,
+   bản sửa và trạng thái phục hồi, không xây harness trí nhớ thứ hai.
+6. **Gọn và tùy chọn:** không bắt mọi lần khởi động phải chờ database, embedding
+   hay dịch vụ tổng hợp trí nhớ. Thử backend Hindsight qua adapter opt-in trước;
+   công bố thêm chi phí vận hành và độ trễ của cả ghi, truy hồi và tổng hợp.
+
+#### Tiêu chí kiểm chứng trước khi thay mặc định
+
+- Cùng model, billing route, dữ liệu, token budget và điều kiện hạ tầng cho bốn
+  cấu hình: baseline, context chỉnh sửa, memory backend, và kết hợp cả hai.
+- Có bài kiểm tra trên 300 lượt với sửa thông tin nhiều lần, nhiễu, nén context,
+  chuyển task, hai folder cùng tên, restart và gián đoạn giữa thao tác.
+- Đo nhớ đúng dữ kiện mới nhất, thông tin lỗi thời bị dùng lại, truy hồi sai task,
+  độ đúng của nguồn, xử lý khi chưa có dữ kiện và kết quả công việc cuối.
+- Đo token/cache do provider báo, latency, số request, chi phí bổ sung cho memory
+  và tính hoàn chỉnh của checkpoint. Không chuyển số FLOPs của nghiên cứu thành
+  lời hứa giảm hóa đơn API.
+- Nhật ký công cụ phải phân biệt hoàn tất, thất bại và chưa biết kết quả. Không
+  tự phát lại effect chưa xác định chỉ vì context model nói cần làm tiếp.
+- Tách kiểm thử lưu trữ tất định khỏi đánh giá model thật. Một bài chạy bị chặn
+  mạng, hết quota hay thiếu phản hồi chưa được tính là đã hoàn thành.
+- Đóng băng baseline, báo số lần lặp và các giới hạn. Không hứa “tuyệt đối không
+  nhầm nhớ” chỉ từ một bộ kiểm thử hoặc một điểm benchmark.
+
+Chỉ nâng thử nghiệm thành mặc định sau khi chất lượng và các ranh giới trên đạt
+tiêu chí đã định. Các quy tắc tạm dừng ProgramBench, campaign trả phí và
+self-improvement hiện hành vẫn áp dụng.
+
 ## Thứ tự triển khai khuyến nghị
 
 1. **Lập baseline trước:** chọn tác vụ đại diện và ghi lại pass/fail, provider calls,
