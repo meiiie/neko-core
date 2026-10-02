@@ -535,8 +535,10 @@ export function inspectTaskSession(options: {
     revision: state.revision, updatedAt: state.updatedAt,
     checkpointSha256: createHash("sha256").update(raw).digest("hex"),
     writerLock,
-    tasks: state.tasks.map((task) => ({
-      id: task.id, label: task.label, root: task.canonicalRoot,
+    // Keep the established CLI task-list shape stable; diagnostics are additive metadata.
+    tasks: state.tasks.map((task) => ({ id: task.id, label: task.label, root: task.canonicalRoot })),
+    taskCheckpoints: state.tasks.map((task) => ({
+      taskId: task.id, revision: task.revision,
       messageCount: task.messages.length,
       inflightAssistantCount: task.messages.filter((value) => {
         // SAFETY: parseStored validated every message as a non-array object.

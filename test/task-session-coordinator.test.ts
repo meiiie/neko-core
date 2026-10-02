@@ -686,8 +686,8 @@ test("read-only status inspects active and stale locks without altering checkpoi
     const lock = readFileSync(lockPath, "utf8");
     const report = inspectTaskSession(options);
     expect(report.writerLock).toBe("present");
-    expect(report.tasks[0]!.inflightAssistantCount).toBe(1);
-    expect(report.tasks[0]!.messageCount).toBe(1);
+    expect(report.taskCheckpoints[0]!.inflightAssistantCount).toBe(1);
+    expect(report.taskCheckpoints[0]!.messageCount).toBe(1);
     expect(report.checkpointSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(report)).not.toContain("SYNTHETIC_PRIVATE_CONTENT");
     expect(JSON.stringify(report)).not.toContain(JSON.parse(lock).token);
