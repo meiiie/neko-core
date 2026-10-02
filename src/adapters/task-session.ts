@@ -481,6 +481,21 @@ function errnoCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | null)?.code;
 }
 
+/** A concurrent checkpoint replacement changed the file identity during a validated read. */
+export class TaskSessionSnapshotChangedError extends Error {
+  constructor() { super("Task session file changed during read"); this.name = "TaskSessionSnapshotChangedError"; }
+}
+
+/** Retry only a changing snapshot, never invalid content, permissions or unsafe file types. */
+export function readStableTaskSnapshot<T>(read: () => T): T {
+  for (let attempt = 0; ; attempt++) {
+    try { return read(); }
+    catch (error) {
+      if (!(error instanceof TaskSessionSnapshotChangedError) || attempt >= 2) throw error;
+    }
+  }
+}
+
 function readStoredRaw(path: string): string {
   const before = lstatSync(path);
   if (!before.isFile() || before.size > MAX_STORE_BYTES || before.nlink !== 1) {
@@ -489,18 +504,67 @@ function readStoredRaw(path: string): string {
   const fd = openSync(path, fsConstants.O_RDONLY | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW));
   try {
     const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > MAX_STORE_BYTES) {
-      throw new Error("Task session file changed during read");
+    if (!opened.isFile() || opened.size > MAX_STORE_BYTES) {
+      throw new Error("Task session file must be a regular bounded file");
     }
+    if (opened.dev !== before.dev || opened.ino !== before.ino) throw new TaskSessionSnapshotChangedError();
     const raw = readFileSync(fd, "utf8");
     const after = fstatSync(fd);
-    if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs) throw new Error("Task session file changed during read");
+    if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs) throw new TaskSessionSnapshotChangedError();
     return raw;
   } finally { closeSync(fd); }
 }
 
 function readStored(path: string, expectedId: string): StoredTaskSession {
   return parseStored(readStoredRaw(path), expectedId);
+}
+
+/** Inspect a validated checkpoint without acquiring a writer, activating a runtime, or changing bytes.
+ * Lock presence is an observation, never proof that its PID is alive or safe to remove.
+ */
+export function inspectTaskSession(options: {
+  home: string; root: string; authorityId: string; configId: string;
+  sessionId: string; executionAuthorityId?: string;
+}) {
+  assertAuthorityId(options.authorityId);
+  assertConfigId(options.configId);
+  if (options.executionAuthorityId !== undefined) assertConfigId(options.executionAuthorityId);
+  if (!taskSessionExists(options.home, options.sessionId)) throw new Error("Task session not found");
+  const root = createTaskScope(randomId(), options.root).canonicalRoot;
+  const dir = join(resolve(options.home), ".neko-core", "task-sessions");
+  const { raw, state } = readStableTaskSnapshot(() => {
+    const raw = readStoredRaw(storePath(dir, options.sessionId));
+    return { raw, state: parseStored(raw, options.sessionId) };
+  });
+  if (state.canonicalRoot !== root) throw new Error("Task session root changed or is not host-authorized");
+  if (state.authorityId !== options.authorityId) throw new Error("Task session host authority changed");
+  if (state.configId !== options.configId) throw new Error("Task session provider or safety configuration changed");
+  if (state.executionAuthorityId !== options.executionAuthorityId) throw new Error("Task session execution authority changed");
+  let writerLock: "present" | "absent" | "unsafe";
+  try {
+    const lock = lstatSync(join(dir, `${options.sessionId}.lock`));
+    writerLock = lock.isFile() && lock.nlink === 1 ? "present" : "unsafe";
+  } catch (error) {
+    if (errnoCode(error) !== "ENOENT") throw error;
+    writerLock = "absent";
+  }
+  return {
+    sessionId: state.id, activeTaskId: state.activeTaskId,
+    revision: state.revision, updatedAt: state.updatedAt,
+    checkpointSha256: createHash("sha256").update(raw).digest("hex"),
+    writerLock,
+    // Keep the established CLI task-list shape stable; diagnostics are additive metadata.
+    tasks: state.tasks.map((task) => ({ id: task.id, label: task.label, root: task.canonicalRoot })),
+    taskCheckpoints: state.tasks.map((task) => ({
+      taskId: task.id, revision: task.revision,
+      messageCount: task.messages.length,
+      inflightAssistantCount: task.messages.filter((value) => {
+        // SAFETY: parseStored validated every message as a non-array object.
+        const message = value as Record<string, unknown>;
+        return message.role === "assistant" && message._neko_inflight === true;
+      }).length,
+    })),
+  };
 }
 
 /** A new session ID was published, but its link count could not be confirmed loadable. */
