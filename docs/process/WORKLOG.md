@@ -786,3 +786,15 @@ Scope limitation: this reads messages still present in the checkpoint. It does n
 restore originals discarded by earlier compaction, add a durable display journal,
 page history from disk, or remove the main resume screen's current clipping. Those
 remain separate work; no release or complete-resume-performance claim is made.
+
+### 2026-10-02 — Transcript review follow-up
+
+Addressed the two post-merge PR83 review findings: full replay no longer computes
+unused tool summaries, and literal transcript search no longer compiles user text
+as a regexp. Unicode expanding case folds retain original row offsets. Pasting a
+search over4096 characters is rejected visibly without silently changing the query.
+On the pinned Bun runtime, a1,000,000-character query did not reproduce the reported
+regexp exception, but took about1.19s before the change versus about1.2ms after;
+these are single synthetic search measurements, not general UI latency claims.
+New regressions cover the large query and rejected paste while retaining prior
+search, full-content, Unicode, cancellation, resize and consecutive-row checks.

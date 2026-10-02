@@ -110,19 +110,31 @@ export class TranscriptLayout {
   /** Case-insensitive literal search, returning the actual wrapped row of each occurrence. */
   find(query: string): number[] {
     if (!query) return [];
-    // A Unicode regexp preserves original string offsets (lowercasing can change string length).
-    const literal = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(literal, "giu");
+    const needle = query.toLowerCase();
     const matches: number[] = [];
     for (const entry of this.entries) {
-      pattern.lastIndex = 0;
-      let match: RegExpExecArray | null;
-      while ((match = pattern.exec(entry.text))) {
+      const folded = entry.text.toLowerCase();
+      // Most text folds without changing length. Expanding folds such as İ need an offset map.
+      let offsets: number[] | null = null;
+      if (folded.length !== entry.text.length) {
+        offsets = [];
+        let original = 0;
+        for (const char of entry.text) {
+          for (let i = 0; i < char.toLowerCase().length; i++) offsets.push(original);
+          original += char.length;
+        }
+      }
+      let next = 0;
+      for (;;) {
+        const found = folded.indexOf(needle, next);
+        if (found < 0) break;
+        const originalIndex = offsets?.[found] ?? found;
+        next = found + needle.length;
         let low = 0;
         let high = entry.starts.length;
         while (low < high) {
           const mid = (low + high) >>> 1;
-          if (entry.starts[mid] <= match.index) low = mid + 1;
+          if (entry.starts[mid] <= originalIndex) low = mid + 1;
           else high = mid;
         }
         const row = entry.row + Math.max(0, low - 1);

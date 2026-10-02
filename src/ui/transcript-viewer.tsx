@@ -16,6 +16,7 @@ import { parseLastPointer, parseWheelAll } from "./mouse.ts";
 
 export function TranscriptViewer({ lines, cols, rows: termRows, onClose, title = "Conversation", unabridged = false }: { lines: Line[]; cols: number; rows: number; onClose: () => void; title?: string; unabridged?: boolean }) {
   const [query, setQuery] = useState("");
+  const [searchError, setSearchError] = useState("");
   const width = Math.max(20, cols - 2);
   const viewH = Math.max(3, termRows - 7); // leave room for border + header + hint + a little breathing space
 
@@ -78,7 +79,7 @@ export function TranscriptViewer({ lines, cols, rows: termRows, onClose, title =
       return;
     }
     if (parseLastPointer(input)) return; // consume clicks, releases, motion, and cancelling wheel bursts
-    if (key.escape) { if (q) return setQuery(""); return onClose(); }
+    if (key.escape) { if (searchError) return setSearchError(""); if (q) return setQuery(""); return onClose(); }
     if (key.upArrow) return setOffset((o) => Math.max(0, Math.min(o, maxOffset) - 1));
     if (key.downArrow) return setOffset((o) => Math.min(maxOffset, o + 1));
     if (key.pageUp) return setOffset((o) => Math.max(0, Math.min(o, maxOffset) - viewH));
@@ -89,9 +90,13 @@ export function TranscriptViewer({ lines, cols, rows: termRows, onClose, title =
       setOffset(matches[next]);
       return;
     }
-    if (key.ctrl && input === "u") return setQuery("");
+    if (key.ctrl && input === "u") { setSearchError(""); return setQuery(""); }
     if (key.backspace || key.delete) return setQuery((s) => s.slice(0, -1));
-    if (input && !key.ctrl && !key.meta && !key.tab && !key.return) return setQuery((s) => s + input);
+    if (input && !key.ctrl && !key.meta && !key.tab && !key.return) {
+      if (query.length + input.length > 4096) return setSearchError("Search too long (maximum 4096 characters); paste was not applied");
+      setSearchError("");
+      setQuery((s) => s + input);
+    }
   });
 
   return (
@@ -112,7 +117,7 @@ export function TranscriptViewer({ lines, cols, rows: termRows, onClose, title =
         )}
       </Box>
       <Text dimColor wrap="truncate-end">
-        {q ? `search: ${query.trim()} · ` : ""}↑↓ scroll · PgUp/PgDn page · type to search{q ? " · tab/shift+tab next/previous · ctrl+u clear" : ""} · esc {q ? "clear/close" : "close"}
+        {searchError ? `${searchError} · ` : q ? `search: ${query.trim()} · ` : ""}↑↓ scroll · PgUp/PgDn page · type to search{q ? " · tab/shift+tab next/previous · ctrl+u clear" : ""} · esc {q ? "clear/close" : "close"}
       </Text>
     </Box>
   );

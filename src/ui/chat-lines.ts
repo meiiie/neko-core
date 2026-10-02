@@ -242,7 +242,7 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
       const call = toolById.get(m.tool_call_id);
       const rawObservation = contentToText(m.content);
       const obs = resume ? rawObservation.split("\n").slice(0, 400).join("\n") : rawObservation;
-      const summary = resultSummary(call?.name, obs, call?.args);
+      const summary = resume ? resultSummary(call?.name, obs, call?.args) : undefined;
       if (resume && summary && call) {
         const combined: Line = { id: nextId(), kind: "tool_result", text: `${call.line.text}\n${obs}`, summary };
         const callIndex = out.indexOf(call.line);
