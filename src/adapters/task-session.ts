@@ -481,6 +481,21 @@ function errnoCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | null)?.code;
 }
 
+/** A concurrent checkpoint replacement changed the file identity during a validated read. */
+export class TaskSessionSnapshotChangedError extends Error {
+  constructor() { super("Task session file changed during read"); this.name = "TaskSessionSnapshotChangedError"; }
+}
+
+/** Retry only a changing snapshot, never invalid content, permissions or unsafe file types. */
+export function readStableTaskSnapshot<T>(read: () => T): T {
+  for (let attempt = 0; ; attempt++) {
+    try { return read(); }
+    catch (error) {
+      if (!(error instanceof TaskSessionSnapshotChangedError) || attempt >= 2) throw error;
+    }
+  }
+}
+
 function readStoredRaw(path: string): string {
   const before = lstatSync(path);
   if (!before.isFile() || before.size > MAX_STORE_BYTES || before.nlink !== 1) {
@@ -489,12 +504,13 @@ function readStoredRaw(path: string): string {
   const fd = openSync(path, fsConstants.O_RDONLY | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW));
   try {
     const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > MAX_STORE_BYTES) {
-      throw new Error("Task session file changed during read");
+    if (!opened.isFile() || opened.size > MAX_STORE_BYTES) {
+      throw new Error("Task session file must be a regular bounded file");
     }
+    if (opened.dev !== before.dev || opened.ino !== before.ino) throw new TaskSessionSnapshotChangedError();
     const raw = readFileSync(fd, "utf8");
     const after = fstatSync(fd);
-    if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs) throw new Error("Task session file changed during read");
+    if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs) throw new TaskSessionSnapshotChangedError();
     return raw;
   } finally { closeSync(fd); }
 }
@@ -516,8 +532,10 @@ export function inspectTaskSession(options: {
   if (!taskSessionExists(options.home, options.sessionId)) throw new Error("Task session not found");
   const root = createTaskScope(randomId(), options.root).canonicalRoot;
   const dir = join(resolve(options.home), ".neko-core", "task-sessions");
-  const raw = readStoredRaw(storePath(dir, options.sessionId));
-  const state = parseStored(raw, options.sessionId);
+  const { raw, state } = readStableTaskSnapshot(() => {
+    const raw = readStoredRaw(storePath(dir, options.sessionId));
+    return { raw, state: parseStored(raw, options.sessionId) };
+  });
   if (state.canonicalRoot !== root) throw new Error("Task session root changed or is not host-authorized");
   if (state.authorityId !== options.authorityId) throw new Error("Task session host authority changed");
   if (state.configId !== options.configId) throw new Error("Task session provider or safety configuration changed");

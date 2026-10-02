@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 
-import { createTaskSession, inspectTaskSession, loadTaskSession, taskSessionConfigId, taskSessionExists, TaskSessionRecoveryRequiredError, TaskSessionWriterUnavailableError, TaskSwitchCommittedError, type TaskRuntimeInput, type TaskSessionCoordinator } from "../src/adapters/task-session.ts";
+import { createTaskSession, inspectTaskSession, readStableTaskSnapshot, TaskSessionSnapshotChangedError, loadTaskSession, taskSessionConfigId, taskSessionExists, TaskSessionRecoveryRequiredError, TaskSessionWriterUnavailableError, TaskSwitchCommittedError, type TaskRuntimeInput, type TaskSessionCoordinator } from "../src/adapters/task-session.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
 import { Agent } from "../src/core/agent.ts";
 import { createCompactionSourceEvent, sourceProjectionDigest } from "../src/core/compaction-source.ts";
@@ -721,4 +721,23 @@ test("read-only status never creates a missing task store", () => {
       authorityId: "local", configId: CONFIG_ID, sessionId: "c".repeat(32) })).toThrow("not found");
     expect(existsSync(join(f.home, "never-created"))).toBe(false);
   } finally { f.cleanup(); }
+});
+
+
+test("read-only snapshot retries only concurrent replacement and bounds repeated churn", () => {
+  let reads = 0;
+  expect(readStableTaskSnapshot(() => {
+    if (++reads < 3) throw new TaskSessionSnapshotChangedError();
+    return "validated snapshot";
+  })).toBe("validated snapshot");
+  expect(reads).toBe(3);
+  reads = 0;
+  expect(() => readStableTaskSnapshot(() => { reads++; throw new TaskSessionSnapshotChangedError(); }))
+    .toThrow(TaskSessionSnapshotChangedError);
+  expect(reads).toBe(3);
+  for (const failure of [new SyntaxError("Invalid JSON"), new Error("Unsafe file"), new Error("Permission denied")]) {
+    reads = 0;
+    expect(() => readStableTaskSnapshot(() => { reads++; throw failure; })).toThrow(failure);
+    expect(reads).toBe(1);
+  }
 });
