@@ -76,3 +76,6 @@ scripts/_caret_probe.tsx
 .zcode/
 .bun-build
 *.bun-build
+
+# Private local research documents
+/AI everyday/
