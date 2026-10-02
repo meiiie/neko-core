@@ -240,7 +240,8 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
       }
     } else if (m.role === "tool") {
       const call = toolById.get(m.tool_call_id);
-      const obs = contentToText(m.content).split("\n").slice(0, 400).join("\n");
+      const rawObservation = contentToText(m.content);
+      const obs = resume ? rawObservation.split("\n").slice(0, 400).join("\n") : rawObservation;
       const summary = resultSummary(call?.name, obs, call?.args);
       if (resume && summary && call) {
         const combined: Line = { id: nextId(), kind: "tool_result", text: `${call.line.text}\n${obs}`, summary };
