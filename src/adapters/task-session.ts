@@ -503,6 +503,50 @@ function readStored(path: string, expectedId: string): StoredTaskSession {
   return parseStored(readStoredRaw(path), expectedId);
 }
 
+/** Inspect a validated checkpoint without acquiring a writer, activating a runtime, or changing bytes.
+ * Lock presence is an observation, never proof that its PID is alive or safe to remove.
+ */
+export function inspectTaskSession(options: {
+  home: string; root: string; authorityId: string; configId: string;
+  sessionId: string; executionAuthorityId?: string;
+}) {
+  assertAuthorityId(options.authorityId);
+  assertConfigId(options.configId);
+  if (options.executionAuthorityId !== undefined) assertConfigId(options.executionAuthorityId);
+  if (!taskSessionExists(options.home, options.sessionId)) throw new Error("Task session not found");
+  const root = createTaskScope(randomId(), options.root).canonicalRoot;
+  const dir = join(resolve(options.home), ".neko-core", "task-sessions");
+  const raw = readStoredRaw(storePath(dir, options.sessionId));
+  const state = parseStored(raw, options.sessionId);
+  if (state.canonicalRoot !== root) throw new Error("Task session root changed or is not host-authorized");
+  if (state.authorityId !== options.authorityId) throw new Error("Task session host authority changed");
+  if (state.configId !== options.configId) throw new Error("Task session provider or safety configuration changed");
+  if (state.executionAuthorityId !== options.executionAuthorityId) throw new Error("Task session execution authority changed");
+  let writerLock: "present" | "absent" | "unsafe";
+  try {
+    const lock = lstatSync(join(dir, `${options.sessionId}.lock`));
+    writerLock = lock.isFile() && lock.nlink === 1 ? "present" : "unsafe";
+  } catch (error) {
+    if (errnoCode(error) !== "ENOENT") throw error;
+    writerLock = "absent";
+  }
+  return {
+    sessionId: state.id, activeTaskId: state.activeTaskId,
+    revision: state.revision, updatedAt: state.updatedAt,
+    checkpointSha256: createHash("sha256").update(raw).digest("hex"),
+    writerLock,
+    tasks: state.tasks.map((task) => ({
+      id: task.id, label: task.label, root: task.canonicalRoot,
+      messageCount: task.messages.length,
+      inflightAssistantCount: task.messages.filter((value) => {
+        // SAFETY: parseStored validated every message as a non-array object.
+        const message = value as Record<string, unknown>;
+        return message.role === "assistant" && message._neko_inflight === true;
+      }).length,
+    })),
+  };
+}
+
 /** A new session ID was published, but its link count could not be confirmed loadable. */
 export class TaskSessionImportCommittedError extends Error {
   readonly committed = true;

@@ -44,7 +44,7 @@ import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import { assertNoConfiguredCredentialInSourceEvents } from "../src/core/compaction-source.ts";
 import { buildAgentRuntime } from "../src/adapters/agent-runtime.ts";
 import type { AgentRuntime } from "../src/adapters/agent-runtime.ts";
-import { createTaskSession, importTaskSessionV1, loadTaskSession, taskSessionConfigId, type TaskRuntimeInput, type TaskSessionCoordinator, type TaskSessionRuntime } from "../src/adapters/task-session.ts";
+import { createTaskSession, importTaskSessionV1, inspectTaskSession, loadTaskSession, taskSessionConfigId, type TaskRuntimeInput, type TaskSessionCoordinator, type TaskSessionRuntime } from "../src/adapters/task-session.ts";
 import { matchedTurnContext } from "../src/adapters/turn-context.ts";
 import { planTurnCapabilities } from "../src/adapters/turn-capabilities.ts";
 import {
@@ -1399,6 +1399,11 @@ async function cmdTaskSession(args: Args): Promise<number> {
       assertQuiescent: () => {}, close: () => {},
     };
   };
+  if (action === "status") {
+    if (!sessionId || taskId) { console.error("usage: neko task-session status <session-id>"); return 2; }
+    console.log(JSON.stringify(inspectTaskSession({ ...base, sessionId })));
+    return 0;
+  }
   if (action === "new") {
     const label = args.positionals.slice(1).join(" ").trim();
     if (!label) { console.error("usage: neko task-session new <label>"); return 2; }
@@ -1418,7 +1423,7 @@ async function cmdTaskSession(args: Args): Promise<number> {
     }));
     return 0;
   }
-  if (!["add", "use", "status"].includes(action ?? "") || !sessionId) {
+  if (!["add", "use"].includes(action ?? "") || !sessionId) {
     console.error("usage: neko task-session new <label> | add <session-id> <label> | use <session-id> <task-id> | status <session-id> | import-v1 <v1-session-id>");
     return 2;
   }
@@ -1432,8 +1437,6 @@ async function cmdTaskSession(args: Args): Promise<number> {
       if (!taskId) { console.error("usage: neko task-session use <session-id> <task-id>"); return 2; }
       await session.switchTask(taskId);
       console.log(JSON.stringify({ sessionId, activeTaskId: session.active.id }));
-    } else {
-      console.log(JSON.stringify({ sessionId, activeTaskId: session.active.id, tasks: session.tasks }));
     }
     return 0;
   } finally { await session.close(); }

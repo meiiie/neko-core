@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 
-import { createTaskSession, loadTaskSession, taskSessionConfigId, taskSessionExists, TaskSessionRecoveryRequiredError, TaskSessionWriterUnavailableError, TaskSwitchCommittedError, type TaskRuntimeInput, type TaskSessionCoordinator } from "../src/adapters/task-session.ts";
+import { createTaskSession, inspectTaskSession, loadTaskSession, taskSessionConfigId, taskSessionExists, TaskSessionRecoveryRequiredError, TaskSessionWriterUnavailableError, TaskSwitchCommittedError, type TaskRuntimeInput, type TaskSessionCoordinator } from "../src/adapters/task-session.ts";
 import { NekoConfig } from "../src/adapters/config.ts";
 import { Agent } from "../src/core/agent.ts";
 import { createCompactionSourceEvent, sourceProjectionDigest } from "../src/core/compaction-source.ts";
@@ -611,4 +611,114 @@ test("malformed fixed protocol is present for routing but rejected before runtim
     await session?.close();
     f.cleanup();
   }
+});
+
+test("360 offline turns retain exact task/root memory through switches and clean restarts", async () => {
+  const f = fixture();
+  const { runtimeFactory } = fakeRuntimeFactory(f.home);
+  const roots = [f.root, f.otherRoot];
+  const sessions: TaskSessionCoordinator<FakeRuntime>[] = [];
+  const ids: string[][] = [];
+  const expected = new Map<string, { messages: unknown[]; memory: string }>();
+  try {
+    for (const [r, root] of roots.entries()) {
+      const s = await createTaskSession({ home: f.home, root, authorityId: "local", configId: CONFIG_ID, label: `Root ${r} A`, runtimeFactory });
+      sessions.push(s);
+      ids.push([s.active.id, s.createTask(`Root ${r} B`)]);
+      for (const id of ids[r]!) expected.set(id, { messages: [], memory: "" });
+    }
+    for (let turn = 0; turn < 360; turn++) {
+      const rootIndex = turn % 2;
+      const s = sessions[rootIndex]!;
+      const taskId = ids[rootIndex]![Math.floor(turn / 2) % 2]!;
+      await s.switchTask(taskId);
+      const state = expected.get(taskId)!;
+      expect(s.active.runtime.messages).toEqual(state.messages);
+      if (state.memory) expect(readMemoryFile("current", f.home, s.active.scope)).toBe(state.memory);
+      else expect(memoryTool({ action: "read", name: "current" }, f.home, s.active.scope)).toContain("no memory");
+      const marker = `root-${rootIndex}/task-${taskId}/revision-${turn}`;
+      const messages = [{ role: "user", content: `Correction: ${marker}` }, { role: "assistant", content: marker }];
+      s.active.runtime.messages.push(...messages);
+      state.messages.push(...messages);
+      state.memory = `# ${marker}`;
+      memoryTool({ action: "write", name: "current", content: state.memory }, f.home, s.active.scope);
+      s.checkpoint();
+      expect(readMemoryFile("current", f.home, s.active.scope)).toBe(state.memory);
+      if ((turn + 1) % 60 === 0) {
+        for (let r = 0; r < sessions.length; r++) {
+          const previous = sessions[r]!;
+          const sessionId = previous.id;
+          const oldScope = previous.active.scope;
+          await previous.close();
+          expect(() => readMemoryFile("current", f.home, oldScope)).toThrow();
+          await expect(loadTaskSession({ home: f.home, root: roots[1 - r]!, authorityId: "local", configId: CONFIG_ID, sessionId, runtimeFactory }))
+            .rejects.toThrow("root changed");
+          sessions[r] = await loadTaskSession({ home: f.home, root: roots[r]!, authorityId: "local", configId: CONFIG_ID, sessionId, runtimeFactory });
+          expect(sessions[r]!.active.runtime.messages).toEqual(expected.get(sessions[r]!.active.id)!.messages);
+        }
+      }
+    }
+    for (const s of sessions) {
+      for (const task of s.tasks) {
+        await s.switchTask(task.id);
+        expect(s.active.runtime.messages).toEqual(expected.get(task.id)!.messages);
+        expect(readMemoryFile("current", f.home, s.active.scope)).toBe(expected.get(task.id)!.memory);
+      }
+    }
+  } finally {
+    for (const s of sessions) await s.close();
+    f.cleanup();
+  }
+}, 30_000);
+
+test("read-only status inspects active and stale locks without altering checkpoint or exposing content", async () => {
+  const f = fixture();
+  const { runtimeFactory } = fakeRuntimeFactory(f.home);
+  const s = await createTaskSession({ home: f.home, root: f.root, authorityId: "local", configId: CONFIG_ID, label: "A", runtimeFactory });
+  const options = { home: f.home, root: f.root, authorityId: "local", configId: CONFIG_ID, sessionId: s.id };
+  const path = join(f.home, ".neko-core", "task-sessions", `${s.id}.json`);
+  const lockPath = join(f.home, ".neko-core", "task-sessions", `${s.id}.lock`);
+  let closed = false;
+  try {
+    s.active.runtime.messages.push({ role: "assistant", content: "SYNTHETIC_PRIVATE_CONTENT", _neko_inflight: true });
+    s.checkpoint();
+    const checkpoint = readFileSync(path, "utf8");
+    const lock = readFileSync(lockPath, "utf8");
+    const report = inspectTaskSession(options);
+    expect(report.writerLock).toBe("present");
+    expect(report.tasks[0]!.inflightAssistantCount).toBe(1);
+    expect(report.tasks[0]!.messageCount).toBe(1);
+    expect(report.checkpointSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(report)).not.toContain("SYNTHETIC_PRIVATE_CONTENT");
+    expect(JSON.stringify(report)).not.toContain(JSON.parse(lock).token);
+    expect(readFileSync(path, "utf8")).toBe(checkpoint);
+    expect(readFileSync(lockPath, "utf8")).toBe(lock);
+    expect(() => inspectTaskSession({ ...options, root: f.otherRoot })).toThrow("root changed");
+    expect(() => inspectTaskSession({ ...options, authorityId: "different" })).toThrow("authority changed");
+    expect(() => inspectTaskSession({ ...options, configId: "b".repeat(64) })).toThrow("configuration changed");
+    expect(readFileSync(path, "utf8")).toBe(checkpoint);
+    await s.close();
+    closed = true;
+    expect(inspectTaskSession(options).writerLock).toBe("absent");
+    const closedCheckpoint = readFileSync(path, "utf8");
+    const stale = JSON.stringify({ pid: 5, token: "synthetic-unknown-owner", acquiredAt: "2000-01-01" });
+    writeFileSync(lockPath, stale);
+    expect(inspectTaskSession(options).writerLock).toBe("present");
+    expect(readFileSync(lockPath, "utf8")).toBe(stale);
+    expect(readFileSync(path, "utf8")).toBe(closedCheckpoint);
+    await expect(loadTaskSession({ ...options, runtimeFactory })).rejects.toBeInstanceOf(TaskSessionWriterUnavailableError);
+    expect(readFileSync(lockPath, "utf8")).toBe(stale);
+  } finally {
+    if (!closed) await s.close();
+    f.cleanup();
+  }
+});
+
+test("read-only status never creates a missing task store", () => {
+  const f = fixture();
+  try {
+    expect(() => inspectTaskSession({ home: join(f.home, "never-created"), root: f.root,
+      authorityId: "local", configId: CONFIG_ID, sessionId: "c".repeat(32) })).toThrow("not found");
+    expect(existsSync(join(f.home, "never-created"))).toBe(false);
+  } finally { f.cleanup(); }
 });

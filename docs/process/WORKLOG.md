@@ -743,3 +743,18 @@ Startup now enters raw mode before emitting the terminal title, leaving queued b
 instead of transitioning from a partially typed canonical line at mount. Normal teardown and
 the exit hook restore the previous raw mode. Linux typecheck/lint and the complete build gate
 pass with this change; cross-platform CI must pass before merge.
+
+## 2026-10-02 — Read-only task checkpoint status and offline endurance
+
+`neko task-session status <id>` now validates and inspects the checkpoint without taking
+its writer lock, constructing a runtime, advancing revisions, or exposing transcript and
+lock-token contents. It reports checkpoint digest, revision, message counts, in-flight
+assistant count, and observed lock presence. Root, config and host authority still must
+match. Lock presence is not liveness proof and never authorizes automatic unlinking.
+This improves diagnostics for interrupted sessions; it does not implement stale-lock recovery.
+
+Added a deterministic 360-turn task/root memory endurance regression with clean restarts,
+exact transcript/memory comparisons, wrong-root refusal, and retired-scope checks (1,124
+assertions). This uses an injected runtime with real session persistence and memory tools;
+it does not establish real-model long-context accuracy. The separately requested live
+Bunny 320-turn run remains incomplete after an execution-environment network denial.
