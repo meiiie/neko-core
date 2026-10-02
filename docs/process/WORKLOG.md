@@ -758,3 +758,31 @@ exact transcript/memory comparisons, wrong-root refusal, and retired-scope check
 assertions). This uses an injected runtime with real session persistence and memory tools;
 it does not establish real-model long-context accuracy. The separately requested live
 Bunny 320-turn run remains incomplete after an execution-environment network denial.
+
+## 2026-10-02 — Complete checkpoint transcript viewing (resume follow-up)
+
+The ordinary `/transcript` path advertised a full thread but clipped prose to12 rows,
+other entries to4 rows, and tool observations to400 source lines before rendering.
+Searching could count a deep match without ever displaying its matching text.
+
+- Full replay now preserves the checkpoint's tool output. The ordinary viewer indexes
+  wrapped grapheme offsets and creates strings/Ink rows only for its visible window.
+- Large layouts yield during preparation and cancel on close or replacement. Literal
+  search navigates to actual result rows; Tab/Shift+Tab move between matches. A stable
+  message ID and text offset preserve the reading position on width changes.
+- Native Linux TUI inspection exposed a flex-shrink issue that silently dropped rows
+  when the viewer shared a fixed-height fullscreen parent. The viewer and viewport
+  retain their required height and header/footer stay single-line; a regression covers
+  consecutive output rows alongside flex siblings.
+- Verification: focused layout/viewer tests, existing UX/scroll tests with isolated
+  writable HOME, typecheck, lint, compiled Linux binary, and manual native-terminal
+  `/resume` → `/transcript` → deep search. Synthetic fixture:320 prompt/answer pairs
+  plus600 tool-output rows; native output599 and exact search result300 observed.
+  These are UI checks, not a320-turn live-model endurance pass or Windows validation.
+- Initial UX runs under the executor's read-only default HOME failed on both baseline
+  and candidate. Isolating HOME resolved those harness failures without weakening tests.
+
+Scope limitation: this reads messages still present in the checkpoint. It does not
+restore originals discarded by earlier compaction, add a durable display journal,
+page history from disk, or remove the main resume screen's current clipping. Those
+remain separate work; no release or complete-resume-performance claim is made.
