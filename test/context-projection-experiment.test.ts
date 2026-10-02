@@ -55,6 +55,8 @@ test("scope, stale revisions, role forgery and unknown evidence are rejected ato
     expect(() => f.view.apply({ ...f.scope }, before.revision, [])).toThrow("another runtime");
     expect(() => f.view.apply(f.scope, before.revision - 1, [])).toThrow("Stale");
     f.busy(true); expect(() => f.view.apply(f.scope, before.revision, [])).toThrow("Turn active");
+    expect(f.view.snapshot(f.scope)).toEqual(before);
+    expect(f.view.evidence(f.scope, "r1").text).toBe("evidence");
     f.busy(false); revokeTaskScope(f.scope);
     expect(() => f.view.apply(f.scope, before.revision, [])).toThrow("active runtime");
   } finally { f.cleanup(); }

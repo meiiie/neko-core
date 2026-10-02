@@ -42,7 +42,6 @@ export class ContextProjection {
     if (revision !== undefined && (!Number.isSafeInteger(revision) || revision !== this.state.revision)) {
       throw new Error("Stale context-view revision");
     }
-    this.assertQuiescent();
   }
 
   private checkBudget(parts: readonly ViewPart[]): number {
@@ -58,6 +57,7 @@ export class ContextProjection {
   /** Host-only admission of new original evidence. Never accepts model-proposed originals. */
   append(scope: TaskScope, chunk: EvidenceChunk): void {
     this.admit(scope);
+    this.assertQuiescent();
     if (!isText(chunk.id) || !validId(chunk.id) || !isText(chunk.text)
       || this.archive.has(chunk.id)) throw new Error("Invalid or duplicate evidence id");
     const bytes = Buffer.byteLength(chunk.text, "utf8");
@@ -78,6 +78,7 @@ export class ContextProjection {
   /** Complete replacement of the editable view, validated before a single state assignment. */
   apply(scope: TaskScope, expectedRevision: number, proposal: JsonValue): void {
     this.admit(scope, expectedRevision);
+    this.assertQuiescent();
     if (!Array.isArray(proposal) || proposal.length > MAX_PARTS) throw new Error("Invalid context-view proposal");
     const seen = new Set<string>();
     let proposedBytes = this.checkBudget([]), count = 0;
@@ -114,6 +115,7 @@ export class ContextProjection {
 
   undo(scope: TaskScope, expectedRevision: number): void {
     this.admit(scope, expectedRevision);
+    this.assertQuiescent();
     const parts = this.undoStates.at(-1);
     if (!parts) throw new Error("No context edit to undo");
     this.checkBudget(parts);
