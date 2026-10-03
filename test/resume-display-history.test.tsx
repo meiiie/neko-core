@@ -196,10 +196,13 @@ test("Esc cancels standalone compaction without erasing a draft or installing a 
   }};
   const now = new Date().toISOString();
   const session: Session = {id: "cancel-compaction", createdAt: now, updatedAt: now, cwd: process.cwd(), model: "fixture",
-    messages: Array.from({length: 12}, (_, i) => [{role: "user", content: `request_${i}`}, {role: "assistant", content: `answer_${i} ` + "observed detail ".repeat(100)}]).flat()};
+    messages: Array.from({length: 12}, (_, i) => [{role: "user", content: `request_${i}`}, {role: "assistant", content: `answer_${i} ` + "observed detail ".repeat(100) + `\nEND_answer_${i}`}]).flat()};
   const c = render(<ChatApp fullscreen yolo={false} provider={provider} resumedSession={session} />);
   try {
-    expect(await until(() => Boolean(c.lastFrame()?.includes("answer_11")))).toBe(true);
+    // Rich wrapping can move the start of this long reply above the viewport; its tail stays visible.
+    expect(await until(() => Boolean(c.lastFrame()?.includes("END_answer_11"))
+      && !c.lastFrame()?.includes("Loading earlier history"))).toBe(true);
+    expect(c.lastFrame()).toContain("answer_11");
     c.stdin.write("/compact"); await delay(50); c.stdin.write("\r");
     expect(await until(() => Boolean(receivedSignal && c.lastFrame()?.includes("completion time is unknown")))).toBe(true);
     c.stdin.write("draft stays"); await delay(50); c.stdin.write("\x1b");

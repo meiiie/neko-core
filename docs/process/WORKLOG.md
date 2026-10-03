@@ -126,6 +126,19 @@ The two scroll samples measure 6/101 ms (default response/settle) and 7/77 ms
 The subsequent source-of-instruction correction and this evidence update change
 only the worklog; the final head still needs the complete PR/main CI gate.
 
+Run `37116766215` on `b34a166d6f49cd6e8adc5b847df60b4100350144` passed macOS,
+Windows and feedback but failed Linux before standalone compaction began. The
+fixture waited for `answer_11` at the START of a 1,600-character reply. A settled
+20-row viewport reproduces the failure with history already loaded: rich wrapping
+moves that prefix above the visible tail. The fixture now includes a tail marker,
+waits for that marker with loading finished and still asserts the original answer
+marker. The same small-viewport counterexample passes all eight original assertions;
+the actual test file passes six tests / 44 assertions.
+Every cancellation, draft, late-summary and unmount assertion and both existing
+deadlines are retained. No production code or context size was reduced. This is
+a reproducible fixture geometry error, not a claimed runtime regression between
+the two heads (their diff contains only the worklog), nor an infrastructure retry.
+
 An earlier broad run hit an isolated Windows EPERM while renaming an existing
 schema-1 import fixture. Its focused four-test rerun and the final complete shards
 pass; no assertion, atomic helper or timeout was weakened. This transient host
