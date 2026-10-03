@@ -5,6 +5,21 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-10-03 - v1.8.0 publication and website fallback
+
+PR #85 merged after complete Linux/macOS/Windows PR CI (`37117755841`)
+and main CI (`37118392374`). The immutable public/latest release v1.8.0
+points to `ed80be3ae817f6d6d54745c0eba0ef360d200e02`; release workflow
+`37118911412` succeeded. All 17 downloaded assets match GitHub's SHA-256
+digests, all five binary sidecars and gzip contents match, and both ZIPs
+were checked. Curated release notes replace the generated commit list.
+
+The macOS ARM64 binary is 69,607,154 bytes. The site Worker rounds decimal
+megabytes to 70 MB, so its baked fallback now agrees. This website-only
+correction does not change the public tag or release assets. Its scoped
+checks compare every baked release value with the verified asset metadata;
+ordinary PR CI and the existing authenticated site deployment still apply.
+
 ## 2026-10-03 - v1.8.0 Windows release continuation
 
 Continue the owner's authorized PR/CI/merge/release on DESKTOP-PLLO4HG in a fresh
