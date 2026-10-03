@@ -11,7 +11,8 @@ const TEST_HOME = mkdtempSync(join(tmpdir(), "neko-prefs-home-"));
 const SAVED = { up: process.env.USERPROFILE, home: process.env.HOME };
 beforeAll(() => { process.env.USERPROFILE = TEST_HOME; process.env.HOME = TEST_HOME; });
 afterAll(() => {
-  process.env.USERPROFILE = SAVED.up; process.env.HOME = SAVED.home;
+  if (SAVED.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = SAVED.up;
+  if (SAVED.home === undefined) delete process.env.HOME; else process.env.HOME = SAVED.home;
   rmSync(TEST_HOME, { recursive: true, force: true });
 });
 

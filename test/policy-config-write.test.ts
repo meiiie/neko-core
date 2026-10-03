@@ -8,7 +8,8 @@ import { join } from "node:path";
 
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 
-const realHome = process.env.USERPROFILE;
+const originalHome = process.env.HOME;
+const originalProfile = process.env.USERPROFILE;
 let home = "";
 let root = "";
 
@@ -19,8 +20,8 @@ beforeEach(() => {
   process.env.HOME = home;
 });
 afterEach(() => {
-  process.env.USERPROFILE = realHome;
-  process.env.HOME = realHome;
+  if (originalProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = originalProfile;
+  if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
   rmSync(home, { recursive: true, force: true });
   rmSync(root, { recursive: true, force: true });
 });

@@ -1,3 +1,4 @@
+import { validDisplayHistoryRef, validDisplayPending, type DisplayEntrySeed, type DisplayHistoryRef } from "../core/display-history.ts";
 /**
  * Conversation persistence. Sessions are JSON files under ~/.neko-core/sessions/ (in HOME,
  * never committed), keyed by an id and tagged with the project cwd. `neko chat` saves after
@@ -40,6 +41,9 @@ export interface SessionUsage {
 }
 
 export interface Session {
+  /** Original visible history, independent of the compacted provider messages. */
+  displayHistory?: DisplayHistoryRef;
+  displayPending?: DisplayEntrySeed[];
   /** Version 2 adds durable host metadata while remaining readable by older Neko builds. */
   schemaVersion?: 2;
   id: string;
@@ -128,9 +132,9 @@ export function isValidSessionId(id: string): boolean {
   return SESSION_ID.test(id) && !id.endsWith(".") && !WINDOWS_DEVICE.test(id);
 }
 
-function sessionPath(id: string): string | null {
+function sessionPath(id: string, directory = sessionsDir()): string | null {
   if (!isValidSessionId(id)) return null;
-  const dir = resolve(sessionsDir());
+  const dir = resolve(directory);
   const path = resolve(dir, `${id}.json`);
   return dirname(path) === dir ? path : null;
 }
@@ -190,6 +194,8 @@ function parseSession(value: any, expectedId: string): Session | null {
     || !validMetadataText(session.updatedAt, MAX_SESSION_TIME_BYTES)
     || !validMetadataText(session.cwd, MAX_SESSION_CWD_BYTES)
     || !validMetadataText(session.model, MAX_SESSION_MODEL_BYTES)) return null;
+  if (session.displayPending !== undefined && !validDisplayPending(session.displayPending)) return null;
+  if (session.displayHistory !== undefined && !validDisplayHistoryRef(session.displayHistory)) return null;
   if (!Array.isArray(session.messages) || !session.messages.every(validMessage)) return null;
   if (session.title !== undefined && !validMetadataText(session.title, MAX_SESSION_TITLE_BYTES)) return null;
   if (session.branch !== undefined && !validMetadataText(session.branch, MAX_SESSION_BRANCH_BYTES)) return null;
@@ -358,9 +364,18 @@ async function readSessionPathAsync(path: string, expectedId: string): Promise<{
 /** Event-loop-friendly durable checkpoint. Serialization yields between messages, filesystem I/O is
  * asynchronous, and the previous readable primary remains the backup before the atomic publish. */
 export async function saveSessionAsync(session: Session): Promise<void> {
-  const path = sessionPath(session.id);
+  return saveSessionInDirectory(session, sessionsDir());
+}
+
+function capturedSessionSaver(): (session: Session) => Promise<void> {
+  const directory = sessionsDir();
+  return (session) => saveSessionInDirectory(session, directory);
+}
+
+async function saveSessionInDirectory(session: Session, directory: string): Promise<void> {
+  const path = sessionPath(session.id, directory);
   if (!path || !parseSession(session, session.id)) throw new Error(`Invalid session '${session.id}'`);
-  await mkdir(sessionsDir(), { recursive: true });
+  await mkdir(directory, { recursive: true });
   session.updatedAt = new Date().toISOString();
   session.branch = await currentBranchAsync(session.cwd);
   const serialized = await serializeSessionAsync(session);
@@ -384,7 +399,7 @@ export class AsyncSessionWriter {
   private readonly waiters: SessionSaveWaiter[] = [];
   private latest: Promise<void> = Promise.resolve();
 
-  constructor(private readonly saver: (session: Session) => Promise<void> = saveSessionAsync) {}
+  constructor(private readonly saver: (session: Session) => Promise<void> = capturedSessionSaver()) {}
 
   save(session: Session): Promise<void> {
     return this.saveLazy(() => ({ ...session, messages: [...session.messages] }));
@@ -520,11 +535,18 @@ export function acquireSessionLease(id: string): SessionLease {
 
 const INDEX_FILE = () => join(sessionsDir(), ".index.json");
 
+/** Stable human-facing name: a compaction capsule is not a new user request. */
+export function sessionAutoTitle(messages: Session["messages"]): string {
+  const capsule = messages.find((m) => (m.role === "user" || m._neko_context_capsule === true) && m._neko_internal === true
+    && isText(m._neko_compaction_first_user));
+  const original = capsule?._neko_compaction_first_user
+    ?? messages.find((m) => m.role === "user" && m._neko_internal !== true)?.content;
+  // File attachments can append many expanded lines; the original prompt's first line names the tab.
+  return isText(original) ? terminalSafeText(original.split(/\r?\n/, 1)[0].replace(/\s+/g, " ").trim(), {maxChars: 60}) : "";
+}
+
 function metaOf(session: Session, mtime: number, fsize: number): SessionMeta {
-  const firstUser = session.messages?.find((m) => m.role === "user");
-  const titleText = firstUser
-    ? terminalSafeText(String(firstUser.content).replace(/\s+/g, " "), { maxChars: 60 })
-    : "(no messages)";
+  const titleText = sessionAutoTitle(session.messages) || "(no messages)";
   return {
     id: session.id, createdAt: session.createdAt, updatedAt: session.updatedAt, cwd: session.cwd,
     model: session.model, branch: session.branch, bytes: session.bytes, title: session.title,
@@ -572,7 +594,7 @@ export function listSessionMetas(): SessionMeta[] {
   let index: Record<string, SessionMeta> = {};
   try {
     const raw = JSON.parse(readFileSync(INDEX_FILE(), "utf-8"));
-    if (raw?.v === 1 && raw.metas) index = raw.metas;
+    if (raw?.v === 2 && raw.metas) index = raw.metas;
   } catch { /* missing/corrupt -> rebuild */ }
 
   const out: SessionMeta[] = [];
@@ -609,7 +631,7 @@ export function listSessionMetas(): SessionMeta[] {
     } catch { /* skip corrupt */ }
   }
   if (dirty || Object.keys(index).length !== out.length) {
-    try { atomicWriteFileSync(INDEX_FILE(), JSON.stringify({ v: 1, metas: next })); } catch { /* cache write is best-effort */ }
+    try { atomicWriteFileSync(INDEX_FILE(), JSON.stringify({ v: 2, metas: next })); } catch { /* cache write is best-effort */ }
   }
   return out.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
@@ -637,10 +659,7 @@ export function latestSession(cwd: string): Session | null {
 export function sessionTitle(session: Session | SessionMeta): string {
   if (session.title) return terminalSafeText(session.title, { maxChars: MAX_SESSION_TITLE_DISPLAY_CHARS });
   if ("titleText" in session) return terminalSafeText(session.titleText, { maxChars: MAX_SESSION_TITLE_DISPLAY_CHARS }); // SessionMeta (precomputed)
-  const firstUser = session.messages.find((m) => m.role === "user");
-  return firstUser
-    ? terminalSafeText(String(firstUser.content).replace(/\s+/g, " "), { maxChars: 60 })
-    : "(no messages)";
+  return sessionAutoTitle(session.messages) || "(no messages)";
 }
 
 /** Rebuild the task tracker from the last durable todo_write call. The registry itself is ephemeral,

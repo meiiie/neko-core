@@ -10,8 +10,8 @@ const oldProfile = process.env.USERPROFILE;
 const homes: string[] = [];
 
 afterEach(() => {
-  process.env.HOME = oldHome;
-  process.env.USERPROFILE = oldProfile;
+  if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+  if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 

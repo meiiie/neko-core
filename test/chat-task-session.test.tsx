@@ -447,7 +447,7 @@ test("TUI task source lookup survives two compactions and restart without crossi
       advertisedLookups++;
       return { content: null, tool_calls: [{ id: "tui-source-lookup", name: "source_lookup", arguments: { id: sourceId } }] };
     }
-    return { content: `done ${request}`, tool_calls: [] };
+    return { content: `done ${request}` + " historical observation".repeat(100), tool_calls: [] };
   } };
   const send = async (stdin: { write: (value: string) => void }, value: string) => {
     stdin.write(value);
@@ -502,6 +502,10 @@ test("TUI task source lookup survives two compactions and restart without crossi
     expect(lookupObservations[1]).toContain("historical observed-byte digest sha256:");
     expect(lookupObservations[1]).toContain("not a current filesystem revision");
     expect(lookupObservations[1]).toContain("new read_file");
+    // A provider observation is not a settled UI turn. Queue a read-only status barrier before close.
+    const beforeClose = first.frames.length;
+    await send(first.stdin, "/task status");
+    expect(await until(() => first.frames.slice(beforeClose).join("\n").includes(`active ${alphaId}`))).toBe(true);
     first.unmount();
     firstUnmount = undefined;
     await firstLifecycle.shutdown();
@@ -518,6 +522,9 @@ test("TUI task source lookup survives two compactions and restart without crossi
     expect(lookupObservations[2]).toContain("not a current filesystem revision");
     expect(lookupObservations[2]).toContain("new read_file");
     expect(advertisedLookups).toBe(3);
+    const beforeFinalClose = second.frames.length;
+    await send(second.stdin, "/task status");
+    expect(await until(() => second.frames.slice(beforeFinalClose).join("\n").includes(`active ${alphaId}`))).toBe(true);
     expect(saved(sessionId).tasks.find((task: { id: string }) => task.id === betaId).sourceEvents).toEqual([]);
   } finally {
     await finishFixture(
@@ -531,3 +538,42 @@ test("TUI task source lookup survives two compactions and restart without crossi
     );
   }
 }, 60_000);
+
+test.each([false, true])("queued task dispatch preserves quiescence and trailing-input protection (%s)", async (trailingInput) => {
+  const previousHome = process.env.HOME, previousProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-task-queue-home-"));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  mkdirSync(join(home, ".neko-core"));
+  writeFileSync(join(home, ".neko-core", "config.json"), JSON.stringify({auto_update_check: false, auto_update: false}));
+  let release: (() => void) | undefined;
+  let called = false;
+  const lifecycle = taskLifecycle();
+  const app = render(<ChatApp fullscreen={false} yolo taskLifecycle={lifecycle} provider={{complete: async () => {
+    called = true;
+    await new Promise<void>(resolve => { release = resolve; });
+    return {content: "finished active turn", tool_calls: []};
+  }}}/>);
+  const send = async (text: string) => { app.stdin.write(text); await tick(30); app.stdin.write("\r"); };
+  try {
+    await send("/task new Alpha");
+    expect(await until(() => app.frames.join("\n").includes("Task Alpha"))).toBe(true);
+    await send("do a turn");
+    expect(await until(() => called)).toBe(true);
+    await send("/task new Beta");
+    expect(await until(() => app.frames.join("\n").includes("queued: /task new Beta"))).toBe(true);
+    if (trailingInput) await send("/task status");
+    release!();
+    if (trailingInput) {
+      expect(await until(() => app.frames.join("\n").includes("Task switch blocked"))).toBe(true);
+      expect(app.frames.join("\n")).not.toContain("Task Beta");
+      expect(await until(() => app.frames.join("\n").includes("task session "))).toBe(true);
+    } else {
+      expect(await until(() => app.frames.join("\n").includes("Task Beta"))).toBe(true);
+      expect(app.frames.join("\n")).not.toContain("Task switch blocked");
+    }
+  } finally {
+    release?.(); app.unmount(); await lifecycle.shutdown();
+    if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+    if (previousProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = previousProfile;
+  }
+}, 20_000);

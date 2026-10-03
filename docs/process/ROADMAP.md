@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-09-22) - v1.7.0 released
+## Current status (2026-10-03) - v1.8.0
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The current 1.x platform includes:
@@ -25,7 +25,11 @@ The current 1.x platform includes:
 - resumable, disk-streamed release downloads plus compressed transfer artifacts, with final binary digest and
   embedded-version verification before atomic activation.
 
-**Branch:** `main`. **Current release:** [v1.7.0](https://github.com/meiiie/neko-core/releases/tag/v1.7.0)
+**Branch:** `main`. **Current release:** [v1.8.0](https://github.com/meiiie/neko-core/releases/tag/v1.8.0)
+Experimental structured context is explicitly opt-in with `--context-memory` in
+TUI/CLI/ACP; display history is independent of the compacted model context. Existing
+schema 2 sessions, provider configuration and authority defaults remain compatible.
+Publication follows cross-platform PR/main CI and complete release-asset verification.
 freer-auto product default (permission mode `auto`), TUI honesty polish, and honored
 `--max-steps` for `neko run` / `neko bench gui`. See [CHANGELOG](../../CHANGELOG.md) and
 the [release record](WORKLOG.md).

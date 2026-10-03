@@ -11,12 +11,13 @@ import { Box, Text, useInput } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Line } from "./transcript.tsx";
-import { TranscriptLayout } from "./transcript-layout.ts";
+import { MAX_TRANSCRIPT_QUERY_CHARS, TranscriptLayout } from "./transcript-layout.ts";
 import { parseLastPointer, parseWheelAll } from "./mouse.ts";
 
 export function TranscriptViewer({ lines, cols, rows: termRows, onClose, title = "Conversation", unabridged = false }: { lines: Line[]; cols: number; rows: number; onClose: () => void; title?: string; unabridged?: boolean }) {
-  const [query, setQuery] = useState("");
-  const [searchError, setSearchError] = useState("");
+  const [{query, searchError}, setSearchState] = useState({query: "", searchError: ""});
+  const setQuery = (value: string) => setSearchState({query: value, searchError: ""});
+  const setSearchError = (value: string) => setSearchState((state) => ({...state, searchError: value}));
   const width = Math.max(20, cols - 2);
   const viewH = Math.max(3, termRows - 7); // leave room for border + header + hint + a little breathing space
 
@@ -91,11 +92,11 @@ export function TranscriptViewer({ lines, cols, rows: termRows, onClose, title =
       return;
     }
     if (key.ctrl && input === "u") { setSearchError(""); return setQuery(""); }
-    if (key.backspace || key.delete) return setQuery((s) => s.slice(0, -1));
+    if (key.backspace || key.delete) return setSearchState((state) => ({query: state.query.slice(0, -1), searchError: ""}));
     if (input && !key.ctrl && !key.meta && !key.tab && !key.return) {
-      if (query.length + input.length > 4096) return setSearchError("Search too long (maximum 4096 characters); paste was not applied");
-      setSearchError("");
-      setQuery((s) => s + input);
+      setSearchState((state) => state.query.length + input.length > MAX_TRANSCRIPT_QUERY_CHARS
+        ? {...state, searchError: `Search too long (maximum ${MAX_TRANSCRIPT_QUERY_CHARS} characters); paste was not applied`}
+        : {query: state.query + input, searchError: ""});
     }
   });
 

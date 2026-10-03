@@ -1,3 +1,4 @@
+import type { RowSource } from "./row-source.ts";
 /**
  * FrameDiffer — Neko's compositor-lite at the stdout layer. Ink (standard renderer) writes
  * `eraseLines(prevCount) + <full frame>` on every render; this differ intercepts that payload,
@@ -39,6 +40,15 @@ export const CARET_SENTINEL = "⁠";
  * width 0 for both string-width and cellW below). Components prefix clickable text with it; the
  * differ strips it and records its screen cell into ui/hit-targets.ts for pointer hit-testing. */
 export const HIT_SENTINEL = "⁣";
+/** Bind a sticky prompt to the frame that actually paints it, not a newer React closure.
+ * Variation selectors and separators have zero display width; all metadata is stripped. */
+export function promptAnchorMarker(id: number): string {
+  if (!Number.isSafeInteger(id)) throw new Error("Invalid prompt anchor id");
+  return "\u2064" + (id < 0 ? "\u2062" : "\u2061")
+    + Array.from(Math.abs(id).toString(16), (digit) => String.fromCharCode(0xfe00 + parseInt(digit, 16))).join("") + "\u2064";
+}
+const PROMPT_ANCHOR_MARKER = /\u2064([\u2061\u2062])([\ufe00-\ufe0f]{1,14})\u2064/g;
+
 const SGR_RE = /\x1b\[[0-9;]*m/g;
 /** DECSCUSR style for the hardware caret: NEKO_CARET picks it, default a BLINKING BAR (like Claude Code). */
 function caretStyle(): string {
@@ -103,7 +113,7 @@ export function parseInkPayload(p: string): { eraseCount: number; frame: string 
 export class FrameDiffer {
   private prev: string[] | null = null;
   private band: ScrollBand | null = null;
-  private bandRows: string[] | null = null; // full pre-wrapped row set for the band (null = Ink owns the band)
+  private bandRows: RowSource | null = null; // full pre-wrapped row set for the band (null = Ink owns the band)
   private bandTail: string[] = [];           // live tail (the streaming reply) appended after bandRows
   private bandDist = 0;                      // rows between the window bottom and the tail
   private writer: ((s: string) => void) | null = null; // direct emitter for imperative band repaints
@@ -112,7 +122,13 @@ export class FrameDiffer {
 
   // Hardware scroll is safe only when the painted and current band geometry agree.
   private paintedBand: ScrollBand | null = null;
-  private markPainted(): void { this.paintedBand = this.band ? { ...this.band } : null; }
+  private pendingPromptId: number | null = null;
+  private paintedPromptId: number | null = null;
+  promptLineId(): number | null { return this.prev ? this.paintedPromptId : null; }
+  private markPainted(): void {
+    this.paintedBand = this.band ? { ...this.band } : null;
+    this.paintedPromptId = this.band?.top === 2 ? this.pendingPromptId : null;
+  }
   // Windows defaults to absolute repaint because ConPTY can displace rows outside DECSTBM.
   private hwScrollEnabled(): boolean {
     const v = process.env.NEKO_HWSCROLL;
@@ -186,7 +202,7 @@ export class FrameDiffer {
     this.band = band;
     if (changed && band) this.refreshCompose();
   }
-  reset(): void { this.prev = null; }
+  reset(): void { this.prev = null; this.paintedPromptId = null; }
 
   // The stripped caret sentinel drives the terminal's native cursor; overlays omit it to hide the caret.
   private cursorPos: { row: number; col: number } | null = null;
@@ -195,8 +211,15 @@ export class FrameDiffer {
    * it neither displays nor shifts a column. Called on each real frame (process). */
   private extractCursor(lines: string[]): { row: number; col: number }[] {
     let found = false;
+    this.pendingPromptId = null;
     const hits: { row: number; col: number }[] = [];
     for (let r = 0; r < lines.length; r++) {
+      lines[r] = lines[r].replace(PROMPT_ANCHOR_MARKER, (_marker, sign: string, digits: string) => {
+        const magnitude = parseInt(Array.from(digits, (digit) => (digit.charCodeAt(0) - 0xfe00).toString(16)).join(""), 16);
+        const id = sign === "\u2062" ? -magnitude : magnitude;
+        if (r === 0 && this.pendingPromptId === null && Number.isSafeInteger(id)) this.pendingPromptId = id;
+        return "";
+      });
       // Click-zone anchors first (both sentinels are zero-width to cellW, so order is cosmetic).
       if (lines[r].indexOf(HIT_SENTINEL) >= 0) {
         for (let idx = lines[r].indexOf(HIT_SENTINEL); idx >= 0; idx = lines[r].indexOf(HIT_SENTINEL, idx + 1)) {
@@ -279,7 +302,7 @@ export class FrameDiffer {
    * repaint diffs the new window against the previous one, uses the hardware scroll when it detects a
    * shift, and paints just what changed. null = Ink owns the band again (find mode, inline).
    */
-  setBandContent(rows: string[] | null, dist: number, tail: string[] = []): void {
+  setBandContent(rows: RowSource | null, dist: number, tail: string[] = []): void {
     this.bandRows = rows;
     this.bandTail = tail; // the STREAMING reply renders inside the band, right under the committed rows
     this.bandDist = Math.max(0, dist);
@@ -298,7 +321,7 @@ export class FrameDiffer {
     const start = Math.max(0, end - H);
     const slice: string[] = [];
     for (let i = start; i < end; i++) {
-      slice.push(i < this.bandRows.length ? this.bandRows[i] : this.bandTail[i - this.bandRows.length]);
+      slice.push(i < this.bandRows.length ? (this.bandRows.at(i) ?? "") : this.bandTail[i - this.bandRows.length]);
     }
     while (slice.length < H) slice.push("");
     // First and last selected content rows use column bounds; middle rows fill the viewport.

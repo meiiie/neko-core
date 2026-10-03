@@ -196,12 +196,15 @@ test("multi-step input estimate adds the pending context to already-booked usage
   }
 }, 10_000);
 
-test("CompactingLine shows the progress bar, percent, and a tip", () => {
-  const f = strip(render(<CompactingLine start={1_000_000} />).lastFrame());
-  expect(f).toContain("Compacting conversation");
-  expect(f).toContain("0%");            // frame 0: elapsed 0 -> 0%
-  expect(f).toContain("▱");             // empty bar segments visible
-  expect(f).toContain("tip:");
+test("CompactingLine reports elapsed work without claiming measured percent", () => {
+  const c = render(<CompactingLine start={1_000_000} />);
+  try {
+    const f = strip(c.lastFrame());
+    expect(f).toContain("Compacting conversation");
+    expect(f).toContain("completion time is unknown");
+    expect(f).not.toMatch(/\d+%/);
+    expect(f).toContain("tip:");
+  } finally { c.unmount(); }
 });
 
 test("resume-from-summary: a large session prompts to summarize, a small one resumes directly", async () => {
@@ -223,7 +226,8 @@ test("resume-from-summary: a large session prompts to summarize, a small one res
     expect(f2).toContain("hi there small session");        // replayed directly
     c2.unmount();
   } finally {
-    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    if (saved.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.up;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -285,11 +289,12 @@ test("fullscreen mode renders a scrollable transcript region (alt-screen), inlin
     for (let i = 0; i < 40; i++) { msgs.push({ role: "user", content: `question ${i}` }); msgs.push({ role: "assistant", content: `answer ${i}` }); }
     const s: any = { id: "fs", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
     const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
-    await tick(150);
-    const f = strip(c.frames.join("\n"));
-    expect(f).toContain("\x1b[?1049h"); // entered the alternate screen
-    expect(f).toContain("answer 39");   // rich transcript, sticky-bottom -> newest content visible
-    c.unmount();
+    try {
+      expect(await until(c, () => strip(c.lastFrame()).includes("answer 39") && !strip(c.lastFrame()).includes("Loading earlier history"))).toBe(true);
+      const f = strip(c.frames.join("\n"));
+      expect(f).toContain("\x1b[?1049h"); // entered the alternate screen
+      expect(f).toContain("answer 39");   // rich transcript, sticky-bottom -> newest content visible
+    } finally { c.unmount(); }
   }
 });
 
@@ -309,14 +314,17 @@ test("fullscreen resume never paints reasoning fields or tool-attached progress"
     ],
   };
   const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={resumed} sessionId={resumed.id} />);
-  await tick(250);
-  const frames = strip(c.frames.join("\n"));
-  expect(frames).toContain("PUBLIC FINAL ANSWER");
-  expect(frames).toContain("intermediate progress update hidden on resume");
-  expect(frames).not.toContain("PRIVATE PROGRESS TEXT");
-  expect(frames).not.toContain("PRIVATE RAW REASONING");
-  expect(frames).not.toContain("PRIVATE REASONING SUMMARY");
-  c.unmount();
+  try {
+    // Resume imports and flushes history asynchronously; readiness is not a fixed 250 ms delay.
+    expect(await until(c, () => strip(c.lastFrame()).includes("PUBLIC FINAL ANSWER")
+      && !strip(c.lastFrame()).includes("Loading earlier history"))).toBe(true);
+    const frames = strip(c.frames.join("\n"));
+    expect(frames).toContain("PUBLIC FINAL ANSWER");
+    expect(frames).toContain("intermediate progress update hidden on resume");
+    expect(frames).not.toContain("PRIVATE PROGRESS TEXT");
+    expect(frames).not.toContain("PRIVATE RAW REASONING");
+    expect(frames).not.toContain("PRIVATE REASONING SUMMARY");
+  } finally { c.unmount(); }
 });
 
 test("RichView pastes exactly the visible window of cached rows (tail and scrolled)", () => {
@@ -410,30 +418,33 @@ test("ansi-cache: priming a committed assistant skips the raw markdown fallback"
   primeAnsiCache(line, 60, CFG);
   const rows = getCachedRows(line, 60);
   expect(rows).not.toBeNull();
-  expect(rows!.join("\n")).not.toContain("**");
-  expect(rows!.join("\n")).toContain("formatted answer");
+  expect(rows!.slice().join("\n")).not.toContain("**");
+  expect(rows!.slice().join("\n")).toContain("formatted answer");
   clearAnsiCache();
 });
 
-test("fullscreen history: PgUp shows the jump pill; a new turn counts; End returns to the tail", async () => {
+test("fullscreen history: PgUp shows the jump pill; a new turn counts; Ctrl+End returns to the tail", async () => {
   {
     const msgs: any[] = [];
     for (let i = 0; i < 30; i++) { msgs.push({ role: "user", content: `q ${i}` }); msgs.push({ role: "assistant", content: `a ${i}` }); }
     const s: any = { id: "pill", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
     const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
-    await tick(120);
-    c.stdin.write("\x1b[5~"); // PgUp -> scroll up (line-anchored; flush is coalesced ~33ms)
-    expect(await until(c, (f) => /Jump to bottom \(ctrl\+End\)/.test(f))).toBe(true);
-    c.stdin.write("hi there"); // type, then submit separately (one chunk with \r would read as a paste)
-    await tick(60);
-    c.stdin.write("\r"); // run a turn while scrolled up -> Echo replies
-    expect(await until(c, (f) => /new message/.test(f))).toBe(true); // pill counts the new activity
-    c.stdin.write("\x1b[F"); // End -> back to the live tail
-    expect(await until(c, (f) => {
-      const frames = f.split("\n");
-      return frames.some((x) => x.includes("hello")) && !/Jump to bottom/.test(frames.slice(-30).join("\n"));
-    })).toBe(true);
-    c.unmount();
+    try {
+      // Resume hydration is asynchronous. A fixed delay could send PageUp before
+      // history exists, then the adoption correctly reanchors at the live tail.
+      expect(await until(c, (f) => f.includes("a 29"), 3000)).toBe(true);
+      c.stdin.write("\x1b[5~"); // PgUp -> scroll up (line-anchored; flush is coalesced ~33ms)
+      expect(await until(c, (f) => /Jump to bottom \(ctrl\+End\)/.test(f))).toBe(true);
+      c.stdin.write("hi there"); // type, then submit separately (one chunk with \r would read as a paste)
+      await tick(60);
+      c.stdin.write("\r"); // run a turn while scrolled up -> Echo replies
+      expect(await until(c, (f) => /new message/.test(f))).toBe(true); // pill counts the new activity
+      c.stdin.write("\x1b[1;5F"); // Ctrl+End -> back to the live tail
+      expect(await until(c, (f) => {
+        const frames = f.split("\n");
+        return frames.some((x) => x.includes("hello")) && !/Jump to bottom/.test(frames.slice(-30).join("\n"));
+      })).toBe(true);
+    } finally { c.unmount(); }
   }
 });
 
@@ -441,12 +452,12 @@ test("fullscreen history pins the nearest prompt and clicking it jumps to that e
   const msgs: any[] = [];
   for (let i = 0; i < 30; i++) {
     msgs.push({ role: "user", content: `anchor prompt ${i}` });
-    msgs.push({ role: "assistant", content: `answer ${i}` });
+    msgs.push({ role: "assistant", content: Array.from({length: 80}, (_, row) => `answer ${i} row ${row}`).join("\n") });
   }
   const s: any = { id: "anchors", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
   const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
   try {
-    expect(await until(c, (frames) => frames.includes("answer 29"), 3000)).toBe(true); // hydrate before sending navigation
+    expect(await until(c, (frames) => frames.includes("answer 29 row 79"), 3000)).toBe(true); // wait for the full reply layout, not its one-line loading fallback
     c.stdin.write("\x1b[5~"); // PageUp: leave the live tail so the fixed navigation row becomes active
 
     let anchor = "";
@@ -601,15 +612,13 @@ test("fullscreen find: Ctrl+F opens the find bar and typing shows a match badge"
     for (let i = 0; i < 20; i++) { msgs.push({ role: "user", content: `question ${i}` }); msgs.push({ role: "assistant", content: `answer NEEDLE ${i}` }); }
     const s: any = { id: "fsf", createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "m", messages: msgs };
     const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={s} />);
-    await tick(120);
-    c.stdin.write("\x06"); // Ctrl+F -> open find
-    await tick(60);
-    c.stdin.write("NEEDLE");
-    await tick(100);
-    const f = strip(c.frames.join("\n"));
-    expect(f).toContain("find:");
-    expect(f).toMatch(/\d+\/\d+/); // match badge like "1/20"
-    c.unmount();
+    try {
+      c.stdin.write("\x06"); // Ctrl+F may be used while the saved history is still loading.
+      expect(await until(c, (frame) => frame.includes("find:"))).toBe(true);
+      c.stdin.write("NEEDLE");
+      expect(await until(c, (frame) => /\d+\/\d+/.test(frame))).toBe(true);
+      expect(strip(c.frames.join("\n"))).toContain("find:");
+    } finally { c.unmount(); }
   }
 });
 
@@ -1132,10 +1141,13 @@ test("interrupted turn is PERSISTED incrementally - resume shows the work, not n
     expect(s).not.toBeNull();
     expect(s.messages.some((m: any) => m.role === "user" && String(m.content).includes("nhiem vu quan trong"))).toBe(true);
     expect(s.messages.some((m: any) => m.role === "assistant" && String(m.content).includes("bằng chứng quan trọng"))).toBe(true);
+    expect(s.displayHistory?.head).toBeTruthy();
+    expect(s.displayPending?.some((entry: any) => entry.kind === "assistant" && entry.text.includes("bằng chứng quan trọng"))).toBe(true);
     c.unmount();
   } finally {
     cancelled = true;
-    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    if (saved.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.up;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
     rmSync(home, { recursive: true, force: true });
   }
 }, 15000);

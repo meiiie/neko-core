@@ -69,11 +69,11 @@ test("model source_lookup recovers historical result through task session after 
       { ...source, verifiedPath: join(root, "other.ts") },
     ])).toThrow(/identity|digest/);
     session.active.runtime.agent.messages.push(...Array.from({ length: 6 }, (_, i) => [
-      { role: "user", content: "tail " + i }, { role: "assistant", content: "ack " + i },
+      { role: "user", content: "tail " + i }, { role: "assistant", content: "ack " + i + " historical observation".repeat(100) },
     ]).flat());
     await session.active.runtime.agent.compact();
     session.active.runtime.agent.messages.push(...Array.from({ length: 6 }, (_, i) => [
-      { role: "user", content: "second " + i }, { role: "assistant", content: "second ack " + i },
+      { role: "user", content: "second " + i }, { role: "assistant", content: "second ack " + i + " historical observation".repeat(100) },
     ]).flat());
     await session.active.runtime.agent.compact();
     session.checkpoint();

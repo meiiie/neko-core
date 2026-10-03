@@ -345,6 +345,14 @@ export function TextInput(props: {
       else props.onHistoryDown?.();
       return;
     }
+    if (key.home && !key.ctrl && !key.meta) {
+      while (cur.current > 0 && chars[cur.current - 1] !== "\n") cur.current--;
+      return rerender();
+    }
+    if (key.end && !key.ctrl && !key.meta) {
+      while (cur.current < chars.length && chars[cur.current] !== "\n") cur.current++;
+      return rerender();
+    }
     if (key.leftArrow) { cur.current = Math.max(0, cur.current - 1); return rerender(); }
     if (key.rightArrow) { cur.current = Math.min(chars.length, cur.current + 1); return rerender(); }
     if (key.ctrl && input === "a") { cur.current = 0; return rerender(); } // home

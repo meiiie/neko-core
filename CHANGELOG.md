@@ -6,6 +6,37 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-03
+
+### Added
+
+- Opt-in structured context for scoped task sessions in TUI, CLI and ACP using
+  `--context-memory`. Compaction publishes working messages and immutable source
+  references together before activating them; exact historical source lookup is
+  restricted to the current task and selected journal branch.
+- ACP `/compact` and explicit structured/legacy task status. New schema 3 sessions
+  require matching opt-in on resume; existing schema 2 sessions are unchanged.
+
+### Fixed
+
+- Full display history remains separate from compacted model context, with older
+  prompts reachable after resume. Sticky-prompt clicks target the painted turn;
+  Home/End edit drafts and Ctrl+Home/Ctrl+End navigate history.
+- Incomplete, oversized, stale, canceled and non-shrinking summaries preserve the
+  prior context. Uncertain structured checkpoint publication stops subsequent work
+  until recovery instead of overwriting durable state with stale messages.
+
+### Compatibility and limits
+
+- Structured context is experimental and opt-in. No automatic schema migration,
+  permission change, credential change or new runtime dependency. Existing exact
+  read-file evidence remains bounded to 256 events / 8 MiB; unsafe compaction at
+  that boundary is blocked rather than silently discarding evidence.
+- Validation uses scripted-provider mechanism tests. The earlier Z.ai Coding Plan
+  trial stopped at 200/320 turns due to an environment network-policy block and
+  does not validate this later integration. No unlimited-memory or SOTA claim.
+- See [structured context](docs/STRUCTURED-CONTEXT.md) for usage, recovery and limits.
+
 ## [1.7.0] - 2026-09-22
 
 ### Changed

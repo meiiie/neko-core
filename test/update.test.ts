@@ -133,7 +133,8 @@ test("an 'up to date' check is re-asked the same day, so a release minutes later
     expect(apiCalls).toBe(seen);
     expect(JSON.parse(readFileSync(cache, "utf-8")).latest).toBe(shipped);
   } finally {
-    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    if (saved.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.up;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
     globalThis.fetch = saved.fetch;
     rmSync(home, { recursive: true, force: true });
   }
@@ -272,7 +273,8 @@ test("setAutoUpdate writes the hold flag to the user config (rollback sticks)", 
     setAutoUpdate(true);  // resume
     expect(JSON.parse(require("node:fs").readFileSync(cfgPath, "utf-8")).auto_update).toBe(true);
   } finally {
-    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    if (saved.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.up;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -332,7 +334,8 @@ test("the machine-wide update lock reclaims dead owners without deleting success
     expect(acquireUpdateLock(t0 + 11 * 60_000, () => true)).toBe(true);
     releaseUpdateLock();
   } finally {
-    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    if (saved.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.up;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -349,7 +352,8 @@ test("a manual updater waits for an active auto-updater instead of failing immed
     expect(await acquireUpdateLockWithin(250, 5)).toBe(true);
     releaseUpdateLock();
   } finally {
-    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    if (saved.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.up;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -380,4 +384,22 @@ test("cleanupStaleUpdate sweeps orphaned staging files but never a fresh one", (
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("cancelled startup check cannot fall back to another request after its owner closes", async () => {
+  const original = globalThis.fetch;
+  const controller = new AbortController();
+  let calls = 0;
+  globalThis.fetch = fetchStub(async (_input, options) => {
+    calls++;
+    return new Promise((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("cancelled")), {once: true}));
+  });
+  try {
+    const pending = latestVersion(controller.signal);
+    controller.abort();
+    expect(await pending).toBeNull();
+    expect(calls).toBe(1);
+    expect(await latestVersion(controller.signal)).toBeNull();
+    expect(calls).toBe(1);
+  } finally { globalThis.fetch = original; }
 });

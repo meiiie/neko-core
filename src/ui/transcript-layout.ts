@@ -11,6 +11,8 @@ interface Entry {
   row: number;
 }
 
+export const MAX_TRANSCRIPT_QUERY_CHARS = 4096;
+
 const segments = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 export class TranscriptLayout {
@@ -109,27 +111,17 @@ export class TranscriptLayout {
 
   /** Case-insensitive literal search, returning the actual wrapped row of each occurrence. */
   find(query: string): number[] {
-    if (!query) return [];
-    const needle = query.toLowerCase();
+    if (!query || query.length > MAX_TRANSCRIPT_QUERY_CHARS) return [];
+    // Bound BEFORE escaping/compilation. Native Unicode simple folding handles sigma and long-s
+    // while preserving original offsets and avoiding locale-sensitive length-changing lowercase maps.
+    const literal = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(literal, "giu");
     const matches: number[] = [];
     for (const entry of this.entries) {
-      const folded = entry.text.toLowerCase();
-      // Most text folds without changing length. Expanding folds such as İ need an offset map.
-      let offsets: number[] | null = null;
-      if (folded.length !== entry.text.length) {
-        offsets = [];
-        let original = 0;
-        for (const char of entry.text) {
-          for (let i = 0; i < char.toLowerCase().length; i++) offsets.push(original);
-          original += char.length;
-        }
-      }
-      let next = 0;
-      for (;;) {
-        const found = folded.indexOf(needle, next);
-        if (found < 0) break;
-        const originalIndex = offsets?.[found] ?? found;
-        next = found + needle.length;
+      pattern.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(entry.text))) {
+        const originalIndex = match.index;
         let low = 0;
         let high = entry.starts.length;
         while (low < high) {

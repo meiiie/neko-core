@@ -11,7 +11,8 @@ const TEST_HOME = mkdtempSync(join(tmpdir(), "neko-disp-home-"));
 const SAVED = { up: process.env.USERPROFILE, home: process.env.HOME, fps: process.env.NEKO_FPS };
 beforeAll(() => { process.env.USERPROFILE = TEST_HOME; process.env.HOME = TEST_HOME; delete process.env.NEKO_FPS; });
 afterAll(() => {
-  process.env.USERPROFILE = SAVED.up; process.env.HOME = SAVED.home;
+  if (SAVED.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = SAVED.up;
+  if (SAVED.home === undefined) delete process.env.HOME; else process.env.HOME = SAVED.home;
   if (SAVED.fps === undefined) delete process.env.NEKO_FPS; else process.env.NEKO_FPS = SAVED.fps;
   rmSync(TEST_HOME, { recursive: true, force: true });
 });

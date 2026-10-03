@@ -1686,6 +1686,8 @@ test("/usage shows ChatGPT subscription windows and credits without making a mod
   const home = mkdtempSync(join(tmpdir(), "neko-usage-"));
   process.env.HOME = home; process.env.USERPROFILE = home;
   saveChatGptCredentials({ accessToken: "access", refreshToken: "refresh", expiresAt: Date.now() + 3_600_000, accountId: "acct" });
+  // This fixture observes only the usage request, not an unrelated startup release check.
+  writeFileSync(join(home, ".neko-core", "config.json"), JSON.stringify({auto_update_check: false}));
   let requested = "";
   // SAFETY: test-built fixture; the asserted shape is exactly what this test constructs.
   globalThis.fetch = (async (input: string | URL | Request) => {

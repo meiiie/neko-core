@@ -243,7 +243,9 @@ test("sticky prompt survives FrameDiffer composition and its first-row click jum
     { stdout: wrapStdoutForSync(out as any, { supported: true, differ }) as any, stdin: stdin as any, patchConsole: false, exitOnCtrlC: false },
   );
   try {
-    for (let waited = 0; waited < 3000 && !vt.text().includes("answer 49"); waited += 25) await tick(25);
+    const hydrated = () => vt.text().includes("answer 49") && !vt.text().includes("Loading earlier history");
+    for (let waited = 0; waited < 3000 && !hydrated(); waited += 25) await tick(25);
+    expect(hydrated()).toBe(true); // don't click a replay row while async hydration can replace its identity
       stdin.push("\x1b[5~");
       let anchor = "";
       for (let step = 0; step < 8; step++) {
@@ -269,14 +271,16 @@ test("sticky prompt survives FrameDiffer composition and its first-row click jum
       if ((differ as any).band?.top === 1 && rows.slice(0, 4).some((row) => row.trim() === anchor)) { jumped = true; break; }
       await tick(25);
     }
-    expect(jumped).toBe(true); // header unmounted; the exact prompt now belongs to the transcript band
+    // Preserve the visible source/destination when diagnosing a failed real input jump.
+    // SAFETY: this test owns the FrameDiffer fixture and synthetic transcript.
+    expect({jumped, anchor, bandTop: (differ as any).band?.top, rows: vt.lines().slice(0, 6)}).toMatchObject({jumped: true});
   } finally {
     app.unmount();
     await tick(50);
   }
 }, 30000);
 
-test("successful web tool replay is one compact line with full output hidden by default", async () => {
+test("resumed web tool output stays reachable in the main history viewport", async () => {
   const vt = new VirtualTerminal(100, 30);
   const out = new FakeTtyOut(100, 30, vt);
   const stdin = new FakeStdin();
@@ -298,9 +302,8 @@ test("successful web tool replay is one compact line with full output hidden by 
   );
   await tick(650);
   const rows = vt.lines();
-  const summaryRows = rows.filter((line) => line.includes("Fetched https://example.com/advisory"));
-  expect(summaryRows).toHaveLength(1);
-  expect(vt.text()).not.toContain("FETCH RESULT"); // Ctrl+O and /transcript retain it; default history does not dump it
+  expect(rows.filter((line) => line.trim() === "BODY")).toHaveLength(1);
+  expect(vt.text()).toContain("FETCH RESULT"); // Resume preserves source content in the main scrollback.
   app.unmount();
   await tick(50);
 }, 30000);

@@ -198,6 +198,8 @@ export const RESUME_MESSAGE_MAX_ROWS = 12; // rich rendering stays proportional 
 export const RESUME_SUMMARY_AT = 0.6; // offer resume-from-summary once a session would fill >60% of the window
 
 export interface BuildReplayOptions {
+  /** Preserve all visible text for the durable UI archive, independently of model context. */
+  preserveContent?: boolean;
   /** `full` is the source-faithful /transcript view; `resume` is a bounded screen projection. */
   mode?: "full" | "resume";
   columns?: number;
@@ -215,7 +217,7 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
   const maxMessageRows = Math.max(4, Math.floor(options.maxMessageRows ?? RESUME_MESSAGE_MAX_ROWS));
   const toolById = new Map<string, { name: string; args: any; line: Line }>();
   let hiddenProgress = 0;
-  const screenText = (text: string) => resume && wrappedRows(text, columns) > maxMessageRows
+  const screenText = (text: string) => resume && !options.preserveContent && wrappedRows(text, columns) > maxMessageRows
     ? tailByRows(text, maxMessageRows, columns)
     : text;
 
@@ -241,8 +243,8 @@ export function buildReplayLines(messages: any[], nextId: () => number, options:
     } else if (m.role === "tool") {
       const call = toolById.get(m.tool_call_id);
       const rawObservation = contentToText(m.content);
-      const obs = resume ? rawObservation.split("\n").slice(0, 400).join("\n") : rawObservation;
-      const summary = resume ? resultSummary(call?.name, obs, call?.args) : undefined;
+      const obs = resume && !options.preserveContent ? rawObservation.split("\n", 400).join("\n") : rawObservation;
+      const summary = resume ? resultSummary(call?.name, obs.split("\n", 400).join("\n"), call?.args) : undefined;
       if (resume && summary && call) {
         const combined: Line = { id: nextId(), kind: "tool_result", text: `${call.line.text}\n${obs}`, summary };
         const callIndex = out.indexOf(call.line);

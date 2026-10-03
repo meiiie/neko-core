@@ -5,6 +5,188 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-10-03 - v1.8.0 Windows release continuation
+
+Continue the owner's authorized PR/CI/merge/release on DESKTOP-PLLO4HG in a fresh
+checkout; the existing dirty worktree is untouched. The transferred ZIP was
+verified before extraction (SHA-256
+`d218aca3ff8fb06b0431c5a6a64b40fae9b0e725bce61e4bd033b52847decb4c`).
+Its patch recreates tree `0cea4eddd762c965427feff7e083f00c72d5e1bf` on upstream
+`8b3354fcb5b76c55061b9e439c241faf7ecbbcae`. The later cloud candidate
+`b2ecda814cea310c379151ed91951a2d9cdaec09` was unavailable; this release uses the
+verified transfer plus the fixes below, not that candidate or its reported gates.
+The Library helper failed on Windows `os.setxattr`; the owner's exact connected
+Drive copy supplied the bytes. Existing GitHub authentication works on this host,
+superseding the earlier connector/push blockers recorded below.
+
+Windows verification exposed a child-process fixture importing a file URL's
+pathname (`/C:/...`) instead of its href; the URL fix keeps the same fault
+assertions. Directory-sync faults are explicit Windows skips because that durable
+write stage is absent there, rather than body-level early returns counted as passes.
+A TUI cancellation race could label an uncertain published checkpoint as safely
+canceled. The catch now preserves the recovery error even when cancellation is
+set. A rendered TUI regression publishes a real checkpoint, aborts its signal and
+loses the acknowledgement; it requires recovery, rejects another provider turn and
+proves shutdown leaves the published bytes unchanged. It fails with the old catch.
+
+Earlier full Windows suite on Bun `1.4.0+34cbb9a40`: 2,042 passed, 26 explicit skips,
+0 failures, 26,098 assertions across four sequential shards (all 209 test files).
+Typecheck and lint pass. Doctor and policy exit 0 with their explicit auto-mode,
+unconfined-shell, project-trust and non-TTY warnings; this is not a claim of live
+OS confinement. Native build/render/input/ACP, startup input and both lifecycle
+renderers pass. Three unchanged ConPTY ghost/typing probes pass with exactly
+three localhost scripted-provider requests and no external model request.
+Scroll probes require actual movement and pass startup/resize/menu/keyboard:
+default 8 ms first response / 78 ms settle; forced incremental 7 ms / 54 ms.
+These are single-host samples, not cross-host performance claims. The prebuilt
+autoload/embedded-skills gate passes 6 tests / 37 assertions.
+Required live Windows ACL/MCP launcher boundaries pass 31 tests / 165 assertions;
+the forced-color soft-wrap selection regression passes. Gitleaks 8.30.1 reports
+no leaks in tracked history and the complete release diff, with redacted output.
+
+PR #85's first CI run passed Windows and feedback but Linux/macOS each failed
+36 UI tests. Existing display/prefs/setup/MCP/updater fixtures restored an absent
+USERPROFILE by assignment, producing the literal relative string "undefined".
+The new absolute display-history scope guard correctly refused it. Replaying a
+display-cache test followed by fullscreen startup with USERPROFILE absent fails
+before cleanup is fixed and passes afterward. Cleanup now deletes originally
+absent HOME/USERPROFILE values in those five fixtures; production scope validation
+and every assertion remain unchanged. The seven-file affected run with the absent
+profile passes 118 tests, 5 explicit skips, 682 assertions; typecheck/lint pass.
+The full Windows/native results above precede only these fixture cleanups. The
+next complete cross-platform CI validates the final test fixtures before merge.
+The website's baked Windows ZIP fallback is refreshed from 40 to 42 MB: the local
+release build's Optimal ZIP measures 42,304,008 bytes. Public asset sizes are checked
+again after publication; fallback deployment uses the existing authenticated account.
+
+The follow-up matrix still rejected history scopes: Linux had 16 failures and
+macOS 24 on head `76ff7912cdb3600b7d9c43123e0abf537eb0611e`, while Windows and
+feedback passed. A full missing-profile diagnostic trace identified a sixth fixture,
+`policy-config-write`, restoring both variables from the old USERPROFILE alone.
+It now preserves HOME and USERPROFILE independently and deletes an originally
+absent value. The policy-then-streaming-scroll counterexample fails before the
+fix and passes 6/6 afterward; all four affected policy/scroll/chat/UX files pass
+141 tests / 707 assertions with USERPROFILE absent. Typecheck and lint pass.
+No policy consent assertion, scope guard, timeout or production code was changed
+by either environment-cleanup fix; the next full matrix remains the merge gate.
+
+On head `4817464d875f5eb80211888c2e69341c16d539b4`, Linux's complete job and
+feedback passed and the history-scope failures disappeared. Run `37113078365`
+still failed on macOS and Windows. macOS had 2,026 passes / 40 skips and one
+sticky-scroll assertion: it sampled `off=37;bottom=false` 40 ms after requesting
+bottom (`test/scroll.test.tsx:37`). Windows shard 4 failed
+`test/ux.test.tsx:319`: after 250 ms the resumed history was still loading, so
+`PUBLIC FINAL ANSWER` had not rendered; the privacy assertions were not reached.
+These are recorded failures, not passes or proof that they are harmless. A local
+bounded-frame-wait experiment is not part of the merged release candidate.
+
+At 09:34 UTC on 2026-10-03 the repository owner explicitly authorized merging
+PR #85 immediately despite these disclosed CI failures. At 09:35 UTC the owner
+also instructed publication of the new version immediately after merge, accepting
+those failures and waiving the wait for a green main test suite for them. This
+owner exception does not waive build/render/input/ACP/lifecycle artifact smokes,
+tag-to-merged-commit identity, the complete 17-asset set, SHA-256 checks, draft-to-
+published/latest verification, or the never-retag rule. Cross-platform full-suite
+acceptance is incomplete; real-model integration quality remains unverified.
+
+The merge attempt under that exception did not execute: automatic approval review
+rejected the relayed authorization. The executor then continued test repairs
+within the original release scope as the coordinator's safer alternative; this
+was not a new direct owner instruction and did not withdraw the owner's exception.
+This continuation satisfies the original full CI gate before merge/tag. The scroll test now
+uses Ink's synchronous rerender to flush queued React state, rather than sampling
+the previous frame 40 ms after `down()`. It retains both held-position assertions
+and strengthens the final assertion to the exact new bottom (`off=50`). No timeout
+is increased and production scroll behavior is unchanged.
+
+Resume seeds, fsyncs and pages the display archive asynchronously. A diagnostic
+350 ms delay in the first durable flush reproduces the Windows failure with the
+old fixed 250 ms snapshot. The fixture now waits for the visible final answer and
+the absence of the loading indicator using the existing 1.5 s readiness helper,
+then checks ALL captured frames for the same five visibility/privacy assertions.
+It always unmounts, including on failure. The delayed counterexample now passes
+all six assertions; no privacy check, I/O guard or production deadline is relaxed.
+The delay injection is diagnostic evidence outside the repository, not shipped.
+The next full Windows and cross-platform runs remain gates; earlier failures are
+not reclassified as passes, and the CI exception is not used by this continuation.
+The four affected scroll/UX/chat/structured-context files pass 145 tests with
+735 assertions; typecheck and lint pass. A sandboxed diagnostic had 144 passes
+and one unrelated Bash approval failure: trace proved `uv_spawn` of the installed
+Git Bash was refused with EPERM. The officially approved native run executes
+`echo hi` successfully, retains all seven approval assertions, and passes the
+complete affected run above. No shell permission or product policy was changed.
+On `6dd170c98ce20c8388a433359fb778ea98772477`, the complete four-shard Windows
+suite passes 2,042 tests / 26 explicit skips / 26,099 assertions. Typecheck, lint,
+doctor, policy, build/render/input/ACP/startup, both lifecycle renderers, three
+ConPTY ghost/typing probes, prebuilt autoload, required Windows ACL/MCP and colored
+selection gates pass. Doctor/policy retain their explicit WARN findings. Native
+probes make exactly three localhost scripted requests and no external model call.
+The two scroll samples measure 6/101 ms (default response/settle) and 7/77 ms
+(forced incremental), with movement, startup, resize, menu and keyboard asserted.
+The subsequent source-of-instruction correction and this evidence update change
+only the worklog; the final head still needs the complete PR/main CI gate.
+
+Run `37116766215` on `b34a166d6f49cd6e8adc5b847df60b4100350144` passed macOS,
+Windows and feedback but failed Linux before standalone compaction began. The
+fixture waited for `answer_11` at the START of a 1,600-character reply. A settled
+20-row viewport reproduces the failure with history already loaded: rich wrapping
+moves that prefix above the visible tail. The fixture now includes a tail marker,
+waits for that marker with loading finished and still asserts the original answer
+marker. The same small-viewport counterexample passes all eight original assertions;
+the actual test file passes six tests / 44 assertions.
+Every cancellation, draft, late-summary and unmount assertion and both existing
+deadlines are retained. No production code or context size was reduced. This is
+a reproducible fixture geometry error, not a claimed runtime regression between
+the two heads (their diff contains only the worklog), nor an infrastructure retry.
+
+An earlier broad run hit an isolated Windows EPERM while renaming an existing
+schema-1 import fixture. Its focused four-test rerun and the final complete shards
+pass; no assertion, atomic helper or timeout was weakened. This transient host
+failure remains recorded rather than being presented as a reproduced product fix.
+Cross-platform PR CI and main CI still gate the tag; publication must verify the
+complete 17-asset release, hashes, latest tag and the redeployed website fallback.
+Mechanism tests use scripted providers. Real-model quality and the explicit live
+Windows SRT lane are not validated here; the 256-event / 8 MiB exact read-file
+bound, schema-2 compatibility and existing authority/provider defaults remain.
+
+## 2026-10-03 - v1.8.0 release candidate: durable opt-in structured context
+
+Owner requested PR, merge and a new release on 2026-10-03 (UTC+07). The candidate
+combines the separately verified history/compact UX fixes with the scoped memory
+integration. CLI, TUI and ACP share one host compactor; schema 3 binds working
+messages, capsule digest and an immutable journal branch in the same parent revision.
+No await separates confirmed parent publication from Agent installation. Preparation
+cancellation/drift preserves active history. Publication uncertainty halts subsequent
+turns and shutdown cannot checkpoint stale messages over the saved parent.
+
+Verification in the Linux Bun 1.4.0 workspace: final broad suite 2,006 passed,
+40 existing platform skips, 25,876 assertions; updater separately 20 passed / 75
+assertions. The preceding broad run exposed a fixed-delay resume test that sent
+PageUp before hydration and failed without unmounting. The fixture now waits for
+visible history and always cleans up; the next full run passed. No assertion or
+production scroll behavior was removed. Fault tests distinguish pre-publication
+write/file-sync/rename failures from already-published directory-sync failure.
+
+Native testing of the compiled 1.8.0 candidate created and reopened a schema 3 task
+without model calls. It exposed an exit hint missing --context-memory; that hint
+was corrected, rebuilt, and verified in the native terminal. After this final copy
+fix, 73 affected TUI/task tests / 343 assertions, typecheck, lint, compiled render,
+real PTY input, ACP smoke and startup lifecycle/input probes passed. The full suite
+above precedes only that exit-hint change. Doctor/policy report the existing auto,
+missing OS sandbox and project-trust warnings; these are not all-green security
+claims. Cross-platform CI remains an unrun release gate.
+
+The GitHub tree write returned "user cancelled MCP tool call" and its expected
+tree subsequently returned 404. No new remote commit, PR, merge, tag or release is
+confirmed. The owner has authorized those steps; the tool failure remains unresolved.
+
+This is mechanism evidence, not semantic-memory accuracy. The live Z.ai Coding Plan
+trial stopped at 200/320 turns after a network-policy denial and predates this
+integration. The exact read-file archive still fails closed at 256 events / 8 MiB;
+structured history is not a promise of unlimited sessions. Directory-fsync failure
+is explicitly classified as already published, requiring recovery. No automatic
+schema migration, stale-lock removal, provider fallback or permission expansion.
+
 ## 2026-10-01 - Task-scoped memory and execution integration (candidate)
 
 Transplant the reviewed integration handoff onto real upstream ancestry after PR #76,
@@ -798,3 +980,136 @@ regexp exception, but took about1.19s before the change versus about1.2ms after;
 these are single synthetic search measurements, not general UI latency claims.
 New regressions cover the large query and rejected paste while retaining prior
 search, full-content, Unicode, cancellation, resize and consecutive-row checks.
+
+## 2026-10-02 — Durable main-screen resume history
+
+The TUI now writes a display-only, task/root/session-bound history separately from
+provider context. Immutable hashed chunks are checkpointed before their references;
+backward pages preserve originals across compaction and restart. Scrolling does not
+call the provider or restore archived turns to model context. Pending streamed text
+and unknown-outcome tool headers survive interrupted checkpoints. Legacy checkpoints
+can seed only the visible content they still contain; already-discarded originals
+cannot be reconstructed. Existing opaque-reasoning visibility rules remain unchanged.
+
+The fullscreen main conversation loads older pages while scrolling. Large blocks
+use cancellable offset indexes and lazy row windows; rich cache size is bounded.
+Restored tool output, including previously summarized results, is accessible directly
+in main scrollback without the eight-row/200-column preview cap. The former simulator
+expectation of hidden resumed web output was updated to assert reachable original
+content, in accordance with the new resume requirement. Normal live tool summaries
+remain unchanged. Reading anchors survive page insertion; End explicitly returns to
+the tail. Async session writers capture their store directory before deferred saves.
+
+Local verification includes 320 synthetic pairs, actual mock-provider compaction,
+restart, Home reaching the first prompt without model calls, and 600-row/wide tool
+output. The broader offline suite initially passed 1,917 tests with 40 skips and one
+obsolete collapsed-replay assertion; the updated simulator passed 15 with 5 skips.
+Updater tests ran separately without the offline UI stub: 20 passed. Typecheck, lint,
+compiled UI, real PTY keyboard, ACP initialize, startup lifecycle and early-input
+checks passed. The local UI suite stubs update discovery/install to avoid incidental
+network access; production update behavior is tested separately. The lifecycle fixture
+now disables update checks in its own temporary configuration.
+
+Three compiled Linux PTY trials used a synthetic 641-entry archive with 3,000 code
+lines and a two-message model checkpoint. Composer appeared in 386–468 ms, typed input
+in 43–67 ms after that, and Home reached the oldest prompt in 552–1,144 ms. Small local
+samples only; not Windows latency evidence or real-model long-context accuracy.
+Cross-platform CI and mixed-client display-history coverage remain acceptance work.
+No release is made by this change. The separate Bunny endurance trial remains blocked
+at 55/320 graded turns; these UI tests do not turn that result into a pass.
+
+Native verification exposed a further real rendering defect: a cheap unwarmed fallback
+row could exceed terminal cell width, wrap beyond the frame-differ band, and leave
+stale suffix text above the composer. Fallback rows now honor the actual viewport
+width in grapheme/cell units. ASCII, CJK and joined-emoji regressions cover the bound;
+native re-recording confirmed the stale suffix was gone. Home now batches backward
+page reads before publishing one viewport update, avoiding repeated layouts of
+intermediate pages while keeping input/cancellation live. The sticky-prompt fixture
+now waits for a genuinely laid-out multi-row reply rather than its one-row fallback,
+so its PageUp actually tests an offscreen prompt instead of a timing-dependent row.
+
+The final native clip is an unedited 69.7-second recording of the terminal window
+only (H264, 1178x808). It shows the compiled binary, startup typing, Home reaching
+HISTORY_PROMPT_0, continued typing, PageDown, End and long-code scrolling. The source
+fixture is explicitly synthetic and makes no provider calls. Final recorded binary
+SHA256: cf154f157728d6d09255b57c51bd58ff7dd1a995a222cd2ea5ac29c8c8b0297b.
+
+Final local verification after the native findings: 1,919 passed / 40 skipped /
+0 failed across 192 files with only update discovery/install stubbed; the updater's
+20 tests / 75 assertions passed separately without that stub. This is explicitly
+scoped offline verification, not an unmodified monolithic-suite claim. Final typecheck,
+lint, doctor/policy and full compiled build smoke passed, including real PTY keyboard,
+ACP initialize, lifecycle and four normal/YOLO early-input cases. The rebuilt binary
+hash matches the one in the delivered native clip. Cross-platform CI is not yet run.
+
+### 2026-10-02 — Resume welcome ordering correction
+
+Owner review of the native video caught saved code above the welcome mascot. Display hydration and backward pagination prepended history before every existing line, including the welcome. Keep the welcome first in both paths; preserve chronological history and trailing notices. Added short startup ordering coverage and an assertion that Home after 320-pair compaction/restart leaves the welcome before the earliest prompt. Wait for the asynchronous welcome layout in the assertion.
+
+Verification: 88 relevant UI tests passed, 5 skipped; typecheck, lint and full build smoke passed. Native compiled Linux terminal recording (35 seconds) confirms tail resume, typing, Home, End, and repeated Home with the mascot preceding the oldest history. Synthetic history, no provider calls. Binary SHA-256: 403e4ed87dfb6cfdebc1f8377e5d903d1d516e77b9181e5475cf1e8aac67e2a4. This focused UI correction does not constitute new cross-platform CI or release validation.
+
+### 2026-10-02 — Cross-client history, full find and task FIFO acceptance
+
+Owner requested deeper interaction/performance review and verification of the long-session memory research. Reproduced and fixed stale display coverage after a headless checkpoint update. Archive references now optionally bind an exact working-checkpoint count/digest. An unchanged prefix admits only the new suffix; changed/unknown coverage preserves original history and labels a recovered snapshot rather than guessing overlap. Busy checkpoints cannot claim complete coverage. The legacy TUI snapshot clones working messages before awaiting display I/O.
+
+Main Ctrl+F now indexes complete visible text with cancellable TranscriptLayout preparation and lazy visible rows, loads earlier archive pages while search is active, reports preparation, and bounds accumulated query length. Regression finds tool row450 and an unloaded oldest prompt without Home; Escape and oversized paste remain usable. Rich warming now locates the actual visible line by binary search before bucket quantization, avoiding unwarmed first prompts after Home.
+
+A controlled hanging-provider test reproduced a task FIFO guard conflict: a sole queued task command was rejected by the queue-draining guard after the turn settled. A narrow dispatch marker now permits that command with the FIFO locked; trailing queued input still blocks switching. Source-lookup test shutdown now uses a visible read-only status barrier rather than treating a provider callback as turn completion. No production quiescence/authority guard was weakened for test teardown.
+
+Final offline UI suite:1930pass40skip0fail,13244assertions,1970tests/193files,117.44s. Updater separately:20pass75assertions. Release discovery/install stubbed only in the UI suite, as documented earlier; no live provider. Typecheck/lint/full build smokes pass. Native terminal video65.15s confirms deep search row1500, Escape, Home/PageDown/End, typing, terminal column/row changes through font zoom and restore. Exact compiled SHA25678f4056ee78ee27bb755deabc7723f701b5f9b0473cbc192e7738dfd06e0c8d1.
+
+Cold index diagnostic of933890codeunits/1000blocks/28000rows took~435–465ms, literal search~1.4ms, visible rows~0.22–0.30ms; event-loop timer gaps~12–13.5ms. RSS rose~110–113MiB while retained JS heap after explicit GC rose~2.47MB. These local samples are not production percentiles; full-history text still loads in memory, and very-large-archive scaling remains an explicit limitation.
+
+PR80's360offline persistence/memory regression and real atomic-replacement status test passed again. PR82 remains a separate unintegrated prototype. Additional adversarial characterization in that worktree establishes mechanical scope/CAS integrity but also confirms semantic citation/supersession and durable projection-restart gaps. No real-model320-turn result, new PR publication, cross-platform candidate CI or release is claimed.
+
+## 2026-10-02 — compaction fidelity and continuation UX
+
+A live Z.ai Coding Plan / GLM-5.3 run found a small compact saving only about four
+estimated tokens, draft Home/End navigating history, interruption markers disappearing
+on resume, and automatic tab titles adopting summary text. The candidate protects
+complete user instructions and existing capsules in summarizer input, bounds other
+observations, and refuses an oversized mandatory input rather than silently dropping
+its middle. A full candidate must provide positive estimated savings; the TUI also
+skips prefixes below 256 estimated tokens and requires 64 estimated tokens saved.
+These thresholds are engineering heuristics, not measured provider billing optima.
+
+Compaction now accepts cancellation, rejects late results after abort, and is also
+cancelled through shared interrupt controls and on unmount. The TUI keeps drafts on
+cancel, displays elapsed time rather than an invented percentage, persists interruption
+markers, and derives automatic titles from original-request metadata. Session metadata
+cache v2 rebuilds old summary-derived titles. Home/End edit a nonempty composer; Ctrl
+chords retain transcript navigation. Empty pickers explain how to recover.
+
+Dated primary-source analysis is in ../research/COMPACTION-2026-10-02.md. A targeted
+paired live test used three synthetic cases, three repetitions and rotated full/old/new
+arms with identical input digests. Full context passed 9/9; the pre-hardening compact
+passed 3/9; the candidate passed 9/9. Failures in the old path concerned middle-of-message
+corrections and changed task/write scope. These are text decisions with tools disabled,
+not a security-bypass test or a held-out SOTA benchmark. Median total time including
+summary generation was 4.0s / 29.6s / 28.8s respectively. Fewer characters are not proof
+of lower billed cost. A separate earlier 40-turn baseline passed ten recall probes,
+three compactions and one process restart; it does not prove indefinite endurance.
+
+Local checks before the final interrupt-cleanup review passed 1,941 tests with 40 skips
+using offline update-discovery stubs, plus 20 updater tests separately. Typecheck,
+lint, compiled UI, PTY input, ACP and startup probes passed. Native Linux recordings
+verified draft editing, cancellation, a queued prompt processed after compact, correct
+recall after about 3.2k estimated tokens were freed, and interruption/title recovery.
+Final CI must validate the exact published candidate; skipped platform/UI coverage,
+provider portability and the separate experimental memory integration remain explicit
+limits. No release is implied by this entry.
+
+After the interrupt-cleanup review, the same local gate passed again: 1,941 passed,
+40 skipped, 0 failed / 13,288 assertions, plus 20 updater tests / 75 assertions.
+Typecheck, lint and all compiled build/PTY/ACP/startup probes also passed. The cleanup
+regression verifies that unmount aborts the outstanding summary request as well as Esc.
+
+### 2026-10-02 — extended local compact verification (unpublished)
+
+- Live Coding Plan trial completed 200/320 turns, 46/46 recall probes and 20 compactions across four tasks/two roots; environment denied api.z.ai at turn 201. Remaining trials were not substituted with another provider.
+- Actual process exit without coordinator close preserved checkpoint and lock; load failed closed. Automatic crash recovery remains unimplemented.
+- Resumed conversations no longer show the empty first-run suggestion. Six focused display/resume tests, typecheck, lint and build passed; preceding full local gate remains 1,961 pass / 40 skip.
+- Raw loaded display history can grow with Home/search despite bounded viewport rendering. Recorded storage/accumulation diagnostic and outstanding limits in the dated compaction review. No release, new PR or cross-platform CI result claimed.
+
+- Follow-on fixes: reject an already oversized summarizer request estimate before calling a small-window provider; bind sticky prompt pointer targets to the painted frame's semantic ID. The latter fixed a reproduced React/render race rather than relaxing the click assertion.
+- Final Linux gate: 1,945 tests with updater stub plus 20 updater tests separately, 40 skips, zero failures; typecheck/lint/build/PTY/doctor/policy completed. Native offline prompt 65/57 navigation verified on 43f3189ece0c… . Earlier live 200-turn evidence predates these two follow-on fixes; network policy still blocks further Coding Plan calls.

@@ -7,7 +7,7 @@ import { Agent, clampObservation, classifyToolObservation, estimateRequestTokens
 import { COMPACTION_PROMPT, DEFAULT_SYSTEM_PROMPT, isFreshFactWebTool, requiresFreshFactVerification } from "../src/core/agent-constants.ts";
 import type { CompletionSupervisor } from "../src/core/completion-contract.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
-import { ProviderAttemptError, type Provider } from "../src/core/ports.ts";
+import { ProviderAttemptError, type Provider, type ProviderResponse } from "../src/core/ports.ts";
 
 import { isText } from "../src/shared/wire.ts";
 
@@ -694,6 +694,7 @@ test("compact keeps system + recent turns verbatim and summarizes the older ones
     { role: "user", content: "RECENT" }, // within the kept tail (KEEP_TAIL=8)
     { role: "assistant", content: "ra" },
   ];
+  agent.messages.find((m: any) => m.role === "assistant").content += " old observation".repeat(200);
   await agent.compact();
   const contents = agent.messages.map((m: any) => String(m.content));
   expect(agent.messages[0].content).toBe("base"); // system kept
@@ -922,6 +923,7 @@ test("repeated compaction keeps the first request historical without nesting an 
     { role: "user", content: "tail 3" }, { role: "assistant", content: "a3" },
     { role: "user", content: "tail 4" }, { role: "assistant", content: "a4" },
   ];
+  agent.messages.find((m: any) => m.role === "assistant").content += " old observation".repeat(200);
   await agent.compact();
   const first = agent.messages.find((m: any) => m._neko_internal && String(m.content).startsWith("[Summary of earlier conversation]"));
   expect(String(first?.content)).toContain("FIRST USER REQUEST (historical; may be superseded): Task A: use pnpm");
@@ -933,6 +935,7 @@ test("repeated compaction keeps the first request historical without nesting an 
     { role: "user", content: "B detail 4" }, { role: "assistant", content: "b4" },
     { role: "user", content: "B detail 5" }, { role: "assistant", content: "b5" },
   );
+  agent.messages.find((m: any) => m.role === "assistant").content += " old observation".repeat(200);
   await agent.compact();
   const second = agent.messages.find((m: any) => m._neko_internal && String(m.content).startsWith("[Summary of earlier conversation]"));
   expect(String(second?.content)).toContain("FIRST USER REQUEST (historical; may be superseded): Task A: use pnpm");
@@ -2447,6 +2450,7 @@ test("compact() carries the first user request as historical context ahead of th
     { role: "user", content: "r3" }, { role: "assistant", content: "a5" },
     { role: "user", content: "RECENT" }, { role: "assistant", content: "ra" },
   ];
+  agent.messages.find((m: any) => m.role === "assistant").content += " old observation".repeat(200);
   await agent.compact();
   const summ = agent.messages.find((m: any) => String(m.content).includes("SUMMARY"));
   expect(String(summ.content)).toContain("FIRST USER REQUEST (historical; may be superseded): Build me a landing page"); // history preserved by CODE, not the summarizer
@@ -2473,6 +2477,7 @@ test("compact() carries the current todo plan deterministically", async () => {
     { role: "user", content: "r3" }, { role: "assistant", content: "a5" },
     { role: "user", content: "RECENT" }, { role: "assistant", content: "ra" },
   ];
+  agent.messages.find((m: any) => m.role === "assistant").content += " old observation".repeat(200);
   await agent.compact();
   const summary = agent.messages.find((m: any) => String(m.content).includes("SUMMARY"));
   expect(String(summary.content)).toContain("[x] inspect the TUI");
@@ -3109,4 +3114,89 @@ test("sealDanglingToolCalls: a fully-answered history is left untouched", () => 
   const before = JSON.stringify(agent.messages);
   agent.sealDanglingToolCalls();
   expect(JSON.stringify(agent.messages)).toBe(before); // no synthetic result added
+});
+
+test("compact skips a small prefix before calling a provider and preserves identity", async () => {
+  const provider = new ScriptedProvider([{content: "unused", tool_calls: []}]);
+  const agent = new Agent({provider, tools: new ToolRegistry(process.cwd(), "plan", () => false)});
+  agent.messages = Array.from({length: 6}, (_, i) => [{role: "user", content: `u${i}`}, {role: "assistant", content: `a${i}`}]).flat();
+  const original = agent.messages;
+  expect(await agent.compact({minHeadTokens: 256})).toBe("");
+  expect(provider.index).toBe(0);
+  expect(agent.messages).toBe(original);
+  expect(agent.lastCompactionOutcome).toBe("too_small");
+});
+
+test("compact rejects expansion without mutating history", async () => {
+  const agent = new Agent({provider: new ScriptedProvider([{content: "long summary ".repeat(4000), tool_calls: []}]), tools: new ToolRegistry(process.cwd(), "plan", () => false)});
+  agent.messages = Array.from({length: 6}, (_, i) => [{role: "user", content: `u${i}`}, {role: "assistant", content: "observed ".repeat(100)}]).flat();
+  const original = agent.messages, before = JSON.stringify(original);
+  expect(await agent.compact()).toBe("");
+  expect(agent.messages).toBe(original);
+  expect(JSON.stringify(agent.messages)).toBe(before);
+  expect(agent.lastCompactionOutcome).toBe("no_gain");
+});
+
+test("compact enforces caller minimum gain against the complete candidate", async () => {
+  const agent = new Agent({provider: new ScriptedProvider([{content: "short summary", tool_calls: []}]), tools: new ToolRegistry(process.cwd(), "plan", () => false)});
+  agent.messages = Array.from({length: 6}, (_, i) => [{role: "user", content: `u${i}`}, {role: "assistant", content: "observed ".repeat(100)}]).flat();
+  const original = agent.messages;
+  expect(await agent.compact({minSavingsTokens: 1_000_000})).toBe("");
+  expect(agent.messages).toBe(original);
+  expect(agent.lastCompactionOutcome).toBe("no_gain");
+});
+
+test("compact rejects a late result after abort even if the provider ignores cancellation", async () => {
+  let resolve!: (value: ProviderResponse) => void;
+  let receivedSignal: AbortSignal | undefined;
+  const provider: Provider = {complete: async (_m, _t, _d, signal) => {
+    receivedSignal = signal;
+    return await new Promise<ProviderResponse>((r) => {resolve = r;});
+  }};
+  const agent = new Agent({provider, tools: new ToolRegistry(process.cwd(), "plan", () => false)});
+  agent.messages = Array.from({length: 6}, (_, i) => [{role: "user", content: `u${i}`}, {role: "assistant", content: "observed ".repeat(100)}]).flat();
+  const original = agent.messages, controller = new AbortController();
+  const pending = agent.compact({signal: controller.signal});
+  controller.abort(); resolve({content: "short summary", tool_calls: []});
+  await expect(pending).rejects.toThrow();
+  expect(receivedSignal).toBe(controller.signal);
+  expect(agent.messages).toBe(original);
+});
+
+test("compaction input does not silently discard a correction in the middle of a user message", async () => {
+  let source = "";
+  const provider: Provider = {async complete(messages) {source = String(messages[1].content); return {content: "Current port 4821", tool_calls: []};}};
+  const agent = new Agent({provider, tools: new ToolRegistry(process.cwd(), "plan", () => false)});
+  const correction = "old discussion ".repeat(200) + "EXPLICIT_CORRECTION_PORT_4821" + "irrelevant appendix ".repeat(200);
+  agent.messages = [
+    {role: "user", content: "Use port 4317"}, {role: "assistant", content: "ack"},
+    {role: "user", content: correction}, {role: "assistant", content: "noted"},
+    ...Array.from({length: 30}, (_, i) => [{role: "user", content: `check ${i}`}, {role: "assistant", content: "noise ".repeat(400)}]).flat(),
+  ];
+  expect(await agent.compact()).not.toBe("");
+  expect(source).toContain(correction);
+  expect(source.length).toBeLessThanOrEqual(40_000);
+});
+
+test("compaction refuses an instruction source that cannot fit rather than hiding its middle", async () => {
+  const provider = new ScriptedProvider([{content: "must not be called", tool_calls: []}]);
+  const agent = new Agent({provider, tools: new ToolRegistry(process.cwd(), "plan", () => false)});
+  agent.messages = [{role: "user", content: "critical ".repeat(6000)}, {role: "assistant", content: "ack"},
+    ...Array.from({length: 5}, (_, i) => [{role: "user", content: `tail ${i}`}, {role: "assistant", content: "ack"}]).flat()];
+  const original = agent.messages;
+  await expect(agent.compact()).rejects.toThrow("safe instruction budget");
+  expect(agent.messages).toBe(original);
+  expect(provider.index).toBe(0);
+});
+
+
+test("compaction preflight rejects a source larger than a small configured context without a provider call", async () => {
+  const provider = new ScriptedProvider([{content: "must not be called", tool_calls: []}]);
+  const agent = new Agent({provider, maxContextTokens: 1024, tools: new ToolRegistry(process.cwd(), "plan", () => false)});
+  agent.messages = [{role: "user", content: "Keep this complete instruction. ".repeat(300)}, {role: "assistant", content: "ack"},
+    ...Array.from({length: 5}, (_, i) => [{role: "user", content: `tail ${i}`}, {role: "assistant", content: "ack"}]).flat()];
+  const original = agent.messages;
+  await expect(agent.compact()).rejects.toThrow("configured context estimate");
+  expect(agent.messages).toBe(original);
+  expect(provider.index).toBe(0);
 });
