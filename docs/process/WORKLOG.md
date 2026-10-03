@@ -59,6 +59,17 @@ The website's baked Windows ZIP fallback is refreshed from 40 to 42 MB: the loca
 release build's Optimal ZIP measures 42,304,008 bytes. Public asset sizes are checked
 again after publication; fallback deployment uses the existing authenticated account.
 
+The follow-up matrix still rejected history scopes: Linux had 16 failures and
+macOS 24 on head `76ff7912cdb3600b7d9c43123e0abf537eb0611e`, while Windows and
+feedback passed. A full missing-profile diagnostic trace identified a sixth fixture,
+`policy-config-write`, restoring both variables from the old USERPROFILE alone.
+It now preserves HOME and USERPROFILE independently and deletes an originally
+absent value. The policy-then-streaming-scroll counterexample fails before the
+fix and passes 6/6 afterward; all four affected policy/scroll/chat/UX files pass
+141 tests / 707 assertions with USERPROFILE absent. Typecheck and lint pass.
+No policy consent assertion, scope guard, timeout or production code was changed
+by either environment-cleanup fix; the next full matrix remains the merge gate.
+
 An earlier broad run hit an isolated Windows EPERM while renaming an existing
 schema-1 import fixture. Its focused four-test rerun and the final complete shards
 pass; no assertion, atomic helper or timeout was weakened. This transient host
