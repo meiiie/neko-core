@@ -70,6 +70,25 @@ fix and passes 6/6 afterward; all four affected policy/scroll/chat/UX files pass
 No policy consent assertion, scope guard, timeout or production code was changed
 by either environment-cleanup fix; the next full matrix remains the merge gate.
 
+On head `4817464d875f5eb80211888c2e69341c16d539b4`, Linux's complete job and
+feedback passed and the history-scope failures disappeared. Run `37113078365`
+still failed on macOS and Windows. macOS had 2,026 passes / 40 skips and one
+sticky-scroll assertion: it sampled `off=37;bottom=false` 40 ms after requesting
+bottom (`test/scroll.test.tsx:37`). Windows shard 4 failed
+`test/ux.test.tsx:319`: after 250 ms the resumed history was still loading, so
+`PUBLIC FINAL ANSWER` had not rendered; the privacy assertions were not reached.
+These are recorded failures, not passes or proof that they are harmless. A local
+bounded-frame-wait experiment is not part of the merged release candidate.
+
+At 09:34 UTC on 2026-10-03 the repository owner explicitly authorized merging
+PR #85 immediately despite these disclosed CI failures. At 09:35 UTC the owner
+also instructed publication of the new version immediately after merge, accepting
+those failures and waiving the wait for a green main test suite for them. This
+owner exception does not waive build/render/input/ACP/lifecycle artifact smokes,
+tag-to-merged-commit identity, the complete 17-asset set, SHA-256 checks, draft-to-
+published/latest verification, or the never-retag rule. Cross-platform full-suite
+acceptance is incomplete; real-model integration quality remains unverified.
+
 An earlier broad run hit an isolated Windows EPERM while renaming an existing
 schema-1 import fixture. Its focused four-test rerun and the final complete shards
 pass; no assertion, atomic helper or timeout was weakened. This transient host
