@@ -160,6 +160,7 @@ export function SelectList(props: {
         <Text dimColor>  {query ? `search: ${query}` : "search… (type to filter)"}</Text>
       ) : null}
       <Text dimColor>{rule}</Text>
+      {!filtered.length ? <Text color="yellow">{query ? "No matching items. Edit the search or press Esc to cancel." : "No items available. Press Esc to cancel."}</Text> : null}
       {filtered.slice(start, start + N).map((it, k) => {
         const i = start + k;
         return (

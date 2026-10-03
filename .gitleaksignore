@@ -3,3 +3,5 @@
 fbcb820abdb3308be46f54d535492495dbb6b0d1:docs/process/TESTING.md:generic-api-key:81
 bbca71707dfd20f650bf257628a3a6f6a4e7a04a:test/oracle.test.ts:generic-api-key:78
 bbca71707dfd20f650bf257628a3a6f6a4e7a04a:test/oracle.test.ts:generic-api-key:111
+# Chrome extension ID public SPKI key; parsed as an RSA public key, not a credential.
+25044e1aa3ea5ff4285cd3df7c0cd3dd27b43ac5:browser-extension/manifest.json:generic-api-key:8

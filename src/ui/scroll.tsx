@@ -50,6 +50,17 @@ export function projectLineRows<T>(
   return { rows, spans };
 }
 
+/** Locate the actual visible line with a binary search; only the returned bucket is quantized. */
+export function visibleLineBucket(spans: LineRowSpan[], start: number, bucketSize = 40): number {
+  let low = 0, high = spans.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (spans[mid].end <= start) low = mid + 1;
+    else high = mid;
+  }
+  return Math.floor(Math.min(low, Math.max(0, spans.length - 1)) / bucketSize);
+}
+
 /** Nearest completed user prompt above the visible window. If the prompt itself is still visible at the
  * top, return null so the fixed header does not duplicate it. `reservedRows` models the header's own
  * height before deciding whether it can mount; dist=0 is live-tail mode: no sticky row. */
@@ -262,7 +273,7 @@ function highlightRow(r: Row, q: string, isCurrent: boolean): React.ReactNode {
  * terminal row (wrap="truncate-end"), so the layout CANNOT break or wrap sideways - this is what makes
  * scrolled-back history O(viewport) and misalignment-proof. No scrollbar (the jump-to-bottom pill is the
  * position affordance). Optionally highlights `highlight` matches and marks the row at `currentRow`. */
-export function ScrollRegion({ rows, offset, height, width, highlight = "", currentRow }: { rows: Row[]; offset: number; height: number; width: number; highlight?: string; currentRow?: number }): React.ReactNode {
+export function ScrollRegion({ rows, offset, height, width, highlight = "", currentRow }: { rows: Pick<Row[], "slice">; offset: number; height: number; width: number; highlight?: string; currentRow?: number }): React.ReactNode {
   const view = rows.slice(offset, offset + height);
   return (
     <Box flexDirection="column" width={width} height={height}>

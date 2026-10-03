@@ -54,3 +54,11 @@ test("large pasted literal queries cannot throw regexp compilation errors", () =
   const layout = new TranscriptLayout([{id: 1, kind: "assistant", text: "small text"}], 80);
   expect(layout.find("a".repeat(1_000_000))).toEqual([]);
 });
+
+test("bounded Unicode search preserves simple case-fold equivalence and source offsets", () => {
+  const layout = new TranscriptLayout([{id: 1, kind: "assistant", text: "İİ\nος\nſ\nı\nß"}], 80);
+  expect(layout.find("ΟΣ")).toEqual([1]);
+  expect(layout.find("S")).toEqual([2]);
+  expect(layout.find("i")).toEqual([]);
+  expect(layout.find("ss")).toEqual([]);
+});

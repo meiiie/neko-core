@@ -70,7 +70,7 @@ test("ACP task session/load looks up a historical read_file result after two com
             if (ordinaryCalls === 1) return { content: null, tool_calls: [{
               id: "read-a", name: "read_file", arguments: { path: "config.ts" },
             }] };
-            return { content: "Read completed", tool_calls: [] };
+            return { content: "Read completed" + " historical observation".repeat(100), tool_calls: [] };
           } },
           tools: registry, onEvent: options.onEvent, onCheckpoint: options.onCheckpoint,
           sourceArchiveCredential: () => runtimeConfig.apiKey,

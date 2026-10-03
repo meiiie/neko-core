@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { CARET_SENTINEL, detectShift, FrameDiffer, HIT_SENTINEL, parseInkPayload } from "../src/ui/frame-diff.ts";
+import { CARET_SENTINEL, detectShift, FrameDiffer, HIT_SENTINEL, parseInkPayload, promptAnchorMarker } from "../src/ui/frame-diff.ts";
 import { hitIndexAt, setHitTargets } from "../src/ui/hit-targets.ts";
 
 // The hardware-scroll MECHANISM stays exercised here even though its default is platform-gated
@@ -484,4 +484,45 @@ test("selection + links: screenText strips OSC 8 (copy yields the visible url), 
   expect(inside).not.toContain("\x1b]8;;https"); // no link OPEN inside/after the selection block on this row
   // Column math skipped the zero-width OSC: the selected run starts at the same screen text ("em " + url head).
   expect(d.screenText(1, 1)[0].slice(2, 9)).toBe("xem htt");
+});
+
+
+test("sticky prompt target follows accepted frame metadata even when visible labels are identical", () => {
+  const d = new FrameDiffer();
+  d.setBand({top: 2, height: 2});
+  const first = d.process(`${promptAnchorMarker(-38)}> same prompt${promptAnchorMarker(999)}\nbody\nfooter`)!;
+  expect(first).not.toContain(promptAnchorMarker(-38));
+  expect(d.promptLineId()).toBe(-38);
+  // Computing a newer marker does not retarget the already visible prompt.
+  const pending = `${promptAnchorMarker(-39)}> same prompt\nbody\nfooter`;
+  expect(d.promptLineId()).toBe(-38);
+  d.process(erase(3) + pending);
+  expect(d.promptLineId()).toBe(-39);
+  d.process(erase(3) + "plain header\nbody\nfooter");
+  expect(d.promptLineId()).toBeNull();
+});
+
+test("sticky metadata accepts safe signed IDs and is unavailable after reset or unparsed output", () => {
+  const d = new FrameDiffer();
+  d.setBand({top: 2, height: 2});
+  for (const id of [0, Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER]) {
+    d.process(`${promptAnchorMarker(id)}> prompt\nbody\nfooter`);
+    expect(d.promptLineId()).toBe(id);
+    d.reset();
+    expect(d.promptLineId()).toBeNull();
+  }
+  expect(() => promptAnchorMarker(Number.MAX_SAFE_INTEGER + 1)).toThrow();
+  d.process(`${promptAnchorMarker(7)}> prompt\nbody\nfooter`);
+  d.process("\x1b[2J\x1b[H");
+  expect(d.promptLineId()).toBeNull();
+});
+
+test("prompt metadata outside the sticky first row cannot become a click target", () => {
+  const d = new FrameDiffer();
+  d.setBand({top: 1, height: 2});
+  d.process(`${promptAnchorMarker(7)}> transcript\nbody\nfooter`);
+  expect(d.promptLineId()).toBeNull();
+  d.setBand({top: 2, height: 2});
+  d.process(erase(3) + `header\n${promptAnchorMarker(8)}body\nfooter`);
+  expect(d.promptLineId()).toBeNull();
 });

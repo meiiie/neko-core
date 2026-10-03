@@ -37,3 +37,15 @@ test("wheel input moves a picker even though wheel is also a pointer report", as
 
   picker.unmount();
 });
+
+test("an empty search explains recovery and Enter cannot select an absent item", async () => {
+  let selected = 0, cancelled = 0;
+  const c = render(<SelectList title="Model" items={[{id: "one", label: "GLM"}]} cols={80}
+    onSelect={() => {selected++;}} onCancel={() => {cancelled++;}} />);
+  try {
+    await tick(); c.stdin.write("zzz"); await tick();
+    expect(strip(c.lastFrame())).toContain("No matching items");
+    c.stdin.write("\r"); await tick(); expect(selected).toBe(0);
+    c.stdin.write("\x1b"); await tick(); expect(cancelled).toBe(1);
+  } finally {c.unmount();}
+});

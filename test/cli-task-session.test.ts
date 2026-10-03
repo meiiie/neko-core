@@ -101,7 +101,7 @@ async function syntheticCompactionArchive(taskId: string, root: string) {
   return events;
 }
 
-test("CLI task session isolates A→B→A across processes, excludes legacy v2, and rejects another root", async () => {
+test.each(["legacy", "structured"] as const)("CLI task session isolates A→B→A across processes, excludes legacy v2, and rejects another root (%s)", async (contextMode) => {
   const fixture = mkdtempSync(join(tmpdir(), "neko-cli-task-session-"));
   const home = join(fixture, "home");
   const rootA = join(fixture, "root-a");
@@ -135,6 +135,7 @@ test("CLI task session isolates A→B→A across processes, excludes legacy v2, 
     const configPath = join(configDir, "config.json");
     const fixtureConfig = {
       active_profile: "fixture",
+      context_mode: contextMode,
       profiles: {
         fixture: {
           provider: "openai_compat",

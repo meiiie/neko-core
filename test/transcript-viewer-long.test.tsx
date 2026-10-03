@@ -5,20 +5,27 @@ import { TranscriptViewer } from "../src/ui/transcript-viewer.tsx";
 import { buildReplayLines } from "../src/ui/chat-lines.ts";
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 100));
+const until = async (ready: () => boolean) => {
+  const deadline = Date.now() + 2000;
+  while (!ready() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+  return ready();
+};
 
 test("ordinary transcript exposes final tool rows beyond400 and search navigates deep matches", async () => {
   let id = 0;
   const lines = buildReplayLines([{role: "tool", content: Array.from({length: 600}, (_, i) => `TOOL_ROW_${i}`).join("\n")}], () => ++id);
   const c = render(<TranscriptViewer lines={lines} cols={80} rows={20} onClose={() => {}} />);
   try {
-    await tick();
+    expect(await until(() => Boolean(c.lastFrame()?.includes("TOOL_ROW_599")))).toBe(true);
     expect(c.lastFrame()).toContain("TOOL_ROW_599");
     c.stdin.write("TOOL_ROW_300");
-    await tick();
+    expect(await until(() => Boolean(c.lastFrame()?.includes("found 1") && c.lastFrame()?.includes("TOOL_ROW_300")))).toBe(true);
     expect(c.lastFrame()).toContain("found 1");
     expect(c.lastFrame()).toContain("TOOL_ROW_300");
     c.stdin.write("\x1b");
-    await tick();
+    // Clearing query and restoring its viewport occur in successive React commits.
+    // Wait for the visible destination, not a fixed delay under full-suite load.
+    expect(await until(() => Boolean(c.lastFrame()?.includes("TOOL_ROW_599")))).toBe(true);
     expect(c.lastFrame()).toContain("TOOL_ROW_599");
   } finally { c.unmount(); }
 });
@@ -72,5 +79,17 @@ test("oversized search paste is rejected visibly without changing the existing q
     expect(c.lastFrame()).toContain("Search too long");
     expect(c.lastFrame()).toContain("found 1");
     expect(c.lastFrame()).toContain("NEEDLE");
+  } finally { c.unmount(); }
+});
+
+test("fragmented search input checks the accumulated query before accepting each chunk", async () => {
+  const c = render(<TranscriptViewer lines={[{id: 1, kind: "assistant", text: "a".repeat(6000)}]} cols={100} rows={20} onClose={() => {}} />);
+  try {
+    await tick();
+    c.stdin.write("a".repeat(3000));
+    c.stdin.write("a".repeat(3000));
+    await tick();
+    expect(c.lastFrame()).toContain("Search too long");
+    expect(c.lastFrame()).toContain("found 2");
   } finally { c.unmount(); }
 });

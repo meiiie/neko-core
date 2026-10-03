@@ -442,3 +442,19 @@ test("mask preserves line breaks in a multiline value (not collapsed to one bull
   expect(frame).not.toContain("secret");
   c.unmount();
 });
+
+
+test("plain Home/End edit the current line, ctrl chords do not move the composer", async () => {
+  let out = "";
+  const c = render(<Harness cb={(v) => (out = v)} />);
+  try {
+    c.stdin.write("abc"); await tick();
+    c.stdin.write("\x1b[H"); await tick();
+    c.stdin.write("X"); await tick();
+    c.stdin.write("\x1b[F"); await tick();
+    c.stdin.write("Y"); await tick();
+    c.stdin.write("\x1b[1;5H"); await tick();
+    c.stdin.write("Z"); await tick(); c.stdin.write("\r"); await tick();
+    expect(out).toBe("XabcYZ");
+  } finally { c.unmount(); }
+});

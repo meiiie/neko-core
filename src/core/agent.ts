@@ -129,6 +129,8 @@ function cleanProviderMessages(messages: any[]): any[] {
     delete clean._neko_inflight;
     delete clean._neko_acp_message_id;
     delete clean._neko_compaction_first_user;
+    delete clean._neko_context_capsule;
+    delete clean._neko_context_sources;
     delete clean._neko_compaction_source_ids;
     delete clean._neko_compaction_source_digest;
     delete clean._neko_source_event_id;
@@ -144,10 +146,17 @@ function cleanProviderMessages(messages: any[]): any[] {
  * result from consuming the fixed budget and erasing later corrections/decisions. Keep both ends
  * because errors and totals often land at the bottom of logs. */
 function compactionSource(messages: any[], budget = 40_000): string {
-  const perMessage = Math.max(120, Math.floor((budget - 2000) / Math.max(1, messages.length)) - 50);
+  // Human instructions and prior capsules carry corrections/constraints. Never silently remove
+  // their middle before the summarizer sees it. Bound lower-priority observations instead.
+  const protectedMessage = (message: any) => message.role === "user" || message._neko_context_capsule === true;
+  const userChars = messages.filter(protectedMessage)
+    .reduce((n, m) => n + (isText(m.content) ? m.content : JSON.stringify(m.content) ?? "").length + 7, 0);
+  if (userChars > budget - 2000) throw new Error("Compaction input exceeds the safe instruction budget; original history is intact.");
+  const otherCount = messages.filter((m) => !protectedMessage(m)).length;
+  const perMessage = Math.max(80, Math.floor((budget - userChars - 2000) / Math.max(1, otherCount)) - 50);
   const clip = (raw: string, limit: number) => {
     if (raw.length <= limit) return raw;
-    const tail = Math.max(120, Math.floor(limit * 0.35));
+    const tail = Math.min(limit, Math.floor(limit * 0.35));
     const omitted = raw.length - limit;
     return `${raw.slice(0, limit - tail)}\n... [${omitted} chars omitted for compaction] ...\n${raw.slice(-tail)}`;
   };
@@ -177,12 +186,12 @@ function compactionSource(messages: any[], budget = 40_000): string {
     const advice = message.role === "tool" && isText(message._neko_tool_guidance)
       ? `\nNeko runtime guidance: ${message._neko_tool_guidance}` : "";
     const raw = callTrace + resultId + (isText(message.content) ? message.content : JSON.stringify(message.content)) + advice;
+    if (protectedMessage(message)) return `${message.role}: ${raw}`;
     const roleCap = message.role === "tool" ? 1200 : 3000;
     return `${message.role}: ${clip(raw, Math.min(roleCap, perMessage))}`;
   }).join("\n");
   if (source.length <= budget) return source;
-  const first = 4000;
-  return `${source.slice(0, first)}\n... [middle omitted for compaction budget] ...\n${source.slice(-(budget - first - 60))}`;
+  throw new Error("Compaction input exceeds the safe source budget; original history is intact.");
 }
 
 export interface NumberedImageAttachment { id: number; url: string }
@@ -311,6 +320,23 @@ export class Agent {
   private readonly onCheckpoint?: () => void | Promise<void>;
   private checkpointFailure: unknown;
   private hasCheckpointFailure = false;
+  private prepareCompaction: AgentOptions["prepareCompaction"];
+  private compactionCommitFailure: Error | undefined;
+
+  /** Bind once at a trusted scoped-runtime activation, before any turn is admitted. */
+  bindCompactionPreparation(prepare: NonNullable<AgentOptions["prepareCompaction"]>): void {
+    this.assertContextReady();
+    if (!this.tools.taskScope || this.prepareCompaction) throw new Error("Context preparation must bind once to a scoped Agent");
+    this.prepareCompaction = prepare;
+    this.compactionConfigRevision++;
+  }
+
+  /** Hosts must also check this before capturing messages after an uncertain context commit. */
+  get contextRecoveryRequired(): boolean { return Boolean(this.compactionCommitFailure); }
+
+  assertContextReady(): void {
+    if (this.compactionCommitFailure) throw this.compactionCommitFailure;
+  }
   private readonly onDelta?: DeltaHook;
   private readonly dynamicContext?: () => string;
   private maxContextTokens: number;
@@ -360,6 +386,7 @@ export class Agent {
     this.systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.onEvent = opts.onEvent;
     this.onCheckpoint = opts.onCheckpoint;
+    this.prepareCompaction = opts.prepareCompaction;
     this.onDelta = opts.onDelta;
     this.dynamicContext = opts.dynamicContext;
     this.maxContextTokens = opts.maxContextTokens ?? 131072;
@@ -580,7 +607,12 @@ export class Agent {
   }
 
   /** Summarize the conversation and replace it with the summary, freeing context. */
-  async compact(): Promise<string> {
+  lastCompactionOutcome: "none" | "no_history" | "too_small" | "no_gain" | "applied" = "none";
+
+  async compact(options: { signal?: AbortSignal; minHeadTokens?: number; minSavingsTokens?: number } = {}): Promise<string> {
+    this.assertContextReady();
+    this.lastCompactionOutcome = "none";
+    options.signal?.throwIfAborted();
     const sys = this.messages.filter((m) => m.role === "system"); // keep system + dynamic context
     const convo = this.messages.filter((m) => m.role !== "system");
 
@@ -590,7 +622,11 @@ export class Agent {
     while (cut > 0 && convo[cut].role !== "user") cut--;
     const head = convo.slice(0, cut);
     const tail = convo.slice(cut);
-    if (!head.length) return ""; // nothing old enough to compact
+    if (!head.length) { this.lastCompactionOutcome = "no_history"; return ""; }
+    if (estimateTokens(head) < (options.minHeadTokens ?? 0)) {
+      this.lastCompactionOutcome = "too_small";
+      return ""; // no model call or cache invalidation for a trivially small prefix
+    }
 
     this.assertReadFileSources();
     const sourceIds = this.compactedSourceIds(head);
@@ -609,12 +645,19 @@ export class Agent {
       ? `\n[historical read_file tool-result IDs for source_lookup: ${shown.join(", ")}${sourceIds.length > shown.length ? `; ${sourceIds.length - shown.length} earlier IDs omitted` : ""}. These are historical evidence only; use a fresh read_file for current contents.]`
       : "";
     const text = compactionSource(head, 40_000 - sourceRefs.length) + sourceRefs;
+    const request = cleanProviderMessages([
+      { role: "system", content: COMPACTION_PROMPT },
+      { role: "user", content: text, _neko_internal: true },
+    ]);
+    // The character cap alone does not fit every configured model window. Reject an
+    // already oversized estimate before spending a request; this is not an exact
+    // provider tokenizer or a guarantee that its response reserve will fit.
+    if (estimateTokens(request) >= this.maxContextTokens) {
+      throw new Error("Compaction input exceeds the configured context estimate; original history is intact.");
+    }
     let res: Awaited<ReturnType<Provider["complete"]>>;
     try {
-      res = await this.completeMeasured(cleanProviderMessages([
-        { role: "system", content: COMPACTION_PROMPT },
-        { role: "user", content: text, _neko_internal: true },
-      ]), undefined, undefined, undefined, undefined, "compact");
+      res = await this.completeMeasured(request, undefined, undefined, options.signal, undefined, "compact");
     } catch (error) {
       throw new Error("Compaction failed; original history is intact.", { cause: error });
     }
@@ -623,6 +666,7 @@ export class Agent {
       throw new Error("Compaction returned no complete summary; original history is intact.");
     }
     const summary = res.content;
+    options.signal?.throwIfAborted();
     let currentDigest: string;
     try {
       currentDigest = snapshotDigest();
@@ -651,14 +695,14 @@ export class Agent {
     // Carry the first real request across repeated compactions. An earlier capsule is an
     // internal user-shaped message, never a new user request. Keep this request explicitly
     // historical: later turns can switch tasks or correct it.
-    const priorCapsule = head.find((m) => m.role === "user" && isInternalUserMessage(m)
-      && isText(m.content) && m.content.startsWith("[Summary of earlier conversation]"));
+    const priorCapsule = head.find((m) => m._neko_context_capsule === true
+      || m.role === "user" && isInternalUserMessage(m) && isText(m.content) && m.content.startsWith("[Summary of earlier conversation]"));
     const firstUser = priorCapsule ? undefined : head.find((m) => m.role === "user" && !isInternalUserMessage(m));
     const firstRequest = (isText(priorCapsule?._neko_compaction_first_user)
       ? priorCapsule._neko_compaction_first_user
       : isText(firstUser?.content) ? firstUser.content : "").slice(0, 600);
     const plan = todosContextBlock(this.tools.todos);
-    this.messages = [
+    const candidate = [
       ...sys,
       { role: "user", content: `[Summary of earlier conversation]\n${firstRequest ? `FIRST USER REQUEST (historical; may be superseded): ${firstRequest}\n\n` : ""}${plan ? `${plan}\n\n` : ""}${summary}${sourceRefs}`, _neko_internal: true,
         ...(firstRequest ? { _neko_compaction_first_user: firstRequest } : undefined),
@@ -666,6 +710,53 @@ export class Agent {
           _neko_compaction_source_digest: createHash("sha256").update(JSON.stringify(sourceIds)).digest("hex") } : undefined) },
       ...leanTail,
     ];
+    // A valid summary can still be larger or save virtually nothing. Keep exact original state
+    // unless the complete replacement (capsule + retained tail) actually meets the requested gain.
+    const saved = estimateTokens(this.messages) - estimateTokens(candidate);
+    if (saved < Math.max(1, options.minSavingsTokens ?? 1)) {
+      this.lastCompactionOutcome = "no_gain";
+      return "";
+    }
+    options.signal?.throwIfAborted();
+    const prepared = this.prepareCompaction
+      ? await this.prepareCompaction({before: this.messages, candidate, summary}, options.signal)
+      : undefined;
+    options.signal?.throwIfAborted();
+    if (this.prepareCompaction && (!prepared || !(prepared.commit instanceof Function) || !Array.isArray(prepared.messages))) {
+      throw new Error("Host compaction preparation returned no valid publication transaction; original history is intact.");
+    }
+    if (this.compactionConfigRevision !== configRevision || snapshotDigest() !== inputDigest) {
+      throw new Error("Compaction preparation discarded because conversation or model changed; original history is intact.");
+    }
+    const replacement = prepared?.messages ?? candidate;
+    if (!Array.isArray(replacement) || !replacement.some(message => message?.role !== "system")
+      || replacement.some(message => !isJsonObject(message) || !["system", "user", "assistant", "tool"].includes(String(message.role)))
+      || JSON.stringify(replacement.filter(message => message?.role === "system")) !== JSON.stringify(sys)) {
+      throw new Error("Prepared compaction changed the protected system context; original history is intact.");
+    }
+    if (estimateTokens(this.messages) - estimateTokens(replacement) < Math.max(1, options.minSavingsTokens ?? 1)) {
+      this.lastCompactionOutcome = "no_gain";
+      return "";
+    }
+    if (prepared) {
+      const candidateDigest = createHash("sha256").update(JSON.stringify(replacement)).digest("hex");
+      try {
+        const receipt = prepared.commit();
+        // A Promise would introduce an unguarded gap between persistence and installation.
+        if (receipt instanceof Promise) { void receipt.catch(() => {}); throw new Error("Context commit must be synchronous"); }
+        if (receipt?.committed !== true) throw new Error("Context commit did not confirm publication");
+        if (this.compactionConfigRevision !== configRevision || snapshotDigest() !== inputDigest
+          || createHash("sha256").update(JSON.stringify(replacement)).digest("hex") !== candidateDigest) {
+          throw new Error("Context changed across publication");
+        }
+      } catch (cause) {
+        this.compactionCommitFailure = new Error("Context commit needs recovery; reopen the saved session before continuing.", {cause});
+        throw this.compactionCommitFailure;
+      }
+    }
+    // No await separates the host's synchronous publication and this active-state installation.
+    this.messages = replacement;
+    this.lastCompactionOutcome = "applied";
     return summary;
   }
 
@@ -1368,6 +1459,7 @@ export class Agent {
    * `images` (data: URLs) attach as OpenAI vision content — used by paste-image (needs a vision model). */
   // `internal` is local provenance for controller-generated turns; providerHistory() removes it.
   async run(instruction: string, signal?: AbortSignal, images?: ImageAttachment[], internal = false): Promise<string> {
+    this.assertContextReady();
     // Ordinary turns are not closed-loop; drop leftover harness gate state.
     this.closedLoopGoal = "";
     this.recentFailedChecks = [];
@@ -1548,7 +1640,7 @@ export class Agent {
         // Clip old observations before paying for a summarizer call in a single long turn.
         if (!this.shrinkOldObservations()) {
           this.emit("compact", "auto");
-          try { await this.compact(); }
+          try { await this.compact({signal}); }
           finally { this.emit("compact_done", "auto"); }
         }
       }
@@ -2120,6 +2212,7 @@ export class Agent {
   }
 
   private async durableCheckpoint(): Promise<void> {
+    this.assertContextReady();
     if (this.hasCheckpointFailure) {
       const error = this.checkpointFailure;
       this.hasCheckpointFailure = false;

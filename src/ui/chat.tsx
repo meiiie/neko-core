@@ -1,3 +1,11 @@
+import {bindStructuredContext} from "../adapters/context/compactor.ts";
+import { promptAnchorMarker } from "./frame-diff.ts";
+import { useHistorySearch } from "./history-search.ts";
+import { MAX_TRANSCRIPT_QUERY_CHARS } from "./transcript-layout.ts";
+import { DisplayHistory } from "../adapters/display-history.ts";
+import type { DisplayEntrySeed, DisplayHistoryCursor } from "../core/display-history.ts";
+import { createDisplayHistory } from "./display-history.ts";
+import { CombinedRows, mapRows, projectRowSources, type RowSource } from "./row-source.ts";
 /**
  * `neko chat` — the Ink (React-for-terminal) REPL. The Neko Core UX surface.
  *
@@ -29,7 +37,7 @@ import { syncOutputDecision, wrapStdoutForSync } from "./sync-stdout.ts";
 import { FrameDiffer, HIT_SENTINEL } from "./frame-diff.ts";
 import { canFullscreen, emergencyRestore, installAltScreenGuard } from "./altscreen.ts";
 import { setApprovalCursorHidden, setFocusReporting, terminalFocusFromInput } from "./terminal-attention.ts";
-import { flattenLines, projectLineRows, ScrollRegion, stickyPromptAnchor, useRowScroll, useScroll } from "./scroll.tsx";
+import { projectLineRows, visibleLineBucket, ScrollRegion, stickyPromptAnchor, useRowScroll, useScroll } from "./scroll.tsx";
 import { RichView } from "./rich-transcript.tsx";
 import { clearAnsiCache, fallbackRows, getCachedRows, primeAnsiCache, renderNodeRows, rowsCountFor, warmAnsiCache } from "./ansi-cache.ts";
 import { DISABLE_MOUSE, isMouseEnabled, parseLastPointer, parseWheelAll, setMouseHover } from "./mouse.ts";
@@ -81,8 +89,8 @@ import { prepareCompletionAlert } from "../adapters/completion-sound.ts";
 import { buildMcpHub, type McpHub } from "../adapters/mcp.ts";
 import { isMode, modeDetail, nextMode, type PermissionMode } from "../core/permissions.ts";
 import { getProvider, type Provider } from "../adapters/providers.ts";
-import { AsyncSessionWriter, latestSession, loadSession, newSessionId, renameSession, type Session } from "../adapters/session.ts";
-import { createTaskSession, loadTaskSession, taskSessionConfigId, TaskSwitchCommittedError, type TaskRuntimeInput, type TaskSessionRuntime, type TaskSessionCoordinator } from "../adapters/task-session.ts";
+import { AsyncSessionWriter, latestSession, loadSession, newSessionId, renameSession, sessionAutoTitle, type Session } from "../adapters/session.ts";
+import { createTaskSession, loadTaskSession, taskSessionConfigId, taskSessionContextMode, TaskSwitchCommittedError, type TaskRuntimeInput, type TaskSessionRuntime, type TaskSessionCoordinator } from "../adapters/task-session.ts";
 import { applySkillPolicyForTurn, matchesSkill } from "../adapters/skills.ts";
 import { ToolRegistry } from "../core/tool-runtime.ts";
 import { assertNoConfiguredCredentialInSourceEvents } from "../core/compaction-source.ts";
@@ -133,6 +141,7 @@ export interface ChatTaskLifecycle {
 }
 
 interface ChatProps {
+  contextMemory?: boolean;
   profile?: string;
   yolo: boolean;
   resume?: boolean;
@@ -170,6 +179,7 @@ interface ChatProps {
 }
 
 interface ChatTaskRuntime extends TaskSessionRuntime {
+  display: DisplayHistory;
   agent: Agent;
   registry: ToolRegistry;
 }
@@ -190,7 +200,7 @@ export const STREAM_PUMP_SCROLLED_MS = 300;
 export const shouldStreamPump = (now: number, lastPump: number, scrolledAway: boolean): boolean =>
   now - lastPump >= (scrolledAway ? STREAM_PUMP_SCROLLED_MS : STREAM_PUMP_MS);
 
-export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, prepareChatGptSupport = provider ? undefined : prepareChatGptRequest, completionAlert, bridgeHolder, taskLifecycle }: ChatProps) {
+export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, prepareChatGptSupport = provider ? undefined : prepareChatGptRequest, completionAlert, bridgeHolder, taskLifecycle }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -207,7 +217,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const [cols, setCols] = useState(stdout?.columns ?? 80);
   const [rows, setRows] = useState(stdout?.rows ?? 24);
   const [resizeKey, setResizeKey] = useState(0); // bump to force a clean full redraw on resize
-  const [started, setStarted] = useState(false); // once a turn has run, drop the input placeholder
+  const [started, setStarted] = useState(Boolean(resumedSession?.messages?.some((message) => message.role !== "system"))); // resumed work is not an empty first-run composer
   const rcRef = useRef<RemoteControl | null>(null);
   const relayRef = useRef<RemoteRelay | null>(null);
   const relayScopeRef = useRef<{ key: string; hub: boolean; url: string } | null>(null);
@@ -232,6 +242,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const voiceModeRef = useRef("voice");
   const [rcOn, setRcOn] = useState(false);
   const cfg = useRef(loadConfig({ profile })).current;
+  if (contextMemory) cfg.data.context_mode = "structured";
   const tabTitle = titleDriver?.set ?? setTabTitle;
   const stopTabTitle = titleDriver?.stop ?? stopTitleDriver;
   // The registry is built below after approval callbacks exist. Use a conservative startup catalog
@@ -251,6 +262,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const multilineRef = useRef("");
   const queueRef = useRef<string[]>([]);
   const drainingQueuedRef = useRef(false);
+  const queuedTaskDispatchRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
   const feedbackRequestRef = useRef<AbortController | null>(null);
   useEffect(() => () => { feedbackRequestRef.current?.abort(); feedbackRequestRef.current = null; }, []);
@@ -278,7 +290,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       // Project the prior conversation back onto the screen. Keep tool calls/results so interrupted
       // work remains visible, but leave the canonical full messages untouched for model continuation.
       out.push(...(initialFullscreen
-        ? buildReplayLines(resumedRef.current.messages, () => idRef.current++, { mode: "resume", columns: cols })
+        ? []
         : replaySessionLines(resumedRef.current.messages, () => idRef.current++, {
             columns: cols,
             maxRows: Math.max(8, Math.min(20, rows - 10)),
@@ -439,6 +451,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const overlayOpenRef = useRef(false);
   const queuePausedForPickerRef = useRef(false);
   const queuePauseNoticeShownRef = useRef(false);
+  const [queueHoldNotice, setQueueHoldNotice] = useState<string | null>(null);
+  const resumeTransitionRef = useRef(false);
+  const announcePausedQueue = () => {
+    if (!resumeTransitionRef.current && !overlayOpenRef.current && queuePausedForPickerRef.current && queueRef.current.length && !queuePauseNoticeShownRef.current) {
+      queuePauseNoticeShownRef.current = true;
+      setQueueHoldNotice(`${queueRef.current.length} queued input(s) held. Session ${sessionIdRef.current} transcript: ${terminalSafeText(activeSessionCwdRef.current, { maxChars: 180 })}; tool root: ${terminalSafeText(process.cwd(), { maxChars: 180 })}. Use /queue resume to run here, or /queue discard to drop them.`);
+    }
+  };
   const setOverlay = (next: Overlay | null) => {
     const closed = overlayOpenRef.current && !next;
     // A picker can receive Esc before the awaiting drain loop resumes. Mark the held queue now,
@@ -446,12 +466,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (next && drainingQueuedRef.current && queueRef.current.length) queuePausedForPickerRef.current = true;
     overlayOpenRef.current = !!next;
     setOverlayState(next);
-    if (closed && queuePausedForPickerRef.current) queueMicrotask(() => {
-      if (!overlayOpenRef.current && queuePausedForPickerRef.current && queueRef.current.length && !queuePauseNoticeShownRef.current) {
-        queuePauseNoticeShownRef.current = true;
-        addLine("info", `${queueRef.current.length} queued input(s) held. Session ${sessionIdRef.current} transcript: ${terminalSafeText(activeSessionCwdRef.current, { maxChars: 180 })}; tool root: ${terminalSafeText(process.cwd(), { maxChars: 180 })}. Use /queue resume to run here, or /queue discard to drop them.`);
-      }
-    });
+    if (closed && queuePausedForPickerRef.current) queueMicrotask(announcePausedQueue);
   };
   // Fullscreen is fixed at mount; incapable terminals stay inline.
   const [fullscreen] = useState<boolean>(initialFullscreen);
@@ -490,8 +505,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // /title name (pinned) or its first user message; a fresh one is named on its first turn (see handle()).
   const titleLockedRef = useRef(!!resumedSession?.title); // a resumed /title name stays pinned
   const titleTaskRef = useRef((() => {
-    const fu = resumedSession?.messages?.find((m) => m.role === "user");
-    const name = resumedSession?.title || (isText(fu?.content) ? fu.content.replace(/\s+/g, " ").trim() : "");
+    const name = resumedSession?.title || sessionAutoTitle(resumedSession?.messages ?? []);
     return name ? trunc(name, 40) : "";
   })());
   const pinnedTitleRef = useRef(resumedSession?.title ?? ""); // full persisted /title; tab text stays truncated separately
@@ -500,7 +514,20 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const feedbackPreviewCloseRef = useRef<(() => void) | null>(null);
   const [search, setSearch] = useState<{ q: string; matches: number[]; idx: number } | null>(null); // fullscreen in-viewport find
   const [compacting, setCompacting] = useState<{ start: number } | null>(null); // shows the compacting progress bar
+  const compactionControllerRef = useRef<AbortController | null>(null);
   const compactingRef = useRef(false); // guard: never overlap two compactions
+  const compactionMountedRef = useRef(true);
+  useEffect(() => {
+    compactionMountedRef.current = true;
+    return () => { compactionMountedRef.current = false; compactionControllerRef.current?.abort(); };
+  }, []);
+  const interruptActiveWork = () => {
+    const compact = compactionControllerRef.current;
+    const turn = controllerRef.current;
+    if (compact) compact.abort();
+    if (turn) turn.abort();
+    return Boolean(compact || turn);
+  };
   const [expandedId, setExpandedId] = useState<number | null>(null); // ctrl+o: which tool_result is peeked in full (toggle)
   // Tool calls in flight: shown LIVE with a blinking dot, then committed to <Static> (solid dot) with
   // their result. A keyed list (not one value) because the agent's concurrent path fires all tool_calls
@@ -538,9 +565,101 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     relayRef.current?.refresh();
   }, [approval, busy, compacting, inflight, overlay, queued, step, todos]);
 
+  const displayRef = useRef<DisplayHistory | null>(null);
+  const displayReadyRef = useRef<Promise<void>>(Promise.resolve());
+  const displaySettledRef = useRef(false);
+  const displayOlderRef = useRef<DisplayHistoryCursor | null>(null);
+  const displayGeneration = useRef(0);
+  const resetHistoryScroll = useRef<(() => void) | null>(null);
+  const displayReadBusy = useRef(false);
+  const seekHistoryStart = useRef(false);
+  const displayFailure = useRef<Error | null>(null);
+  const historyId = useRef(-1);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const searchActiveRef = useRef(false);
+  searchActiveRef.current = search !== null;
+  const [findError, setFindError] = useState("");
+
+  // eslint-disable-next-line anti-slop/no-unknown-parameters -- Convert an async I/O rejection into a visible error at the UI boundary.
+  const showHistoryError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    setLines((prev) => [...prev, {id: idRef.current++, kind: "error", text: `History unavailable: ${message}`}]);
+  };
+  const adoptDisplay = (source: Promise<DisplayHistory>) => {
+    const generation = ++displayGeneration.current;
+    displaySettledRef.current = false;
+    displayReadBusy.current = false;
+    seekHistoryStart.current = false;
+    displayOlderRef.current = null;
+    displayFailure.current = null;
+    setHistoryLoading(true);
+    const liveAfter = idRef.current;
+    const ready = source.then(async (history) => {
+      await history.flush();
+      const page = await history.page();
+      if (generation !== displayGeneration.current) return;
+      displayRef.current = history;
+      resetHistoryScroll.current?.();
+      displayOlderRef.current = page.older;
+      const restored: Line[] = page.entries.map((entry) => ({...entry, kind: entry.kind === "tool_result" ? "tool_result_full" : entry.kind, id: historyId.current--}));
+      setLines((prev) => [
+        ...prev.filter((line) => line.kind === "welcome"),
+        ...restored,
+        ...prev.filter((line) => line.kind !== "welcome" && (line.id >= liveAfter || line.kind === "info" || line.kind === "error")),
+      ]);
+      if (!fullscreenRef.current) setResizeKey((value) => value + 1);
+    }).catch((error) => {
+      if (generation !== displayGeneration.current) return;
+      displayFailure.current = error instanceof Error ? error : new Error(String(error));
+      showHistoryError(error);
+    }).finally(() => { if (generation === displayGeneration.current) { displaySettledRef.current = true; setHistoryLoading(false); void drainQueued(); } });
+    displayReadyRef.current = ready;
+    return ready;
+  };
+  const loadOlderDisplay = async (allForSearch = false) => {
+    const history = displayRef.current;
+    const cursor = displayOlderRef.current;
+    if (!history || !cursor || displayReadBusy.current) return;
+    const generation = displayGeneration.current;
+    displayReadBusy.current = true;
+    setHistoryLoading(true);
+    try {
+      let next: DisplayHistoryCursor | null = cursor;
+      const pages: Line[][] = [];
+      do {
+        const page = await history.page(next);
+        if (generation !== displayGeneration.current) return;
+        pages.push(page.entries.map((entry) => ({...entry, kind: entry.kind === "tool_result" ? "tool_result_full" : entry.kind, id: historyId.current--})));
+        next = page.older;
+        // Home seeks the oldest page. Avoid laying out every intermediate viewport along the way;
+        // keep input/cancellation live while reading, then publish the accumulated pages once.
+        if (next && (seekHistoryStart.current || (allForSearch && searchActiveRef.current))) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      } while (next && (seekHistoryStart.current || (allForSearch && searchActiveRef.current)));
+      if (generation !== displayGeneration.current) return;
+      displayOlderRef.current = next;
+      const older = pages.reverse().flat();
+      setLines((prev) => [
+        ...prev.filter((line) => line.kind === "welcome"),
+        ...older,
+        ...prev.filter((line) => line.kind !== "welcome"),
+      ]);
+    } catch (error) { if (generation === displayGeneration.current) { displayOlderRef.current = null; showHistoryError(error); } }
+    finally { if (generation === displayGeneration.current) { displayReadBusy.current = false; setHistoryLoading(false); } }
+  };
+  useEffect(() => {
+    const saved = resumedRef.current;
+    void adoptDisplay(createDisplayHistory(cfg.resolvedHome, {sessionId: sessionIdRef.current, root: activeSessionCwdRef.current}, saved?.messages ?? [], saved?.displayHistory, saved?.displayPending));
+    return () => { displayGeneration.current++; };
+  }, []);
+
   const addLine = (kind: LineKind, text: string, summary?: string, mirror = true, failed = false) => {
     const line: Line = { id: idRef.current++, kind, text, summary };
     if (failed) line.failed = true;
+    if (kind === "user" || kind === "assistant" || kind === "tool_call" || kind === "tool_result"
+      || (kind === "info" && /^(?:Compacted - |\(rewound last turn|\(conversation reset\)|\(interrupted\)$)/.test(text))) {
+      try { displayRef.current?.append(kind, text, summary, failed); }
+      catch (error) { displayFailure.current = error instanceof Error ? error : new Error(String(error)); showHistoryError(error); }
+    }
     // A streamed answer is rich Markdown before commit. Prime its final rows now so fullscreen never
     // flashes the cheap raw-markdown fallback while the asynchronous cache warmer catches up.
     if (fullscreenRef.current && (kind === "assistant" || kind === "user")) primeAnsiCache(line, contentColsRef.current, cfg);
@@ -605,7 +724,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // to re-print the kept tail cleanly. Generous cap: only a very long session ever trips it.
   const MAX_LINES = 3000;
   useEffect(() => {
-    if (lines.length <= MAX_LINES) return;
+    if (displayRef.current || lines.length <= MAX_LINES) return;
     clearTerm(); // Ink-safe clear (was a raw escape that froze real terminals)
     setLines((prev) => [
       { id: idRef.current++, kind: "info", text: "(... earlier transcript trimmed to keep the session fast ...)" },
@@ -873,12 +992,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
           const idx = inflightRef.current.findIndex((x) => x.key === k);
           const done = idx >= 0 ? inflightRef.current.splice(idx, 1)[0] : { text: describeToolCall(data.call?.name, data.call?.arguments) };
           syncInflight();
-          const obs = contentToText(data.observation).split("\n").slice(0, 400).join("\n");
+          const obs = contentToText(data.observation);
           if (isToolFailure(obs) && /^\(interrupted\)/i.test(obs.trim())) {
             interruptedBannerShownRef.current = true;
           }
           // todo_write folds via resultSummary (raise-bar-12 density); full checklist under Ctrl+O.
-          const summary = resultSummary(data.call?.name, obs, data.call?.arguments);
+          const summary = resultSummary(data.call?.name, obs.split("\n", 400).join("\n"), data.call?.arguments);
           if (summary) addLine("tool_result", `${done.text}\n${obs}`, summary);
           else {
             // Failures stay expanded: paint the call bullet red so deny/interrupt is not success-green.
@@ -923,11 +1042,12 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   const taskTransitionRef = useRef(false);
   if (taskLifecycle) taskLifecycle.shutdown = async () => {
     const session = taskSessionRef.current;
+    if (!session?.recoveryRequired) await persistRef.current();
     if (!session) return;
     await session.close();
     taskSessionRef.current = null;
   };
-  const createTaskRuntime = ({ scope, messages, sourceEvents }: TaskRuntimeInput): ChatTaskRuntime => {
+  const createTaskRuntime = async ({ sessionId, taskId, root, scope, messages, sourceEvents, displayHistory, displayPending, contextMode, contextState }: TaskRuntimeInput): Promise<ChatTaskRuntime> => {
     // A fresh registry and Agent are required on EVERY activation, including A -> B -> A.
     // Bind the runtime-owned scope before constructing the Agent or reading any context.
     const registry = configureToolRegistry(new ToolRegistry(process.cwd(), yolo ? "auto" : cfg.mode, gate, mcpHub), cfg);
@@ -940,25 +1060,41 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     agent.restoreCompactionSourceEvents(sourceEvents);
     // SAFETY: the task coordinator validates and clones every stored message before calling this factory.
     agent.messages = messages as Agent["messages"];
+    const context = contextMode === "structured" ? bindStructuredContext({agent, registry, home: cfg.resolvedHome, scope, messages,
+      state: contextState, inputBudget: () => cfg.contextWindow - Math.max(0, cfg.maxTokens),
+      countTokens: rows => estimateRequestTokens([...rows], registry.schemas()), credential: () => cfg.apiKey,
+      publish: (digest, candidate, state) => {
+        const active = taskSessionRef.current;
+        if (!active || active.id !== sessionId || active.active.id !== taskId) throw new Error("Task changed before context publication");
+        return active.checkpointCompaction(digest, candidate, state);
+      }}) : undefined;
+    const display = await createDisplayHistory(cfg.resolvedHome, {sessionId, taskId, root}, agent.messages, displayHistory, displayPending);
     return {
+      display,
+      getDisplayHistory: () => display.captureCheckpoint(agent.messages, !busyRef.current && !compactingRef.current),
+      getDisplayPending: () => capturePendingDisplay(),
       agent,
       registry,
-      getMessages: () => agent.messages,
+      getMessages: () => {agent.assertContextReady(); return agent.messages;},
+      contextRecoveryRequired: () => agent.contextRecoveryRequired,
+      getStructuredContextState: context ? () => context.snapshot(agent.messages) : undefined,
       getSourceEvents: () => {
         const events = agent.compactionSourceEvents();
         assertNoConfiguredCredentialInSourceEvents(events, cfg.apiKey);
         return events;
       },
-      assertQuiescent: () => {
-        if (busyRef.current || compactingRef.current || drainingQueuedRef.current
+      assertQuiescent: async () => {
+        if (busyRef.current || compactingRef.current || (drainingQueuedRef.current && !queuedTaskDispatchRef.current)
           || queueRef.current.length || queuePausedForPickerRef.current || overlayOpenRef.current
           || controllerRef.current || gatePending.current || remoteApprovalRef.current
           || inflightRef.current.length || registry.bashRunning() || voiceRef.current
           || feedbackRequestRef.current) {
           throw new Error("Finish the active turn, approval, voice, picker, and queued input before switching tasks");
         }
+        await display.flush();
       },
       close: async () => {
+        await display.flush();
         if (!provider) await agent.currentProvider().dispose?.();
       },
     };
@@ -984,23 +1120,44 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } catch { /* terminal teardown must not be blocked by provider cleanup */ }
   }, [provider]);
 
-  const persist = () => taskSessionRef.current
-    ? Promise.resolve(taskSessionRef.current.checkpoint())
-    : sessionWriterRef.current!.save({
-      id: sessionIdRef.current,
+  const capturePendingDisplay = (): DisplayEntrySeed[] => {
+    const pending: DisplayEntrySeed[] = [];
+    if (streamRef.current) pending.push({kind: "assistant", text: streamRef.current});
+    for (const call of inflightRef.current) pending.push({kind: "tool_call", text: `${call.text} (interrupted before a result; outcome unknown)`});
+    return pending;
+  };
+  const persist = async () => {
+    await displayReadyRef.current;
+    if (displayFailure.current) throw displayFailure.current;
+    const history = displayRef.current;
+    const task = taskSessionRef.current;
+    const id = sessionIdRef.current;
+    const agent = agentRef.current!;
+    const cwd = activeSessionCwdRef.current;
+    const messages = structuredClone(agent.messages);
+    const pending = capturePendingDisplay();
+    const displayComplete = !busyRef.current && !compactingRef.current;
+    await history?.flush();
+    const reference = history?.captureCheckpoint(messages, displayComplete);
+    if (task) { task.checkpoint(); return; }
+    return sessionWriterRef.current!.save({
+      id,
+      displayHistory: reference,
+      displayPending: pending,
       createdAt: createdAtRef.current,
       updatedAt: new Date().toISOString(),
-      cwd: process.cwd(),
+      cwd,
       model: cfg.model,
       provider: cfg.provider,
       profile: cfg.profile ?? null,
       mode: modeRef.current,
       title: pinnedTitleRef.current || undefined,
-      messages: agentRef.current!.messages,
-      completionContract: agentRef.current!.completionContract,
+      messages,
+      completionContract: agent.completionContract,
       // ACP already persisted usage; TUI left /cost at 0 after --continue (raise-bar-9 lived).
-      usage: agentRef.current!.cost.snapshot(),
+      usage: agent.cost.snapshot(),
     });
+  };
   persistRef.current = persist;
 
   // Standalone compaction and resumed sessions can collect several queued slash commands. Await
@@ -1010,14 +1167,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (queueRef.current.length) queuePausedForPickerRef.current = true;
       return;
     }
-    if (queuePausedForPickerRef.current || drainingQueuedRef.current || busyRef.current || compactingRef.current || taskTransitionRef.current) return;
+    if (!displaySettledRef.current || displayFailure.current || resumeTransitionRef.current || queuePausedForPickerRef.current || drainingQueuedRef.current || busyRef.current || compactingRef.current || taskTransitionRef.current) return;
     drainingQueuedRef.current = true;
     try {
       while (queueRef.current.length && !busyRef.current && !compactingRef.current) {
         const next = queueRef.current.shift()!;
         setQueued(queueRef.current.length);
+        // A sole queued task command is dispatched only after the prior turn is quiescent. Keep
+        // the FIFO locked while awaiting it; additional queued input still blocks a task switch.
+        queuedTaskDispatchRef.current = /^\/task(?:\s|$)/.test(next) && queueRef.current.length === 0;
         try { await handle(next); }
         catch (error) { addLine("error", error instanceof Error ? error.message : String(error)); }
+        finally { queuedTaskDispatchRef.current = false; }
         if (overlayOpenRef.current) {
           if (queueRef.current.length) queuePausedForPickerRef.current = true;
           break;
@@ -1031,6 +1192,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (!queuePausedForPickerRef.current || overlayOpenRef.current) return false;
     queuePausedForPickerRef.current = false;
     queuePauseNoticeShownRef.current = false;
+    setQueueHoldNotice(null);
     void drainQueued();
     return true;
   };
@@ -1041,6 +1203,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setQueued(0);
     queuePausedForPickerRef.current = false;
     queuePauseNoticeShownRef.current = false;
+    setQueueHoldNotice(null);
     addLine("info", `${count} queued input(s) discarded ${reason}; no queued task was run.`);
     return true;
   };
@@ -1048,31 +1211,62 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
 
   // Standalone compaction also serves /compact and resume-from-summary without setting turn busy state.
   const runCompaction = async (reason: "manual" | "auto" | "resume"): Promise<string> => {
-    if (compactingRef.current) return "";
+    if (compactingRef.current || !compactionMountedRef.current) return "";
     compactingRef.current = true;
+    const controller = new AbortController();
+    compactionControllerRef.current = controller;
+    const signal = busyRef.current && controllerRef.current
+      ? AbortSignal.any([controller.signal, controllerRef.current.signal]) : controller.signal;
     setCompacting({ start: Date.now() });
     try {
       const before = estimateTokens(agentRef.current!.messages);
-      const summary = await agentRef.current!.compact();
+      const summary = await agentRef.current!.compact({
+        signal,
+        minHeadTokens: 256,
+        minSavingsTokens: 64,
+      });
       const freed = Math.max(0, before - estimateTokens(agentRef.current!.messages));
       if (summary) {
         const why = reason === "auto" ? "context was nearly full" : reason === "resume" ? "resumed from a summary" : "on request";
         addLine("info", `Compacted - freed ~${fmtTok(freed)} tokens (${why}).`);
       } else if (reason === "manual") {
-        addLine("info", "(nothing old enough to compact yet)");
+        const outcome = agentRef.current!.lastCompactionOutcome;
+        addLine("info", outcome === "no_gain"
+          ? "Compaction skipped: insufficient token savings; original context retained."
+          : outcome === "too_small"
+            ? "Compaction skipped: older context is too small to justify a model call."
+            : "(nothing old enough to compact yet)");
       }
       return summary;
+    } catch (error) {
+      if (!signal.aborted || agentRef.current!.contextRecoveryRequired) throw error;
+      if (compactionMountedRef.current) addLine("info", "Compaction cancelled; original context retained.");
+      return "";
     } finally {
+      compactionControllerRef.current = null;
       compactingRef.current = false;
-      setCompacting(null);
+      if (compactionMountedRef.current) setCompacting(null);
       // /compact drains here. Resume drains after replay, so queued input cannot run against a
       // half-restored screen; "auto" runs inside handle(), whose own finally drains.
-      if (reason === "manual") void drainQueued();
+      if (reason === "manual" && compactionMountedRef.current) void drainQueued();
     }
   };
 
   // Recover todos before optional compaction so plans in the summarized head survive resume.
   const doResume = async (target: Session, mode: "summary" | "full") => {
+    if (resumeTransitionRef.current) return addLine("info", "A session resume is already in progress.");
+    resumeTransitionRef.current = true;
+    queuePauseNoticeShownRef.current = false;
+    setQueueHoldNotice(null);
+    const previousHistory = displayRef.current;
+    const previousOlder = displayOlderRef.current;
+    const previousFailure = displayFailure.current;
+    try {
+    await persist();
+    await adoptDisplay(target.id === sessionIdRef.current && displayRef.current
+      ? Promise.resolve(displayRef.current)
+      : createDisplayHistory(cfg.resolvedHome, {sessionId: target.id, root: target.cwd}, target.messages, target.displayHistory, target.displayPending));
+    if (displayFailure.current) throw displayFailure.current;
     agentRef.current!.messages = [...target.messages];
     agentRef.current!.restoreCompletionContract(target.completionContract);
     agentRef.current!.cost.restore(target.usage);
@@ -1080,8 +1274,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     sessionIdRef.current = target.id;
     activeSessionCwdRef.current = target.cwd;
     createdAtRef.current = target.createdAt;
-    const fu = target.messages.find((m) => m.role === "user");
-    const tname = target.title || (isText(fu?.content) ? fu.content.replace(/\s+/g, " ").trim() : "");
+    const tname = target.title || sessionAutoTitle(target.messages);
     titleLockedRef.current = !!target.title;
     pinnedTitleRef.current = target.title ?? "";
     titleTaskRef.current = tname ? trunc(tname, 40) : "";
@@ -1105,18 +1298,23 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     } else {
       setLines((prev) => [...prev, { id: idRef.current++, kind: "info", text: `-- resumed ${target.id} (${target.messages.length} messages) --` }]);
     }
-    const replay: Line[] = fullscreen
-      ? buildReplayLines(agentRef.current!.messages, () => idRef.current++, { mode: "resume", columns: cols })
-      : replaySessionLines(agentRef.current!.messages, () => idRef.current++, {
-          columns: cols,
-          maxRows: Math.max(8, Math.min(20, rows - 10)),
-        });
+    const replay: Line[] = [];
     const left = todos.filter((t) => t.status !== "completed").length;
     if (left) replay.push({ id: idRef.current++, kind: "info", text: `Picking up where you left off - ${left} task${left > 1 ? "s" : ""} still open. Just tell me to keep going (in your own words), or /continue.` });
     setLines((prev) => [...prev, ...replay]);
     relayRef.current?.publish({ type: "snapshot", lines: replay.map((line) => ({ ...line, text: line.text.slice(0, 200_000) })) }, { durable: true, reset: true });
     // Input typed while the summary was pending runs only after the saved history is replayed.
     void drainQueued();
+    } catch (error) {
+      displayRef.current = previousHistory;
+      displayOlderRef.current = previousOlder;
+      displayFailure.current = previousFailure;
+      addLine("error", `Could not resume session: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      resumeTransitionRef.current = false;
+      queueMicrotask(announcePausedQueue);
+      void drainQueued();
+    }
   };
 
   const openTranscript = () => {
@@ -1238,7 +1436,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const total = committed.length + live.length;
     const out: string[] = [];
     for (let r = sel.r0; r <= sel.r1 && r < total; r++) {
-      const row = r < committed.length ? committed[r] : live[r - committed.length];
+      const row = r < committed.length ? committed.at(r) : live[r - committed.length];
       const plain = (row ?? "").replace(/\x1b\[[0-9;]*m/g, ""); // strip SGR -> real text (gutter incl.)
       const from = r === sel.r0 ? sel.c0 - 1 : 0;
       const to = r === sel.r1 ? sel.c1 : plain.length;
@@ -1327,15 +1525,18 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Updates are staged in the background and take effect only on the next launch.
   useEffect(() => {
     if (!cfg.autoUpdateCheck) return;
-    void checkForUpdate().then(async (v) => {
-      if (!v) return;
+    const controller = new AbortController();
+    void checkForUpdate(Date.now(), controller.signal).then(async (v) => {
+      if (controller.signal.aborted || !v) return;
       if (cfg.autoUpdate) {
         const result = await selfUpdate(() => {}).catch(() => "failed" as const);
+        if (controller.signal.aborted) return;
         if (result === "updated") return addLine("info", `auto-updated to ${v} - takes effect the next time neko starts ("auto_update": false to disable)`);
         if (result === "up-to-date") return;
       }
       addLine("info", `a newer Neko (${v}) is available - run \`neko update\``);
     }).catch(() => {});
+    return () => controller.abort();
   }, []);
   useEffect(() => {
     if (startupNeedsChoiceRef.current && resumedRef.current) resumeInto(resumedRef.current);
@@ -1639,7 +1840,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (key.ctrl && char === "g") { openEditor(); return; }
       if (key.ctrl && char === "u") return setInput("");
       if (key.ctrl && char === "l") return setLines([{ id: idRef.current++, kind: "info", text: "(cleared)" }]);
-      if (key.escape && !busy && input) return setInput("");
+      if (key.escape && !busy && !compactingRef.current && input) return setInput("");
     });
 
   // Esc interrupts a running turn - but NOT while the find bar or /transcript viewer owns Esc (their
@@ -1647,9 +1848,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // bar mid-turn would also abort the model). Close first, then Esc again to interrupt.
   useInput(
     (_char, key) => {
-      if (key.escape) controllerRef.current?.abort();
+      if (key.escape) interruptActiveWork();
     },
-    { isActive: busy && approval === null && search === null && viewer === null },
+    { isActive: (busy || compacting !== null) && approval === null && search === null && viewer === null },
   );
 
   // Slash-command menu: navigable suggestions. Up/Down highlight, Tab completes — so the arrows
@@ -1726,7 +1927,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     let voice!: ChatGptVoiceControl;
     voice = makeVoice({
       onUtterance: (text) => voiceTurnRunnerRef.current(text),
-      onInterrupt: () => controllerRef.current?.abort(),
+      onInterrupt: interruptActiveWork,
       openUrl,
       onEvent: (event) => {
         if (event.type === "state") {
@@ -2123,6 +2324,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   };
 
   const activateTask = (session: TaskSessionCoordinator<ChatTaskRuntime>) => {
+    void adoptDisplay(Promise.resolve(session.active.runtime.display));
     const { agent, registry } = session.active.runtime;
     // Approval grants belong to the preceding task's interactive lifetime, not this one.
     alwaysApproved.current.clear();
@@ -2156,8 +2358,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setTodos(recoverTodos(agent.messages));
     setStarted(true);
     const next: Line[] = [
-      { id: idRef.current++, kind: "info", text: `Task ${session.active.label} (${session.active.id}) · session ${session.id}` },
-      ...buildReplayLines(agent.messages, () => idRef.current++, { mode: "resume", columns: cols }),
+      { id: idRef.current++, kind: "info", text: `Task ${session.active.label} (${session.active.id}) · session ${session.id}${session.contextMode ? " · structured context" : ""}` },
+
     ];
     setLines(next);
     // Ink Static is append-only. Remount it so the prior task's visible transcript cannot linger.
@@ -2172,7 +2374,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     const current = taskSessionRef.current;
     if (operation === "status") {
       return addLine("info", current
-        ? `task session ${current.id}; active ${current.active.id} (${current.active.label}); root ${current.active.root}`
+        ? `task session ${current.id}; active ${current.active.id} (${current.active.label}); root ${current.active.root}; context ${current.contextMode ?? "legacy"}`
         : "No active task session. /task new <label> starts one; /task resume <session-id> restores one.");
     }
     if (operation === "list") {
@@ -2183,7 +2385,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (!["new", "use", "resume"].includes(operation) || !argument) {
       return addLine("info", "usage: /task new <label> | use <task-id> | list | status | resume <session-id>");
     }
-    if (taskTransitionRef.current || busyRef.current || compactingRef.current || drainingQueuedRef.current
+    if (taskTransitionRef.current || busyRef.current || compactingRef.current || (drainingQueuedRef.current && !queuedTaskDispatchRef.current)
       || queueRef.current.length || queuePausedForPickerRef.current || overlayOpenRef.current
       || controllerRef.current || gatePending.current || remoteApprovalRef.current
       || inflightRef.current.length || registryRef.current!.bashRunning() || voiceRef.current
@@ -2208,7 +2410,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const previousAgent = agentRef.current!;
         const options = {
           home: cfg.resolvedHome, root: process.cwd(), authorityId: "local",
-          configId: taskSessionConfigId(cfg, yolo ? "auto" : cfg.mode), runtimeFactory: createTaskRuntime,
+          configId: taskSessionConfigId(cfg, yolo ? "auto" : cfg.mode), contextMode: taskSessionContextMode(cfg), runtimeFactory: createTaskRuntime,
         };
         const session = operation === "new"
           ? await createTaskSession({ ...options, label: argument })
@@ -2238,6 +2440,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   };
 
   const handle = async (text: string, internal = false) => {
+    if (!displaySettledRef.current) await displayReadyRef.current;
     if (taskTransitionRef.current) {
       addLine("error", "Task transition is in progress; input was not run.");
       return;
@@ -2670,6 +2873,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       const opensBrowserGuide = /^\/browser\s+(?:setup|install)$/.test(slashText);
       const browserTask = opensBrowserGuide ? browserSetupTaskRef.current : undefined;
       if (opensBrowserGuide) browserSetupTaskRef.current = undefined;
+      if (slashText === "/clear") {
+        await persist();
+        await displayRef.current?.reset();
+        displayGeneration.current++;
+        displayOlderRef.current = null;
+        resetHistoryScroll.current?.();
+        setHistoryLoading(false);
+      }
       await runSlashCommand(slashText, {
         cfg,
         agent: agentRef.current!,
@@ -2741,8 +2952,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         setFps: applyFps,
         setTitle: applyTitle,
         setupBrowser,
-        exit,
+        exit: async () => { await persist(); exit(); },
       });
+      if (["/compact", "/clear", "/reset", "/rewind"].includes(slashText)) await persist();
       if (opensBrowserGuide && readBrowserCapability()) offerBrowserAttach(browserTask ?? "");
       relayRef.current?.refresh();
       return;
@@ -2998,7 +3210,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     if (!text) return;
     if (text === "/queue resume") { if (!resumePausedQueue()) queueActionUnavailable(); return; }
     if (text === "/queue discard") { if (!discardPausedQueue("by request")) queueActionUnavailable(); return; }
-    if (busyRef.current || compactingRef.current || drainingQueuedRef.current || overlayOpenRef.current || queuePausedForPickerRef.current) {
+    if (!displaySettledRef.current || busyRef.current || compactingRef.current || drainingQueuedRef.current || overlayOpenRef.current || queuePausedForPickerRef.current) {
       queueRef.current.push(text);
       setQueued(queueRef.current.length);
       if (overlayOpenRef.current) queuePausedForPickerRef.current = true;
@@ -3128,6 +3340,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       // Busy = WAIT for the current turn (the desktop's input queue does), never drop the phone's
       // message. Bounded so a wedged turn eventually answers honestly instead of hanging the client.
+      if (!displaySettledRef.current) await displayReadyRef.current;
       const w0 = Date.now();
       while (busyRef.current && Date.now() - w0 < 15 * 60_000) await new Promise((res) => setTimeout(res, 500));
       if (busyRef.current) return { reply: "(neko stayed busy for 15+ minutes - the Stop button interrupts the running turn)" };
@@ -3205,7 +3418,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       }
       return false;
     },
-    interrupt: () => { if (controllerRef.current) { controllerRef.current.abort(); return true; } return false; },
+    interrupt: interruptActiveWork,
   });
 
   const onSubmit = (value: string) => {
@@ -3260,7 +3473,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     setExpandedId(null); // a new turn: drop any ctrl+o peek panel
     historyRef.current.push(text);
     historyPos.current = historyRef.current.length;
-    if (busyRef.current || compactingRef.current || drainingQueuedRef.current || overlayOpenRef.current || taskTransitionRef.current) {
+    if (!displaySettledRef.current || busyRef.current || compactingRef.current || drainingQueuedRef.current || overlayOpenRef.current || taskTransitionRef.current) {
       // Queue input typed while a turn is running OR a compaction is in flight (a turn must not mutate
       // agent.messages while compact() is rewriting it); drained when the current work finishes.
       queueRef.current.push(text);
@@ -3290,7 +3503,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Computed ALWAYS (cheap: cached rows, else plain fallback - no markdown work), so the band content is
   // READY for the very first fullscreen frame instead of being empty until the next render.
   const ansiProjection = useMemo(
-    () => projectLineRows(lines, (line) => getCachedRows(line, contentCols) ?? fallbackRows(line)),
+    () => projectRowSources(lines, (line) => getCachedRows(line, contentCols) ?? fallbackRows(line, contentCols)),
     [lines, contentCols, warmTick],
   );
   const ansiRows = ansiProjection.rows;
@@ -3301,7 +3514,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // Row scrolling anchored from the END (dist=0 -> pinned): stays put as the warmer swaps rows above.
   // Glide hops repaint the band DIRECTLY through the differ (sub-ms) - React renders only at gesture
   // edges. The refs keep the hop callback reading current values without restarting the animation.
-  const paddedRowsRef = useRef<string[]>([]);
+  const paddedRowsRef = useRef<RowSource>([]);
   const bandActiveRef = useRef(false);
   const rowScroll = useRowScroll(
     bandRowCount,
@@ -3311,6 +3524,31 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     frameDiffer ? (dist) => { if (bandActiveRef.current) frameDiffer.setBandContent(paddedRowsRef.current, dist, streamRowsRef.current); } : undefined,
     Math.max(4, Math.round(1000 / fps)), // glide hop follows the resolved fps (live-adjustable via /fps)
   );
+  const followTailRequested = useRef(false);
+  const readingAnchor = useRef<{ projection: typeof ansiProjection; id: number; offset: number; scrolled: boolean } | null>(null);
+  useEffect(() => {
+    if (seekHistoryStart.current) {
+      rowScroll.top();
+      if (displayOlderRef.current) void loadOlderDisplay();
+      // Stay top-anchored through asynchronous cache reflow until the user navigates elsewhere.
+      return;
+    }
+    let start = Math.max(0, bandRowCount - rowScroll.dist - viewH);
+    const previous = readingAnchor.current;
+    if (!followTailRequested.current && previous?.scrolled && rowScroll.scrolled && previous.projection !== ansiProjection && promptJumpLineRef.current === null) {
+      const moved = ansiProjection.spans.find((span) => span.line.id === previous.id);
+      if (moved) {
+        const anchored = moved.start + Math.min(previous.offset, Math.max(0, moved.end - moved.start - 1));
+        if (start !== anchored) { start = anchored; rowScroll.toRow(start); }
+      }
+    }
+    if (!rowScroll.scrolled) followTailRequested.current = false;
+    const span = ansiProjection.spans.find((entry) => entry.start <= start && entry.end > start);
+    readingAnchor.current = span ? {projection: ansiProjection, id: span.line.id, offset: start - span.start, scrolled: rowScroll.scrolled} : null;
+  }, [ansiProjection, bandRowCount, rowScroll.dist, viewH]);
+  useEffect(() => {
+    if (fullscreen && rowScroll.scrolled && bandRowCount - rowScroll.dist - viewH < viewH * 2) void loadOlderDisplay();
+  }, [fullscreen, rowScroll.dist, bandRowCount, viewH]);
   const promptAnchor = fullscreen && !search
     ? stickyPromptAnchor(ansiProjection.spans, bandRowCount, viewH, rowScroll.dist, PROMPT_ANCHOR_HEIGHT)
     : null;
@@ -3330,9 +3568,10 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     promptJumpLineRef.current = anchor.line.id;
     rowScroll.toRow(anchor.start);
   };
-  const scrollRows = (delta: number) => { promptJumpLineRef.current = null; rowScroll.by(delta); };
-  const scrollTop = () => { promptJumpLineRef.current = null; rowScroll.top(); };
-  const scrollBottom = () => { promptJumpLineRef.current = null; rowScroll.toBottom(); };
+  const scrollRows = (delta: number) => { seekHistoryStart.current = false; followTailRequested.current = false; promptJumpLineRef.current = null; rowScroll.by(delta); };
+  const scrollTop = () => { seekHistoryStart.current = true; followTailRequested.current = false; readingAnchor.current = null; promptJumpLineRef.current = null; rowScroll.top(); void loadOlderDisplay(); };
+  const scrollBottom = () => { seekHistoryStart.current = false; followTailRequested.current = true; readingAnchor.current = null; promptJumpLineRef.current = null; rowScroll.toBottom(); };
+  resetHistoryScroll.current = scrollBottom;
   useEffect(() => { if (!promptAnchor) setPromptAnchorHover(false); }, [promptAnchor?.line.id]);
   // A rich-cache upgrade can change row counts below the viewport after a click. Keep the requested
   // PROMPT anchored by semantic line id until the user deliberately scrolls again; a raw row index would
@@ -3351,21 +3590,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     scrolledAwayRef.current = fullscreen && rowScroll.scrolled;
     if (!scrolledAwayRef.current && streamRef.current) maybePump(true);
   }, [fullscreen, rowScroll.scrolled]);
-  // Which LINE the current scroll position looks at (walk row counts from the end; O(scroll depth),
-  // only while scrolled). Quantized on BOTH ends: the walk re-runs per ~120 rows of travel (not per
-  // 60fps flush - a deep scroll would walk thousands of map lookups per frame otherwise), and the
-  // result is bucketed per 40 lines so the warm effect re-fires per region.
-  const distQ = fullscreen && rowScroll.scrolled ? Math.floor(rowScroll.dist / 120) : -1;
+  // Quantize the line bucket, not the row distance. Rounding distance first can warm a different
+  // screen after Home, leaving the actual visible prompts permanently in their plain fallback.
   const scrollCenterBucket = useMemo(() => {
-    if (distQ < 0) return -1;
-    let acc = 0;
-    const target = distQ * 120;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      acc += rowsCountFor(lines[i], contentCols);
-      if (acc >= target) return Math.floor(i / 40);
-    }
-    return 0;
-  }, [distQ, lines, contentCols]);
+    if (!fullscreen || !rowScroll.scrolled) return -1;
+    const start = Math.max(0, bandRowCount - rowScroll.dist - viewH);
+    return visibleLineBucket(ansiProjection.spans, start);
+  }, [fullscreen, rowScroll.scrolled, rowScroll.dist, ansiProjection, bandRowCount, viewH]);
+
   useEffect(() => {
     if (fullscreen) warmAnsiCache(lines, contentCols, cfg, () => setWarmTick((t) => t + 1), scrollCenterBucket >= 0 ? scrollCenterBucket * 40 : undefined);
   }, [fullscreen, lines, contentCols, scrollCenterBucket]);
@@ -3373,7 +3605,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   // repaint through the differ directly - no Ink render involved. Find mode hands the band back to Ink.
   // Rows get the same left gutter the Ink tree gives everything else (the differ paints at column 1;
   // unpadded rows sat flush against the edge). Padded once per rows-change, never per scroll frame.
-  const paddedRows = useMemo(() => ansiRows.map((r: any) => (r.length ? "  " + r : r)), [ansiRows]);
+  const paddedRows = useMemo(() => mapRows(ansiRows, (r) => (r.length ? "  " + r : r)), [ansiRows]);
   paddedRowsRef.current = paddedRows;
   bandActiveRef.current = fullscreen && !search;
   // The STREAMING reply lives IN the band, right under the committed rows - text appears where it will
@@ -3400,24 +3632,36 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     frameDiffer?.setBandContent(bandActiveRef.current ? paddedRows : null, rowScroll.dist, streamRows);
   }, [fullscreen, search !== null, paddedRows, rowScroll.dist, bandViewH, streamRows]);
   useEffect(() => () => clearAnsiCache(), []); // free on unmount; resize re-keys by width mismatch
-  // Flat rows exist ONLY for the find bar (in-place match highlighting needs row positions).
-  const flat = useMemo(
-    () => (fullscreen && search ? flattenLines(lines, contentCols) : []),
-    [fullscreen, search !== null, lines, contentCols],
-  );
-  const scroll = useScroll(flat.length, viewH);
+  const historySearch = useHistorySearch(lines, contentCols, fullscreen && search !== null);
+  const searchLayout = historySearch.layout;
+  const flat = useMemo(() => ({slice: (from: number, to: number) => searchLayout.window(from, to - from)}), [searchLayout]);
+  const scroll = useScroll(searchLayout.totalRows, viewH);
+  useEffect(() => {
+    if (searchActiveRef.current && displayOlderRef.current && !historyLoading) void loadOlderDisplay(true);
+  }, [search !== null, historyLoading]);
+  useEffect(() => {
+    if (!searchActiveRef.current) return;
+    setSearch((current) => {
+      if (!current) return null;
+      return {...current, matches: searchLayout.find(current.q.trim()), idx: 0};
+    });
+  }, [searchLayout]);
+  useEffect(() => {
+    if (search?.matches.length) scroll.to(search.matches[search.idx], true);
+  }, [search?.matches, search?.idx]);
+  const liveActivityLines = useMemo(() => lines.filter((line) => line.id >= 0), [lines]);
   // "New messages" pill count: activity appended since the scroll-away moment.
   // Capture baseline on the rising edge DURING render (not useEffect) so the first painted
   // Jump-to-bottom frame never flashes a phantom "N new messages" from a stale/zero baseline.
   {
-    const next = scrollAwayBaselineOnEdge(rowScroll.scrolled, lines.length, {
+    const next = scrollAwayBaselineOnEdge(rowScroll.scrolled, liveActivityLines.length, {
       armed: scrollAwayArmedRef.current,
       baseline: scrollAwayLenRef.current,
     });
     scrollAwayArmedRef.current = next.armed;
     scrollAwayLenRef.current = next.baseline;
   }
-  const newSince = rowScroll.scrolled ? countNewActivities(lines, scrollAwayLenRef.current) : 0;
+  const newSince = rowScroll.scrolled ? countNewActivities(liveActivityLines, scrollAwayLenRef.current) : 0;
   // The jump pill's label + screen hit-box (row below the viewport, centered): shared by the hover
   // highlight and the click handler so what LIGHTS UP is exactly what's CLICKABLE.
   const [pillHover, setPillHover] = useState(false);
@@ -3451,13 +3695,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
     // tracking behind that teardown.
     return () => { if (hoverableSurface && altDisposeRef.current) setMouseHover(stdout, false); };
   }, [fullscreen, hoverableSurface, stdout]);
-  const findMatches = (q: string): number[] => {
-    if (!q.trim()) return [];
-    const ql = q.toLowerCase();
-    const out: number[] = [];
-    for (let i = 0; i < flat.length; i++) if (flat[i].text.toLowerCase().includes(ql)) out.push(i);
-    return out;
-  };
+  const findMatches = (q: string): number[] => searchLayout.find(q.trim());
   const jumpToMatch = (matches: number[], idx: number) => { if (matches.length) scroll.to(matches[idx], true); };
 
   // Fullscreen scroll + in-viewport find. Search mode owns typing (edit the query); otherwise wheel /
@@ -3490,12 +3728,16 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       // are consumed here; clicks/wheels fall through to their handlers below.
       const ptr = parseLastPointer(input);
       if (ptr) {
-        const anchorHit = Boolean(promptAnchor && ptr.y === 1);
+        const paintedPromptId = frameDiffer ? frameDiffer.promptLineId() : promptAnchor?.line.id;
+        const anchorHit = paintedPromptId != null && ptr.y === 1;
         setPromptAnchorHover(anchorHit);
-        if (anchorHit && ptr.kind === "press" && ptr.left && promptAnchor) {
-          clearSelection();
-          flushInputSelection(null);
-          jumpToPrompt(promptAnchor);
+        if (anchorHit && ptr.kind === "press" && ptr.left) {
+          const paintedPrompt = ansiProjection.spans.find((span) => span.line.id === paintedPromptId);
+          if (paintedPrompt) {
+            clearSelection();
+            flushInputSelection(null);
+            jumpToPrompt(paintedPrompt);
+          }
           return;
         }
         // Voice controls use the last PAINTED frame's hit targets, so terminal padding, wrapping,
@@ -3613,7 +3855,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         const w = parseWheelAll(input); // wheel still scrolls the flat window while finding
         if (w) return w.dir === "up" ? scroll.up(3 * w.count) : scroll.down(3 * w.count);
         // Esc: close find and return to the live rich tail (predictable; row domains differ).
-        if (key.escape) { setSearch(null); scrollBottom(); return; }
+        if (key.escape) { setSearch(null); setFindError(""); scrollBottom(); return; }
         if (key.return || key.downArrow) { // next match
           const idx = search.matches.length ? (search.idx + 1) % search.matches.length : 0;
           jumpToMatch(search.matches, idx); return setSearch({ ...search, idx });
@@ -3625,11 +3867,14 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         if (key.pageUp) return scroll.up(Math.max(1, viewH - 1));   // paging still works over the find bar
         if (key.pageDown) return scroll.down(Math.max(1, viewH - 1));
         if (key.backspace || key.delete) {
+          setFindError("");
           const q = search.q.slice(0, -1); const matches = findMatches(q); jumpToMatch(matches, 0);
           return setSearch({ q, matches, idx: 0 });
         }
         // Append typed text, but never a control/CSI residue (mouse report bursts, cursor key echoes).
         if (input && !key.ctrl && !key.meta && !input.startsWith("\x1b") && !isEscapeResidue(input)) {
+          if (search.q.length + input.length > MAX_TRANSCRIPT_QUERY_CHARS) { setFindError(`Search too long (maximum ${MAX_TRANSCRIPT_QUERY_CHARS} characters)`); return; }
+          setFindError("");
           const q = search.q + input; const matches = findMatches(q); jumpToMatch(matches, 0);
           return setSearch({ q, matches, idx: 0 });
         }
@@ -3644,8 +3889,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
       if (key.pageDown) return scrollRows(page);
       if (key.ctrl && key.upArrow) return scrollRows(-1);
       if (key.ctrl && key.downArrow) return scrollRows(1);
-      if (key.home) return scrollTop();
-      if (key.end) return scrollBottom(); // plain End AND ctrl+End (the advertised chord) both jump
+      // Plain Home/End belong to the composer while a draft exists. Ctrl chords always navigate history.
+      if (key.home && (key.ctrl || !promptRef.current)) return scrollTop();
+      if (key.end && (key.ctrl || !promptRef.current)) return scrollBottom();
     },
     { isActive: fullscreen && !overlay && !viewer && approval === null },
   );
@@ -3677,6 +3923,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
               backgroundColor={promptAnchorHover ? "#5a5a5a" : "#3d3d3d"}
             >
               <Text wrap="truncate-end">
+                {frameDiffer ? <Text>{promptAnchorMarker(promptAnchor.line.id)}</Text> : null}
                 <Text color="cyan">{"> "}</Text>
                 <Text color="white">{promptAnchorText}</Text>
               </Text>
@@ -3700,7 +3947,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
               <Box height={bandViewH} width={contentCols} />
             ) : (
               // No differ (NEKO_INCR=0 / tests): render the viewport in-tree as before.
-              <RichView rows={streamRows.length ? [...ansiRows, ...streamRows] : ansiRows} dist={rowScroll.dist} viewH={bandViewH} width={contentCols} />
+              <RichView rows={streamRows.length ? new CombinedRows([ansiRows, streamRows]) : ansiRows} dist={rowScroll.dist} viewH={bandViewH} width={contentCols} />
             )}
           </Box>
           </Box>
@@ -3876,6 +4123,8 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
         </Box>
       ) : null}
 
+      {queueHoldNotice && !overlay && !viewer ? <Text color="yellow">{queueHoldNotice}</Text> : null}
+      {historyLoading ? <Text dimColor>Loading earlier history…</Text> : null}
       {viewer ? (
         <TranscriptViewer lines={viewer} cols={contentCols} rows={rows}
           title={feedbackPreviewCloseRef.current ? "Feedback attachment" : undefined}
@@ -3917,9 +4166,9 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
             <Text>{search.q}</Text><Text inverse> </Text>
             <Text dimColor>
               {"  "}
-              {search.q.trim()
+              {findError || historySearch.error || (historyLoading || historySearch.loading ? "searching history…" : search.q.trim()
                 ? (search.matches.length ? `${search.idx + 1}/${search.matches.length}` : "no matches")
-                : ""}
+                : "")}
               {"  · enter/↑↓ next/prev · esc exit"}
             </Text>
           </Text>
@@ -4028,7 +4277,7 @@ export function ChatApp({ profile, yolo, resume, resumedSession, sessionId, mcpH
   );
 }
 
-export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean; resumeId?: string }) {
+export async function runChat(opts: { profile?: string; yolo: boolean; resume?: boolean; resumeId?: string; contextMemory?: boolean }) {
   // Clear stale mouse tracking before the first await so escape reports cannot pollute startup input.
   // SAFETY: bridge to an untyped JS/DOM API surface; use is guarded by the surrounding checks.
   if ((process.stdout as any).isTTY) process.stdout.write(DISABLE_MOUSE);
@@ -4096,7 +4345,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     if (differ) {
       const rows = getCachedRows(welcome, contentCols) ?? fallbackRows(welcome);
       differ.setBand({ top: 1, height: Math.max(3, (process.stdout.rows ?? 24) - 8) });
-      differ.setBandContent(rows.map((row) => row.length ? `  ${row}` : row), 0);
+      differ.setBandContent(mapRows(rows, (row) => row.length ? `  ${row}` : row), 0);
     }
   }
   const preAltDispose = startFullscreen ? installAltScreenGuard(process.stdout, { mouse: isMouseEnabled() }) : null;
@@ -4104,7 +4353,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     activeSessionId: null, shutdown: async () => {},
   };
   const app = render(
-    <ChatApp profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} completionAlert={completionAlert} bridgeHolder={bridgeHolder} taskLifecycle={taskLifecycle} />,
+    <ChatApp contextMemory={opts.contextMemory} profile={opts.profile} yolo={opts.yolo} resume={opts.resume} resumedSession={resumed} sessionId={id} mcpHub={hub} clearScreen={() => clearHolder.fn()} frameDiffer={differ} preAltDispose={preAltDispose} browserHint={showBrowserHint} setupBrowser={setupBrowser} completionAlert={completionAlert} bridgeHolder={bridgeHolder} taskLifecycle={taskLifecycle} />,
     {
       exitOnCtrlC: false,
       // Explicit: Ink otherwise consults is-in-ci and DISABLES interactive rendering (stops writing
@@ -4141,7 +4390,7 @@ export async function runChat(opts: { profile?: string; yolo: boolean; resume?: 
     const handoff = taskShutdownError
       ? `Task session ${taskLifecycle.activeSessionId ?? "(unknown)"} was not safely closed. Resume is blocked until the checkpoint/lock error is resolved: ${terminalSafeText(taskShutdownError instanceof Error ? taskShutdownError.message : String(taskShutdownError), { maxChars: 400, ascii: true })}`
       : taskLifecycle.activeSessionId
-        ? `Resume this task session with:\r\n  neko chat\r\n  /task resume ${taskLifecycle.activeSessionId}`
+        ? `Resume this task session with:\r\n  neko chat${opts.contextMemory || taskSessionContextMode(cfg) === "structured" ? " --context-memory" : ""}\r\n  /task resume ${taskLifecycle.activeSessionId}`
         : `Resume this session with:\r\n  neko --resume ${id}`;
     await new Promise<void>((resolveWrite) => {
       process.stdout.write(`\r\n\r\n${handoff}\r\n`, "utf8", () => resolveWrite());

@@ -1,3 +1,6 @@
+import {bindStructuredContext} from "../src/adapters/context/compactor.ts";
+import {estimateRequestTokens} from "../src/core/agent-constants.ts";
+import {structuredScopeDigest} from "../src/core/context/state.ts";
 /**
  * `neko` command-line entry point (TypeScript / Bun).
  *
@@ -44,7 +47,7 @@ import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import { assertNoConfiguredCredentialInSourceEvents } from "../src/core/compaction-source.ts";
 import { buildAgentRuntime } from "../src/adapters/agent-runtime.ts";
 import type { AgentRuntime } from "../src/adapters/agent-runtime.ts";
-import { createTaskSession, importTaskSessionV1, inspectTaskSession, loadTaskSession, taskSessionConfigId, type TaskRuntimeInput, type TaskSessionCoordinator, type TaskSessionRuntime } from "../src/adapters/task-session.ts";
+import { createTaskSession, importTaskSessionV1, inspectTaskSession, loadTaskSession, taskSessionConfigId, taskSessionContextMode, type TaskRuntimeInput, type TaskSessionCoordinator, type TaskSessionRuntime } from "../src/adapters/task-session.ts";
 import { matchedTurnContext } from "../src/adapters/turn-context.ts";
 import { planTurnCapabilities } from "../src/adapters/turn-capabilities.ts";
 import {
@@ -79,6 +82,7 @@ interface Args {
   resume: boolean;
   resumeId?: string;
   taskSessionId?: string;
+  contextMemory?: boolean;
   loop: boolean;
   once: boolean;
   noTools?: boolean;
@@ -120,6 +124,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--trials") args.trials = Number(argv[++i]) || 1;
     else if (a === "--max-steps") args.maxSteps = Number(argv[++i]) || undefined;
     else if (a === "--call-budget") args.callBudget = Number(argv[++i]);
+    else if (a === "--context-memory") args.contextMemory = true;
     else if (a === "--task-session") args.taskSessionId = argv[++i] ?? "";
     else if (a === "--profiles") args.profiles = String(argv[++i] ?? "").split(/[\s,]+/).map((value) => value.trim()).filter(Boolean);
     else if (a === "--task") { const id = String(argv[++i] ?? "").trim(); if (id) (args.taskIds ??= []).push(id); }
@@ -149,6 +154,7 @@ function parseArgs(argv: string[]): Args {
 
 function load(args: Args): NekoConfig {
   const cfg = loadConfig({ profile: args.profile });
+  if (args.contextMemory) cfg.data.context_mode = "structured";
   if (args.yolo) cfg.data.mode = "auto";
   // Honor CLI --max-steps for `neko run` (and any other load() path). Previously the flag was
   // parsed and used by bench/* only; run always fell through to config default max_steps=40,
@@ -300,6 +306,7 @@ Options:
   --profiles <a,b>   (bench campaign) comma-separated named provider profiles
   --task <id>        (bench campaign) select one task; repeat for a bounded subset
   --task-session <id> (run) use the active task in an explicit opt-in session
+  --context-memory     opt into structured context for scoped task sessions (schema 3)
   --no-tools         (run) expose no tools; a pure text completion (e.g. a judgment/review pass)
   --image <path>     (run) attach an image (repeatable); perception mode, no tools. Use a vision profile,
                      e.g. neko run --profile nvidia --image pkg.jpg "what is this?"
@@ -550,7 +557,7 @@ async function cmdChat(args: Args): Promise<number> {
   }
   // Lazy import: keep Ink/React out of the startup path for non-chat commands.
   const { runChat } = await import("../src/ui/chat.tsx");
-  await runChat({ profile: args.profile, yolo: args.yolo, resume: args.resume, resumeId: args.resumeId });
+  await runChat({ profile: args.profile, yolo: args.yolo, resume: args.resume, resumeId: args.resumeId, contextMemory: args.contextMemory });
   return 0;
 }
 
@@ -1233,7 +1240,8 @@ async function cmdRun(args: Args): Promise<number> {
       authorityId: "local",
       configId: taskSessionConfigId(cfg, args.yolo ? "auto" : cfg.mode),
       sessionId: args.taskSessionId,
-      runtimeFactory: async ({ scope, messages, sourceEvents }) => {
+      contextMode: taskSessionContextMode(cfg),
+      runtimeFactory: async ({ scope, messages, sourceEvents, contextMode, contextState }) => {
         const built = await buildAgentRuntime(cfg, {
           root: process.cwd(),
           taskScope: scope,
@@ -1253,9 +1261,19 @@ async function cmdRun(args: Args): Promise<number> {
           built.agent.messages = messages as Agent["messages"];
           built.agent.refreshSystemPrompt();
         }
+        const context = contextMode === "structured" ? bindStructuredContext({agent: built.agent, registry: built.registry,
+          home: cfg.resolvedHome, scope, messages, state: contextState,
+          inputBudget: () => cfg.contextWindow - Math.max(0, cfg.maxTokens),
+          countTokens: rows => estimateRequestTokens([...rows], built.registry.schemas()), credential: () => cfg.apiKey,
+          publish: (digest, candidate, state) => {
+            if (!taskSession || taskSession.active.scope !== scope) throw new Error("Task changed before context publication");
+            return taskSession.checkpointCompaction(digest, candidate, state);
+          }}) : undefined;
         return {
           ...built,
-          getMessages: () => built.agent.messages,
+          getMessages: () => {built.agent.assertContextReady(); return built.agent.messages;},
+          contextRecoveryRequired: () => built.agent.contextRecoveryRequired,
+          getStructuredContextState: context ? () => context.snapshot(built.agent.messages) : undefined,
           getSourceEvents: () => {
             const events = built.agent.compactionSourceEvents();
             assertNoConfiguredCredentialInSourceEvents(events, cfg.apiKey);
@@ -1386,12 +1404,14 @@ async function cmdTaskSession(args: Args): Promise<number> {
   const [action, sessionId, taskId] = args.positionals;
   const cfg = load(args);
   const root = process.cwd();
-  const base = { home: cfg.resolvedHome, root, authorityId: "local", configId: taskSessionConfigId(cfg) };
-  const runtimeFactory = ({ messages, sourceEvents }: TaskRuntimeInput): TaskSessionRuntime => {
+  const base = { home: cfg.resolvedHome, root, authorityId: "local", configId: taskSessionConfigId(cfg), contextMode: taskSessionContextMode(cfg) };
+  const runtimeFactory = ({ messages, sourceEvents, contextMode, contextState, scope }: TaskRuntimeInput): TaskSessionRuntime => {
     const working = [...messages];
     // Metadata-only task commands must preserve the archive even without constructing an Agent.
     return {
       getMessages: () => working,
+      getStructuredContextState: contextMode ? () => contextState ?? {version: 1, journal: {version: 1,
+        scope: structuredScopeDigest(scope.id, scope.canonicalRoot, scope.executionAuthorityId), head: null}, capsule: null} : undefined,
       getSourceEvents: () => {
         assertNoConfiguredCredentialInSourceEvents(sourceEvents, cfg.apiKey);
         return sourceEvents;
@@ -1413,6 +1433,7 @@ async function cmdTaskSession(args: Args): Promise<number> {
     return 0;
   }
   if (action === "import-v1") {
+    if (taskSessionContextMode(cfg)) { console.error("neko: import-v1 preserves schema 2; run it in legacy context mode"); return 2; }
     if (!sessionId || taskId) {
       console.error("usage: neko task-session import-v1 <v1-session-id>");
       return 2;
@@ -1755,6 +1776,7 @@ async function main(): Promise<number> {
           configForRoot: (root, savedProfile) => {
             const cfg = loadConfig({ profile: savedProfile ?? args.profile, cwd: root });
             if (args.yolo) cfg.data.mode = "auto";
+            if (args.contextMemory) cfg.data.context_mode = "structured";
             return cfg;
           },
         });

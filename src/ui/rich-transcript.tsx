@@ -1,3 +1,4 @@
+import type { RowSource } from "./row-source.ts";
 /**
  * RichView — the fullscreen transcript viewport: a window of PRE-RENDERED ANSI rows (see ansi-cache.ts),
  * bottom-anchored. Each transcript line was rendered rich (markdown/diffs/syntax) exactly ONCE off-screen;
@@ -13,7 +14,7 @@ import { memo } from "react";
 
 // memo: during streaming the parent re-renders per delta, but rows/dist/viewH/width only change on
 // commits, warm upgrades, or scrolling - the viewport bails out of all pure-stream re-renders.
-export const RichView = memo(function RichView({ rows, dist, viewH, width }: { rows: string[]; dist: number; viewH: number; width: number }): React.ReactNode {
+export const RichView = memo(function RichView({ rows, dist, viewH, width }: { rows: RowSource; dist: number; viewH: number; width: number }): React.ReactNode {
   const end = Math.max(0, rows.length - dist);
   const start = Math.max(0, end - viewH);
   const shown = rows.slice(start, end);

@@ -49,23 +49,16 @@ export function RunningLine({ text }: { text: string }) {
   );
 }
 
-// Compaction progress bar glyphs (filled/empty parallelograms, U+25B0/U+25B1) + rotating tips.
-// Same block-bar look claude-code uses; both render as text (not emoji) on Windows Terminal.
-const BAR_FILLED = "▰";
-const BAR_EMPTY = "▱";
 const COMPACT_TIPS = [
-  "the original task is kept verbatim across a compaction - it never gets summarized away",
-  "recent turns stay in full; only older ones are condensed into the summary",
-  "run /compact anytime to free context on demand, before it fills up",
+  "summaries can omit details; inspect original history when exact evidence matters",
+  "recent turns are retained, but large tool outputs may be shortened",
+  "compact only when useful: a shorter context is not always faster or cheaper",
   "big tool outputs are trimmed on compaction - the model rarely re-reads them in full",
   "Plan Mode (shift+tab twice) helps prep a complex request before it grows the context",
 ];
 
-/** The compaction progress indicator: a pulsing star + "Compacting conversation... (Ns)" and a block
- * bar that fills on a TIME estimate. A summary is one opaque model call, so real progress is unknowable
- * (claude-code's bar is time-based too); we ease toward ~95% and let the caller unmount this on
- * completion, so it never falsely claims "done". A slowly-rotating tip fills the wait. Own 120ms clock. */
-export function CompactingLine({ start, expectedMs = 15000 }: { start: number; expectedMs?: number }) {
+/** The provider does not report compaction progress. Show elapsed time, never a fabricated percent. */
+export function CompactingLine({ start }: { start: number }) {
   const [now, setNow] = useState(start);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 120);
@@ -74,10 +67,6 @@ export function CompactingLine({ start, expectedMs = 15000 }: { start: number; e
   const elapsed = Math.max(0, now - start);
   const secs = Math.floor(elapsed / 1000);
   const star = FRAMES[Math.floor(elapsed / 160) % FRAMES.length];
-  // Ease toward 95% (1 - e^-t/τ never reaches 100): alive-feeling without lying that it's finished.
-  const pct = Math.min(95, Math.round(95 * (1 - Math.exp(-elapsed / expectedMs))));
-  const WIDTH = 40;
-  const fill = Math.round((pct / 100) * WIDTH);
   const tip = COMPACT_TIPS[Math.floor(elapsed / 4000) % COMPACT_TIPS.length];
   return (
     <Box flexDirection="column">
@@ -86,12 +75,7 @@ export function CompactingLine({ start, expectedMs = 15000 }: { start: number; e
         <Text color={RUN_BLUE}>Compacting conversation… </Text>
         <Text color="#9a9a9a">({secs}s)</Text>
       </Text>
-      <Text>
-        {"  "}
-        <Text color={RUN_BLUE}>{BAR_FILLED.repeat(fill)}</Text>
-        <Text color="#4a4a4a">{BAR_EMPTY.repeat(WIDTH - fill)}</Text>
-        <Text color="#9a9a9a"> {pct}%</Text>
-      </Text>
+      <Text color="#9a9a9a">  Waiting for the summary; completion time is unknown. Esc cancels.</Text>
       <Text color="#9a9a9a">{chromeTreePrefix()}tip: {tip}</Text>
     </Box>
   );

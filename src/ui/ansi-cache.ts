@@ -1,3 +1,5 @@
+import { TranscriptLayout } from "./transcript-layout.ts";
+import { LayoutRows, type RowSource } from "./row-source.ts";
 /**
  * ANSI line cache — render each transcript Line to styled terminal rows ONCE, then reuse the strings.
  *
@@ -16,6 +18,7 @@
  */
 import { render } from "ink";
 import { createElement } from "react";
+import stringWidth from "string-width";
 
 import type { NekoConfig } from "../adapters/config.ts";
 import { terminalSafeText } from "../shared/terminal-text.ts";
@@ -68,14 +71,65 @@ export function renderLineRows(line: Line, width: number, cfg: NekoConfig): stri
 
 /** Cheap synchronous fallback for a line whose rich rows haven't been warmed yet: one plain row in the
  * transcript's glyph style. Upgraded in place when the rich rows land. */
-export function fallbackRows(line: Line): string[] {
+const fallbackSegments = new Intl.Segmenter(undefined, {granularity: "grapheme"});
+export function fallbackRows(line: Line, width = 80): string[] {
   const { glyph } = styleFor(line.kind);
   const first = String(line.text).split("\n", 1)[0];
-  return [glyph + terminalSafeText(first, { maxChars: 512 })];
+  const text = glyph + terminalSafeText(first, { maxChars: 512 });
+  let row = "", cells = 0;
+  for (const {segment} of fallbackSegments.segment(text)) {
+    const size = stringWidth(segment);
+    if (cells + size > width) break;
+    row += segment; cells += size;
+  }
+  // The frame differ writes these rows directly. Overflow would wrap outside its scroll band,
+  // leaving stale text over the composer even after the full rich block has finished warming.
+  return [row];
 }
 
-const cache = new Map<number, { width: number; rows: string[] }>();
+const cache = new Map<number, { width: number; rows: RowSource }>();
+const pending = new Map<number, {width: number; controller: AbortController}>();
+interface LargeJob { line: Line; width: number; controller: AbortController; onProgress: () => void }
+const largeQueue: LargeJob[] = [];
+let largeBusy = false;
+async function prepareNextLarge(): Promise<void> {
+  if (largeBusy) return;
+  const job = largeQueue.shift();
+  if (!job) return;
+  if (job.controller.signal.aborted) { void prepareNextLarge(); return; }
+  largeBusy = true;
+  const {line, width, controller, onProgress} = job;
+  try {
+    const layout = await TranscriptLayout.create([line], width, controller.signal);
+    if (!controller.signal.aborted && pending.get(line.id)?.controller === controller) {
+      putRows(line.id, width, new LayoutRows(layout));
+      pending.delete(line.id);
+      onProgress();
+    }
+  } catch {
+    if (!controller.signal.aborted && pending.get(line.id)?.controller === controller) {
+      pending.delete(line.id);
+      putRows(line.id, width, ["History block could not be prepared; original content is retained"]);
+      onProgress();
+    }
+  } finally {
+    largeBusy = false;
+    setTimeout(() => { void prepareNextLarge(); }, 0);
+  }
+}
 let warmTimer: ReturnType<typeof setTimeout> | null = null;
+const MAX_CACHED_BLOCKS = 256;
+let protectedIds = new Set<number>();
+function putRows(id: number, width: number, rows: RowSource): void {
+  cache.delete(id);
+  cache.set(id, {width, rows});
+  while (cache.size > MAX_CACHED_BLOCKS) {
+    const removable = [...cache.keys()].find((key) => !protectedIds.has(key));
+    if (removable === undefined) break;
+    cache.delete(removable);
+  }
+}
+
 
 /** One rich render is synchronous and therefore cannot be pre-empted by the chunk scheduler. A single
  * 45k legacy assistant line took >50s in a real resumed session. Keep indivisible work bounded; the
@@ -83,41 +137,20 @@ let warmTimer: ReturnType<typeof setTimeout> | null = null;
 export const RICH_RENDER_MAX_CHARS = 8_000;
 
 export function canRichRender(line: Line): boolean {
+  // Restored tool blocks must expose their complete output in the main timeline. The ordinary
+  // tool renderer deliberately uses a summary/eight-row preview; index full blocks lazily instead.
+  if (line.kind === "tool_result_full") return false;
   const body = line.kind === "tool_result" && line.summary ? line.summary : line.text;
   return String(body).length <= RICH_RENDER_MAX_CHARS;
 }
 
-/** Cheap permanent rendering for an oversized line: retain its useful tail in a viewport-sized block.
- * Unlike the one-row temporary fallback, this is cached and never enters the synchronous rich renderer. */
-function boundedPlainRows(line: Line, width: number): string[] {
-  const { glyph } = styleFor(line.kind);
-  const body = String(line.kind === "tool_result" && line.summary ? line.summary : line.text)
-    .replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-  const wrap = Math.max(8, width - glyph.length);
-  const maxRows = 12;
-  const tail = terminalSafeText(body.slice(-wrap * (maxRows - 1)), {
-    maxChars: wrap * (maxRows - 1),
-    preserveLineBreaks: true,
-  });
-  const segments: string[] = [];
-  for (const raw of tail.split("\n")) {
-    if (!raw.length) { segments.push(""); continue; }
-    for (let i = 0; i < raw.length; i += wrap) segments.push(raw.slice(i, i + wrap));
-  }
-  const shown = segments.slice(-(maxRows - 1));
-  return [
-    `${glyph}... [earlier content hidden; /transcript shows the full thread]`,
-    ...shown.map((segment) => `${" ".repeat(glyph.length)}${segment}`),
-  ];
-}
-
 function cacheRows(line: Line, width: number, cfg: NekoConfig): string[] {
-  if (!canRichRender(line)) return boundedPlainRows(line, width);
+  if (!canRichRender(line)) return fallbackRows(line, width);
   try { return renderLineRows(line, width, cfg); }
-  catch { return fallbackRows(line); }
+  catch { return fallbackRows(line, width); }
 }
 
-export function getCachedRows(line: Line, width: number): string[] | null {
+export function getCachedRows(line: Line, width: number): RowSource | null {
   const hit = cache.get(line.id);
   return hit && hit.width === width ? hit.rows : null;
 }
@@ -126,11 +159,15 @@ export function getCachedRows(line: Line, width: number): string[] | null {
  * are already shown as formatted Markdown; caching the final assistant line synchronously prevents a
  * one-frame fallback to raw `**markdown**` while the background warmer catches up. */
 export function primeAnsiCache(line: Line, width: number, cfg: NekoConfig): void {
-  cache.set(line.id, { width, rows: cacheRows(line, width, cfg) });
+  if (canRichRender(line)) putRows(line.id, width, cacheRows(line, width, cfg));
 }
 
 export function clearAnsiCache(): void {
   cache.clear();
+  for (const job of pending.values()) job.controller.abort();
+  pending.clear();
+  largeQueue.length = 0;
+  protectedIds.clear();
   if (warmTimer) { clearTimeout(warmTimer); warmTimer = null; }
 }
 
@@ -161,6 +198,7 @@ export function warmAnsiCache(lines: Line[], width: number, cfg: NekoConfig, onP
   if (center !== undefined) {
     for (let i = Math.max(0, center - WARM_CENTER_RADIUS); i < Math.min(lines.length, center + WARM_CENTER_RADIUS); i++) wanted.add(i);
   }
+  protectedIds = new Set([...wanted].map((index) => lines[index].id));
   const missing = [...wanted].sort((a, b) => b - a).map((i) => lines[i]).filter((l) => l && !getCachedRows(l, width));
   if (!missing.length) return;
   let i = 0;
@@ -170,7 +208,14 @@ export function warmAnsiCache(lines: Line[], width: number, cfg: NekoConfig, onP
     const t0 = performance.now();
     do {
       const l = missing[i++];
-      cache.set(l.id, { width, rows: cacheRows(l, width, cfg) });
+      if (canRichRender(l)) putRows(l.id, width, cacheRows(l, width, cfg));
+      else if (pending.get(l.id)?.width !== width) {
+        pending.get(l.id)?.controller.abort();
+        const controller = new AbortController();
+        pending.set(l.id, {width, controller});
+        largeQueue.push({line: l, width, controller, onProgress});
+        setTimeout(() => { void prepareNextLarge(); }, 0);
+      }
     } while (i < missing.length && performance.now() - t0 < BUDGET_MS);
     onProgress();
     if (i < missing.length) warmTimer = setTimeout(step, 16);

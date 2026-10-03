@@ -1,3 +1,5 @@
+import {bindStructuredContext} from "./context/compactor.ts";
+import {estimateRequestTokens} from "../core/agent-constants.ts";
 /** ACP v1 adapter: exposes the production Neko Agent over newline-delimited JSON-RPC stdio. */
 import * as acp from "@agentclientprotocol/sdk";
 import { createHash, randomUUID } from "node:crypto";
@@ -45,10 +47,10 @@ import { applySkillPolicyForTurn } from "./skills.ts";
 import { planTurnCapabilities } from "./turn-capabilities.ts";
 import { matchedTurnContext } from "./turn-context.ts";
 import {
-  createTaskSession, loadTaskSession, taskSessionConfigId, taskSessionExists,
+  createTaskSession, loadTaskSession, taskSessionConfigId, taskSessionContextMode, taskSessionExists,
   TaskSessionRecoveryRequiredError, TaskSessionWriterUnavailableError, TaskSwitchCommittedError,
   type ExpectedTaskActivation, type FixedTaskProtocolV1, type TaskActivationReceipt,
-  type TaskRuntimeInput, type TaskSessionCoordinator,
+  type TaskRuntimeInput, type TaskSessionCoordinator, type TaskSessionRuntime,
 } from "./task-session.ts";
 
 import { isJsonObject, isText } from "../shared/wire.ts";
@@ -157,7 +159,7 @@ function taskOuterMeta(session: AcpSession) {
     "neko.execution": session.runtime.registry.taskExecutionReceipt()! } } : {};
 }
 
-interface ScopedAcpRuntime {
+interface ScopedAcpRuntime extends TaskSessionRuntime {
   session: AcpSession;
   getMessages(): unknown[];
   getSourceEvents(): CompactionSourceEvent[];
@@ -266,6 +268,7 @@ function comparableRoot(path: string): string {
 const ACP_COMMANDS: acp.AvailableCommand[] = [
   { name: "help", description: "Show ACP commands implemented by Neko Core." },
   { name: "cost", description: "Show cumulative provider token usage for this session." },
+  { name: "compact", description: "Compact historical context through the session's durable context boundary." },
   { name: "sessions", description: "List durable Neko sessions for this workspace." },
   { name: "tools", description: "List tools available in this ACP session." },
 ];
@@ -953,9 +956,20 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       input.messages.length > 0, hostServer, input.scope);
     try { session.runtime.agent.restoreCompactionSourceEvents(input.sourceEvents); }
     catch (error) { await session.close().catch(() => {}); throw error; }
+    const context = input.contextMode === "structured" ? bindStructuredContext({agent: session.runtime.agent, registry: session.runtime.registry,
+      home: cfg.resolvedHome, scope: input.scope, messages: session.runtime.agent.messages, state: input.contextState,
+      inputBudget: () => session.runtime.config.contextWindow - Math.max(0, session.runtime.config.maxTokens),
+      countTokens: rows => estimateRequestTokens([...rows], session.runtime.registry.schemas()), credential: () => session.runtime.config.apiKey,
+      publish: (digest, candidate, state) => {
+        const coordinator = taskSessions.get(input.sessionId);
+        if (!coordinator || coordinator.active.scope !== input.scope) throw new Error("Task changed before context publication");
+        return coordinator.checkpointCompaction(digest, candidate, state);
+      }}) : undefined;
     return {
       session,
-      getMessages: () => scopedMessages(session),
+      getMessages: () => {session.runtime.agent.assertContextReady(); return scopedMessages(session);},
+      contextRecoveryRequired: () => session.runtime.agent.contextRecoveryRequired,
+      getStructuredContextState: context ? () => context.snapshot(session.runtime.agent.messages) : undefined,
       getSourceEvents: () => {
         const events = session.runtime.agent.compactionSourceEvents();
         assertNoConfiguredCredentialInSourceEvents(events, session.runtime.config.apiKey);
@@ -1039,7 +1053,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       if (!isText(taskLabel)) throw new acp.RequestError(-32602, "neko.taskLabel must be a task label string.");
       const coordinator = await createTaskSession({
         home: cfg.resolvedHome, root, label: taskLabel,
-        authorityId: taskAuthorityId, configId: taskConfigId(cfg),
+        authorityId: taskAuthorityId, configId: taskConfigId(cfg), contextMode: taskSessionContextMode(cfg),
         ...(taskProtocol?.executionVersion ? { executionAuthorityId: executionAuthorityId(cfg, client) } : undefined),
         ...(taskProtocol ? { taskProtocol } : undefined),
         runtimeFactory: taskRuntimeFactory(root, cfg, client, hostServer),
@@ -1136,7 +1150,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         if (taskProtocol?.executionVersion) assertExecutionExpected(params._meta, taskConfig, client, expectedTask);
         coordinator = await loadTaskSession({
           home: taskConfig.resolvedHome, root, sessionId: params.sessionId,
-          authorityId: taskAuthorityId, configId: taskConfigId(taskConfig),
+          authorityId: taskAuthorityId, configId: taskConfigId(taskConfig), contextMode: taskSessionContextMode(taskConfig),
           ...(taskProtocol?.executionVersion ? { executionAuthorityId: executionAuthorityId(taskConfig, client) } : undefined),
           ...(taskProtocol ? { taskProtocol, expectedTask } : undefined),
           runtimeFactory: taskRuntimeFactory(root, taskConfig, client, hostServer),
@@ -1352,6 +1366,27 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           update: { sessionUpdate: "agent_message_chunk", messageId: `msg_${randomUUID()}`, content: { type: "text", text } },
         });
         return { stopReason: "end_turn", ...taskOuterMeta(session) };
+      }
+      if (/^\/compact\s*$/.test(input.text)) {
+        session.record.turnState = {status: "running", startedAt: new Date().toISOString(), activeToolCallIds: []};
+        await persist(session, session.record.turnState);
+        let cancelled = false;
+        try { await runtime.agent.compact({signal: pending.signal, minHeadTokens: 256, minSavingsTokens: 64}); }
+        catch (error) {
+          if (!pending.signal.aborted || runtime.agent.contextRecoveryRequired) throw error;
+          cancelled = true;
+        }
+        const applied = runtime.agent.lastCompactionOutcome === "applied";
+        const text = applied ? "Compacted historical context and saved the checkpoint."
+          : cancelled ? "Compaction cancelled before publication; original context retained."
+          : `Context unchanged (${runtime.agent.lastCompactionOutcome}).`;
+        const stopReason = pending.signal.aborted ? "cancelled" : "end_turn";
+        session.record.turnState = {status: "idle", lastStopReason: stopReason, activeToolCallIds: []};
+        await persist(session, session.record.turnState);
+        await client.notify(acp.methods.client.session.update, {sessionId: session.sessionId, ...taskOuterMeta(session),
+          update: {sessionUpdate: "agent_message_chunk", messageId: `msg_${randomUUID()}`, content: {type: "text", text}}});
+        await syncSessionState(session, client);
+        return {stopReason, ...taskOuterMeta(session)};
       }
       if (hostProfile) {
         lease = runtime.registry.enterTurn({

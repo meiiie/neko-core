@@ -7,7 +7,7 @@
  * Release artifact: `bun scripts/e2e-startup-lifecycle.ts --exe ./neko-windows-x64.exe`.
  * Source fallback: `bun scripts/e2e-startup-lifecycle.ts --source`.
  */
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -29,6 +29,10 @@ const command = sourceMode
   : [exe, "--yolo"];
 
 const home = mkdtempSync(join(tmpdir(), "neko-startup-lifecycle-"));
+mkdirSync(join(home, ".neko-core"));
+writeFileSync(join(home, ".neko-core", "config.json"), JSON.stringify({
+  auto_update: false, auto_update_check: false, completion_sound: false, mcp_servers: {},
+}));
 const vt = new VirtualTerminal(118, 30);
 let raw = "";
 let composerSeen = false;

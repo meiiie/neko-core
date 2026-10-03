@@ -41,12 +41,15 @@ export function isNewer(latest: string, current: string): boolean {
 }
 
 /** Latest stable release tag from GitHub, with a non-API fallback for shared-IP rate limits. */
-export async function latestVersion(): Promise<string | null> {
+export async function latestVersion(signal?: AbortSignal): Promise<string | null> {
+  if (signal?.aborted) return null;
+  const requestSignal = () => signal ? AbortSignal.any([signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000);
   try {
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       headers: { "user-agent": "neko-core", accept: "application/vnd.github+json" },
-      signal: AbortSignal.timeout(8000),
+      signal: requestSignal(),
     });
+    if (signal?.aborted) return null;
     if (res.ok) {
       const data: any = await res.json();
       if (isText(data.tag_name) && STABLE_TAG.test(data.tag_name) && !data.draft && !data.prerelease) {
@@ -56,14 +59,15 @@ export async function latestVersion(): Promise<string | null> {
   } catch {
     /* fall through to GitHub's official release redirect */
   }
+  if (signal?.aborted) return null;
   try {
     const res = await fetch(`https://github.com/${REPO}/releases/latest`, {
       method: "HEAD",
       redirect: "follow",
       headers: { "user-agent": "neko-core" },
-      signal: AbortSignal.timeout(8000),
+      signal: requestSignal(),
     });
-    if (!res.ok) return null;
+    if (signal?.aborted || !res.ok) return null;
     const match = /\/releases\/tag\/(v\d+\.\d+\.\d+)(?:$|[/?#])/.exec(res.url);
     return match?.[1] ?? null;
   } catch {
@@ -429,19 +433,22 @@ export function activateStagedBinary(exe: string, staged: string): void {
 
 /** Cached startup check: returns the newer version string if one exists, else null. Never throws.
  * See UPDATE_RECHECK_MS for why "up to date" expires sooner than "an update is waiting". */
-export async function checkForUpdate(now = Date.now()): Promise<string | null> {
+export async function checkForUpdate(now = Date.now(), signal?: AbortSignal): Promise<string | null> {
+  if (signal?.aborted) return null;
+  const path = cachePath();
   try {
-    const c = JSON.parse(readFileSync(cachePath(), "utf-8"));
+    const c = JSON.parse(readFileSync(path, "utf-8"));
     const cachedNewer = Boolean(c.latest) && isNewer(c.latest, VERSION);
     const ttl = cachedNewer ? UPDATE_RECHECK_MS.found : UPDATE_RECHECK_MS.upToDate;
     if (isJsonNumber(c.at) && now - c.at < ttl) return cachedNewer ? c.latest : null;
   } catch {
     /* no/!valid cache -> fetch fresh */
   }
-  const latest = await latestVersion();
+  const latest = await latestVersion(signal);
+  if (signal?.aborted) return null;
   try {
-    mkdirSync(join(homeDir(), ".neko-core"), { recursive: true });
-    writeFileSync(cachePath(), JSON.stringify({ at: now, latest }));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ at: now, latest }));
   } catch {
     /* cache write is best-effort */
   }

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { acquireSessionLease, AsyncSessionWriter, isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, saveSessionAsync, setSessionsDir } from "../src/adapters/session.ts";
+import { acquireSessionLease, AsyncSessionWriter, isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, saveSessionAsync, setSessionsDir, sessionAutoTitle, sessionTitle } from "../src/adapters/session.ts";
 import { isJsonNumber } from "../src/shared/wire.ts";
 import { createCompletionContract } from "../src/core/completion-contract.ts";
 
@@ -433,4 +433,45 @@ test("NODE_ENV=test diverts the store away from the real home", () => {
   } finally {
     setSessionsDir(TEST_DIR); // restore for any test that runs after this one
   }
+});
+
+test("AsyncSessionWriter binds its destination before a deferred snapshot can change stores", async () => {
+  const other = mkdtempSync(join(tmpdir(), "neko-other-session-store-"));
+  setSessionsDir(TEST_DIR);
+  const writer = new AsyncSessionWriter();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const id = newSessionId();
+  try {
+    const saved = writer.saveLazy(async () => {
+      await gate;
+      return {id, createdAt: new Date().toISOString(), updatedAt: "", cwd: process.cwd(), model: "fixture", messages: [{role: "user", content: "bound to original store"}]};
+    });
+    setSessionsDir(other);
+    release();
+    await saved;
+    expect(existsSync(join(TEST_DIR, `${id}.json`))).toBe(true);
+    expect(existsSync(join(other, `${id}.json`))).toBe(false);
+  } finally { setSessionsDir(TEST_DIR); rmSync(other, {recursive: true, force: true}); }
+});
+
+
+test("automatic session title uses original request metadata, not a compacted capsule", () => {
+  const messages = [
+    {role: "user", content: "[Summary of earlier conversation] condensed", _neko_internal: true, _neko_compaction_first_user: "@a.md\nexpanded fixture contents"},
+    {role: "user", content: "later question"},
+  ];
+  expect(sessionAutoTitle(messages)).toBe("@a.md");
+  expect(sessionAutoTitle([{role: "user", content: "internal", _neko_internal: true}, {role: "user", content: "real request"}])).toBe("real request");
+  const now = new Date().toISOString();
+  const session = {id: "stableautotitle", createdAt: now, updatedAt: now, cwd: process.cwd(), model: "fixture", messages};
+  saveSession(session);
+  expect(sessionTitle(loadSession(session.id)!)).toBe("@a.md");
+  expect(listSessionMetas().find((m) => m.id === session.id)?.titleText).toBe("@a.md");
+  expect(sessionTitle({...session, title: "Pinned title"})).toBe("Pinned title");
+  const indexPath = join(TEST_DIR, ".index.json");
+  const legacy = JSON.parse(readFileSync(indexPath, "utf8"));
+  legacy.v = 1; legacy.metas[session.id].titleText = "[Summary of earlier conversation]";
+  writeFileSync(indexPath, JSON.stringify(legacy));
+  expect(listSessionMetas().find((m) => m.id === session.id)?.titleText).toBe("@a.md");
 });

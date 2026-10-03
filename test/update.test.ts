@@ -381,3 +381,21 @@ test("cleanupStaleUpdate sweeps orphaned staging files but never a fresh one", (
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("cancelled startup check cannot fall back to another request after its owner closes", async () => {
+  const original = globalThis.fetch;
+  const controller = new AbortController();
+  let calls = 0;
+  globalThis.fetch = fetchStub(async (_input, options) => {
+    calls++;
+    return new Promise((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("cancelled")), {once: true}));
+  });
+  try {
+    const pending = latestVersion(controller.signal);
+    controller.abort();
+    expect(await pending).toBeNull();
+    expect(calls).toBe(1);
+    expect(await latestVersion(controller.signal)).toBeNull();
+    expect(calls).toBe(1);
+  } finally { globalThis.fetch = original; }
+});

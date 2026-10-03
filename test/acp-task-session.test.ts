@@ -821,3 +821,50 @@ test("ACP keeps the committed target active if old-task cleanup fails after a sw
     for (const path of [root, home]) rmSync(path, { recursive: true, force: true });
   }
 });
+
+test("ACP structured context uses the shared compact transaction and resumes its capsule and source journal", async () => {
+  const root = mkdtempSync(join(tmpdir(), "neko-acp-structured-root-"));
+  const home = mkdtempSync(join(tmpdir(), "neko-acp-structured-home-"));
+  const cfg = loadConfig({cwd: root, home}); cfg.data.context_mode = "structured";
+  let current: Agent | undefined, registry: ToolRegistry | undefined;
+  const app = () => createNekoAcpAgent({config: cfg, buildRuntime: async (config, options) => {
+    registry = new ToolRegistry(options.root, options.mode, options.approval);
+    registry.memoryHome = config.resolvedHome;
+    registry.computerInputPolicy = config.computerUseInputPolicy;
+    if (options.computer === false) registry.disabled.add("computer");
+    else if (options.computer) registry.computerPort = options.computer;
+    if (options.taskScope) registry.bindTaskScope(options.taskScope);
+    current = new Agent({tools: registry, sourceArchiveCredential: () => undefined,
+      provider: {complete: async () => ({content: "Historical source-backed summary", tool_calls: []})},
+      onCheckpoint: options.onCheckpoint, onEvent: options.onEvent, onDelta: options.onDelta,
+      verifyBeforeExit: false, verifyStateChangesBeforeExit: false});
+    return {agent: current, registry, config, close: async () => {}};
+  }});
+  let sessionId = "", sourceId = "";
+  try {
+    await acp.client({name: "structured-compact"}).connectWith(app(), async ctx => {
+      await ctx.request(acp.methods.agent.initialize, {protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {}});
+      const created = await ctx.request(acp.methods.agent.session.new, {cwd: root, mcpServers: [], _meta: {"neko.taskLabel": "A"}});
+      sessionId = created.sessionId;
+      for (let i = 0; i < 12; i++) current!.messages.push({role: "user", content: `ACP_ORIGINAL_${i}`},
+        {role: "assistant", content: "historical observation ".repeat(100)});
+      await ctx.request(acp.methods.agent.session.prompt, {sessionId, prompt: [{type: "text", text: "/compact"}]});
+      const state = JSON.parse(readFileSync(join(home, ".neko-core", "task-sessions", `${sessionId}.json`), "utf8"));
+      expect(state.schemaVersion).toBe(3);
+      expect(state.tasks[0].contextState.capsule).not.toBeNull();
+      expect(current!.messages.some(message => message.role === "assistant" && message._neko_context_capsule === true)).toBe(true);
+      sourceId = state.tasks[0].contextState.capsule.sources[0];
+      expect(String(await registry!.execute("source_lookup", {id: sourceId}))).toContain("ACP_ORIGINAL_");
+      await ctx.request(acp.methods.agent.session.close, {sessionId});
+    });
+    await acp.client({name: "structured-resume"}).connectWith(app(), async ctx => {
+      await ctx.request(acp.methods.agent.initialize, {protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {}});
+      await ctx.request(acp.methods.agent.session.resume, {cwd: root, mcpServers: [], sessionId});
+      expect(current!.messages.some(message => message._neko_context_capsule === true)).toBe(true);
+      expect(String(await registry!.execute("source_lookup", {id: sourceId}))).toContain("ACP_ORIGINAL_");
+      await ctx.request(acp.methods.agent.session.close, {sessionId});
+    });
+  } finally {
+    for (const path of [root, home]) rmSync(path, {recursive: true, force: true});
+  }
+});

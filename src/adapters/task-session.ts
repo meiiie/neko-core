@@ -1,8 +1,12 @@
+import {StructuredCheckpointPublishedError, writeStructuredCheckpoint} from "./context/durable-write.ts";
+import {PagedSources} from "./context/paged-sources.ts";
+import {decodeStructuredContextState, type StructuredContextState} from "../core/context/state.ts";
+import { validDisplayHistoryRef, validDisplayPending, type DisplayEntrySeed, type DisplayHistoryRef } from "../core/display-history.ts";
 /** Opt-in task sessions. Legacy v2 sessions are never read or rewritten here. */
 /* eslint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/no-runtime-typeof -- This adapter parses untrusted persisted JSON and validates runtime boundary inputs. */
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, constants as fsConstants, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { createTaskScope, revokeTaskScope, type TaskScope } from "../core/task-scope.ts";
 import { sourceProjectionMatches, validateCompactionSourceEvents, type CompactionSourceEvent } from "../core/compaction-source.ts";
@@ -12,6 +16,10 @@ const MAX_STORE_BYTES = 64 * 1024 * 1024;
 const SAFE_ID = /^[a-f0-9]{32}$/;
 
 export interface TaskSessionRuntime {
+  getStructuredContextState?(): StructuredContextState | undefined;
+  contextRecoveryRequired?(): boolean;
+  getDisplayHistory?(): DisplayHistoryRef;
+  getDisplayPending?(): DisplayEntrySeed[];
   /** The Agent's current working history, never a merged UI timeline. */
   getMessages(): unknown[];
   /** Raw read_file observations, captured before later working-context compaction/masking. */
@@ -24,6 +32,8 @@ export interface TaskSessionRuntime {
 }
 
 export interface TaskRuntimeInput {
+  contextMode?: "structured";
+  contextState?: StructuredContextState;
   sessionId: string;
   taskId: string;
   label: string;
@@ -31,6 +41,8 @@ export interface TaskRuntimeInput {
   scope: TaskScope;
   messages: unknown[];
   sourceEvents: CompactionSourceEvent[];
+  displayHistory?: DisplayHistoryRef;
+  displayPending?: DisplayEntrySeed[];
 }
 
 export interface ActiveTaskRuntime<R extends TaskSessionRuntime> {
@@ -44,17 +56,20 @@ export interface ActiveTaskRuntime<R extends TaskSessionRuntime> {
 export type TaskRuntimeFactory<R extends TaskSessionRuntime> = (input: TaskRuntimeInput) => R | Promise<R>;
 
 interface StoredTask {
+  contextState?: StructuredContextState;
   id: string;
   label: string;
   canonicalRoot: string;
   revision: number;
   messages: unknown[];
   sourceEvents: CompactionSourceEvent[];
+  displayHistory?: DisplayHistoryRef;
+  displayPending?: DisplayEntrySeed[];
 }
 
 interface StoredTaskSession {
   /** Working history and source evidence share one revision-checked JSON snapshot. */
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   id: string;
   createdAt: string;
   updatedAt: string;
@@ -129,6 +144,8 @@ export interface ImportTaskSessionV1Result {
 }
 
 export interface TaskSessionOptions<R extends TaskSessionRuntime> {
+  /** Explicit format opt-in. Schema 3 is rejected by old schema-2-only writers. */
+  contextMode?: "structured";
   /** Configured HOME, not a model/client-supplied path. */
   home: string;
   /** Existing root already authorized by this entrypoint's host policy. */
@@ -236,6 +253,13 @@ function mcpEndpointIdentity(raw: string | undefined): string | null {
 }
 
 /** Bind task-session resume to a nonsecret effective runtime configuration. */
+export function taskSessionContextMode(cfg: NekoConfig): "structured" | undefined {
+  const mode = cfg.data.context_mode;
+  if (mode === undefined || mode === "legacy") return undefined;
+  if (mode !== "structured") throw new Error("Invalid context_mode; use legacy or structured");
+  return "structured";
+}
+
 export function taskSessionConfigId(cfg: NekoConfig, effectiveMode: string = cfg.mode): string {
   const profile = cfg.profile ? cfg.profiles[cfg.profile] : undefined;
   const fields = {
@@ -272,7 +296,8 @@ export function taskSessionConfigId(cfg: NekoConfig, effectiveMode: string = cfg
     mcpDeny: [...cfg.mcpDeny].sort(),
     browserExtensionIds: [...cfg.browserExtensionIds].sort(),
   };
-  return createHash("sha256").update(JSON.stringify(fields)).digest("hex");
+  const boundFields = taskSessionContextMode(cfg) ? {...fields, contextMode: "structured-v1", responseReserveTokens: cfg.maxTokens} : fields;
+  return createHash("sha256").update(JSON.stringify(boundFields)).digest("hex");
 }
 
 function randomId(): string { return randomBytes(16).toString("hex"); }
@@ -436,7 +461,7 @@ function parseStored(raw: string, expectedId: string): StoredTaskSession {
   // SAFETY: JSON parsed as a non-array object; every persisted field is checked below.
   const data = value as Record<string, unknown>;
   if (data.schemaVersion === 1) throw new Error("Task session v1 has no source archive; explicit import is required (file unchanged)");
-  if (data.schemaVersion !== 2 || data.id !== expectedId || !SAFE_ID.test(expectedId)
+  if ((data.schemaVersion !== 2 && data.schemaVersion !== 3) || data.id !== expectedId || !SAFE_ID.test(expectedId)
     || typeof data.canonicalRoot !== "string" || !isAbsolute(data.canonicalRoot)
     || typeof data.authorityId !== "string" || !/^[A-Za-z0-9:._-]{1,256}$/.test(data.authorityId)
     || typeof data.configId !== "string" || !/^[a-f0-9]{64}$/.test(data.configId)
@@ -457,6 +482,17 @@ function parseStored(raw: string, expectedId: string): StoredTaskSession {
     const events = cloneSourceEvents(task.sourceEvents, task.id, task.canonicalRoot as string);
     // SAFETY: validateMessages accepted this task's working history above.
     validateSourceReferences(task.messages as unknown[], events);
+    // SAFETY: validateMessages accepted the task history and the root matched the validated session root above.
+    const contextMessages = task.messages as unknown[];
+    // SAFETY: the task root is equal to the absolute string root validated on the parent record.
+    const contextRoot = task.canonicalRoot as string;
+    if (data.schemaVersion === 3) {
+      if (task.contextState !== undefined) decodeStructuredContextState(task.contextState, contextMessages, task.id, contextRoot,
+        typeof data.executionAuthorityId === "string" ? data.executionAuthorityId : undefined);
+      else if (contextMessages.length) throw new Error("Structured task has no context provenance");
+    } else if (task.contextState !== undefined) throw new Error("Structured context requires task-session schema 3");
+    if (task.displayPending !== undefined && !validDisplayPending(task.displayPending)) throw new Error("Invalid pending display history");
+    if (task.displayHistory !== undefined && !validDisplayHistoryRef(task.displayHistory)) throw new Error("Invalid display history reference");
     ids.add(task.id);
   }
   if (!ids.has(data.activeTaskId)) throw new Error("Task session has no active task");
@@ -725,6 +761,7 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
 
   static async create<R extends TaskSessionRuntime>(options: CreateTaskSessionOptions<R>): Promise<TaskSessionCoordinator<R>> {
     assertLabel(options.label);
+    if (options.contextMode !== undefined && options.contextMode !== "structured") throw new Error("Invalid task context mode");
     assertAuthorityId(options.authorityId);
     assertConfigId(options.configId);
     assertFixedTaskProtocol(options.taskProtocol);
@@ -740,7 +777,7 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
     const path = storePath(dir, id);
     const now = new Date().toISOString();
     const state: StoredTaskSession = {
-      schemaVersion: 2, id, createdAt: now, updatedAt: now, canonicalRoot: root,
+      schemaVersion: options.contextMode ? 3 : 2, id, createdAt: now, updatedAt: now, canonicalRoot: root,
       authorityId: options.authorityId,
       configId: options.configId,
       ...(options.executionAuthorityId ? { executionAuthorityId: options.executionAuthorityId } : undefined),
@@ -759,10 +796,11 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
         activationId: state.taskProtocol?.activationId ?? randomId(),
         executionAuthorityId: options.executionAuthorityId,
       });
-      const runtime = await options.runtimeFactory({ sessionId: id, taskId, label: options.label, root, scope, messages: [], sourceEvents: [] });
+      const runtime = await options.runtimeFactory({ sessionId: id, taskId, label: options.label, root, scope, messages: [], sourceEvents: [], contextMode: options.contextMode });
       try {
         if (existsSync(path)) throw new Error("Task session id collision");
-        atomicWriteFileSync(path, JSON.stringify(state), 0o600);
+        if (state.schemaVersion === 3) writeStructuredCheckpoint(path, JSON.stringify(state));
+        else atomicWriteFileSync(path, JSON.stringify(state), 0o600);
         return new TaskSessionCoordinator(path, root, options.runtimeFactory, release, state, runtime, scope);
       } catch (error) {
         revokeTaskScope(scope);
@@ -773,6 +811,7 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
   }
 
   static async load<R extends TaskSessionRuntime>(options: LoadTaskSessionOptions<R>): Promise<TaskSessionCoordinator<R>> {
+    if (options.contextMode !== undefined && options.contextMode !== "structured") throw new Error("Invalid task context mode");
     assertAuthorityId(options.authorityId);
     assertConfigId(options.configId);
     assertFixedTaskProtocol(options.taskProtocol);
@@ -787,6 +826,7 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
     let scope: TaskScope | undefined;
     try {
       const state = readStored(path, options.sessionId);
+      if ((state.schemaVersion === 3) !== (options.contextMode === "structured")) throw new Error("Task context format opt-in changed; use the matching context mode");
       let recoveredFromPrior = false;
       if (state.canonicalRoot !== root) throw new Error("Task session root changed or is not host-authorized");
       if (state.authorityId !== options.authorityId) throw new Error("Task session host authority changed");
@@ -835,9 +875,17 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
         activationId: randomId(), executionAuthorityId: options.executionAuthorityId,
       });
       if (scope.canonicalRoot !== task.canonicalRoot) throw new Error("Task root changed");
+      if (task.contextState) {
+        const journal = new PagedSources(options.home, scope, task.contextState.journal);
+        await journal.assertContainsAsync(task.contextState.capsule?.sources ?? []);
+      }
       const runtime = await options.runtimeFactory({
         sessionId: state.id, taskId: task.id, label: task.label, root, scope,
+        contextMode: state.schemaVersion === 3 ? "structured" : undefined,
+        contextState: task.contextState ? decodeStructuredContextState(task.contextState, task.messages, task.id, task.canonicalRoot, state.executionAuthorityId) : undefined,
         messages: cloneMessages(task.messages), sourceEvents: cloneSourceEvents(task.sourceEvents, task.id, task.canonicalRoot),
+        displayHistory: task.displayHistory ? { ...task.displayHistory } : undefined,
+        displayPending: task.displayPending?.map((entry) => ({...entry})),
       });
       const coordinator = new TaskSessionCoordinator(path, root, options.runtimeFactory, release, state, runtime,
         scope, recoveredFromPrior);
@@ -859,6 +907,7 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
 
   get id(): string { return this.state.id; }
   get sessionId(): string { return this.state.id; }
+  get contextMode(): "structured" | undefined { return this.state.schemaVersion === 3 ? "structured" : undefined; }
   get recoveredFromPriorReceipt(): boolean { return this.recoveredFromPrior; }
   get executionVersion(): 1 | undefined { return this.state.taskProtocol?.executionVersion; }
   get receipt(): TaskActivationReceipt | null {
@@ -879,9 +928,13 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
 
   private activeTask(): StoredTask { return this.state.tasks.find((task) => task.id === this.state.activeTaskId)!; }
   private assertReady(): void {
+    if (this.recoveryRequired) throw this.contextRecoveryError ?? new Error("Context publication needs session recovery");
     if (this.closed) throw new Error("Task session is closed");
     if (this.busy) throw new Error("Task session transition is already in progress");
   }
+  private contextRecoveryError: Error | undefined;
+  get recoveryRequired(): boolean { return Boolean(this.contextRecoveryError || this.runtime.contextRecoveryRequired?.()); }
+
   private persist(next: StoredTaskSession): void {
     const current = readStored(this.path, this.state.id);
     if (current.revision !== this.state.revision) throw new Error("Task session revision conflict");
@@ -889,18 +942,31 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
     next.updatedAt = new Date().toISOString();
     const text = JSON.stringify(next);
     if (Buffer.byteLength(text, "utf8") > MAX_STORE_BYTES) throw new Error("Task session exceeds size limit");
-    atomicWriteFileSync(this.path, text, 0o600);
+    if (next.schemaVersion === 3) {
+      try { writeStructuredCheckpoint(this.path, text); }
+      catch (cause) {
+        if (cause instanceof StructuredCheckpointPublishedError) this.contextRecoveryError = cause;
+        throw cause;
+      }
+    } else atomicWriteFileSync(this.path, text, 0o600);
     this.state = next;
   }
   private capture(): StoredTaskSession {
     const task = this.activeTask();
     const messages = cloneMessages(this.runtime.getMessages());
     const sourceEvents = cloneSourceEvents(this.runtime.getSourceEvents(), task.id, task.canonicalRoot);
+    const contextState = this.state.schemaVersion === 3
+      ? decodeStructuredContextState(this.runtime.getStructuredContextState?.(), messages, task.id, task.canonicalRoot, this.state.executionAuthorityId)
+      : undefined;
     validateSourceReferences(messages, sourceEvents);
+    const displayHistory = this.runtime.getDisplayHistory?.() ?? task.displayHistory;
+    const displayPending = this.runtime.getDisplayPending?.() ?? task.displayPending;
+    if (displayPending !== undefined && !validDisplayPending(displayPending)) throw new Error("Invalid pending display history");
+    if (displayHistory !== undefined && !validDisplayHistoryRef(displayHistory)) throw new Error("Invalid display history reference");
     return {
       ...this.state,
       tasks: this.state.tasks.map((item) => item.id === task.id
-        ? { ...item, messages, sourceEvents, revision: item.revision + 1 } : item),
+        ? { ...item, messages, sourceEvents, contextState, displayHistory, displayPending, revision: item.revision + 1 } : item),
     };
   }
 
@@ -908,6 +974,30 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
   checkpoint(): void {
     this.assertReady();
     this.persist(this.capture());
+  }
+
+  /** Final synchronous publication barrier used only by the host's prepared compaction port. */
+  checkpointCompaction(expectedWorkingDigest: string, candidate: unknown[], contextState: StructuredContextState) {
+    this.assertReady();
+    if (this.state.schemaVersion !== 3) throw new Error("Structured compaction requires task-session schema 3");
+    this.busy = true;
+    try {
+      const next = this.capture();
+      const task = next.tasks.find(item => item.id === next.activeTaskId)!;
+      if (createHash("sha256").update(JSON.stringify(task.messages)).digest("hex") !== expectedWorkingDigest) {
+        throw new Error("Working context changed before publication");
+      }
+      const messages = cloneMessages(candidate);
+      validateSourceReferences(messages, task.sourceEvents);
+      const state = decodeStructuredContextState(contextState, messages, task.id, task.canonicalRoot, this.state.executionAuthorityId);
+      task.messages = messages; task.contextState = state;
+      try { this.persist(next); }
+      catch (cause) {
+        this.contextRecoveryError = new Error("Context publication needs session recovery", {cause});
+        throw cause;
+      }
+      return {committed: true as const};
+    } finally { this.busy = false; }
   }
 
   /** Metadata-only; safe during a turn because it neither captures nor retargets that turn. */
@@ -941,9 +1031,17 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
       });
       candidateScope = scope;
       if (scope.canonicalRoot !== target.canonicalRoot) throw new Error("Task root changed");
+      if (target.contextState) {
+        const journal = new PagedSources(dirname(dirname(dirname(this.path))), scope, target.contextState.journal);
+        await journal.assertContainsAsync(target.contextState.capsule?.sources ?? []);
+      }
       const nextRuntime = await this.factory({
         sessionId: this.state.id, taskId: id, label: target.label, root: this.root, scope,
+        contextMode: this.state.schemaVersion === 3 ? "structured" : undefined,
+        contextState: target.contextState ? decodeStructuredContextState(target.contextState, target.messages, target.id, target.canonicalRoot, this.state.executionAuthorityId) : undefined,
         messages: cloneMessages(target.messages), sourceEvents: cloneSourceEvents(target.sourceEvents, target.id, target.canonicalRoot),
+        displayHistory: target.displayHistory ? { ...target.displayHistory } : undefined,
+        displayPending: target.displayPending?.map((entry) => ({...entry})),
       });
       try { this.persist({ ...this.state, activeTaskId: id }); }
       catch (error) { revokeTaskScope(scope); await nextRuntime.close(); throw error; }
@@ -958,6 +1056,18 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
   }
 
   async close(): Promise<void> {
+    if (this.recoveryRequired) {
+      if (this.busy || this.closed) throw new Error("Task session cannot close during another transition");
+      this.busy = true;
+      try {
+        await this.runtime.assertQuiescent();
+        revokeTaskScope(this.scope);
+        await this.runtime.close();
+        this.closed = true;
+        this.releaseWriter(); // release only our live lease; never rewrite an uncertain parent
+        return;
+      } finally { this.busy = false; }
+    }
     this.assertReady();
     this.busy = true;
     try {
