@@ -44,6 +44,18 @@ Required live Windows ACL/MCP launcher boundaries pass 31 tests / 165 assertions
 the forced-color soft-wrap selection regression passes. Gitleaks 8.30.1 reports
 no leaks in tracked history and the complete release diff, with redacted output.
 
+PR #85's first CI run passed Windows and feedback but Linux/macOS each failed
+36 UI tests. Existing display/prefs/setup/MCP/updater fixtures restored an absent
+USERPROFILE by assignment, producing the literal relative string "undefined".
+The new absolute display-history scope guard correctly refused it. Replaying a
+display-cache test followed by fullscreen startup with USERPROFILE absent fails
+before cleanup is fixed and passes afterward. Cleanup now deletes originally
+absent HOME/USERPROFILE values in those five fixtures; production scope validation
+and every assertion remain unchanged. The seven-file affected run with the absent
+profile passes 118 tests, 5 explicit skips, 682 assertions; typecheck/lint pass.
+The full Windows/native results above precede only these fixture cleanups. The
+next complete cross-platform CI validates the final test fixtures before merge.
+
 An earlier broad run hit an isolated Windows EPERM while renaming an existing
 schema-1 import fixture. Its focused four-test rerun and the final complete shards
 pass; no assertion, atomic helper or timeout was weakened. This transient host

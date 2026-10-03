@@ -14,8 +14,8 @@ async function withTempHome(fn: () => Promise<void>): Promise<void> {
   process.env.USERPROFILE = dir;
   process.env.HOME = dir;
   try { await fn(); } finally {
-    process.env.USERPROFILE = prev.USERPROFILE;
-    process.env.HOME = prev.HOME;
+    if (prev.USERPROFILE === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = prev.USERPROFILE;
+    if (prev.HOME === undefined) delete process.env.HOME; else process.env.HOME = prev.HOME;
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }

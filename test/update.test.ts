@@ -133,7 +133,8 @@ test("an 'up to date' check is re-asked the same day, so a release minutes later
     expect(apiCalls).toBe(seen);
     expect(JSON.parse(readFileSync(cache, "utf-8")).latest).toBe(shipped);
   } finally {
-    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    if (saved.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.up;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
     globalThis.fetch = saved.fetch;
     rmSync(home, { recursive: true, force: true });
   }
@@ -272,7 +273,8 @@ test("setAutoUpdate writes the hold flag to the user config (rollback sticks)", 
     setAutoUpdate(true);  // resume
     expect(JSON.parse(require("node:fs").readFileSync(cfgPath, "utf-8")).auto_update).toBe(true);
   } finally {
-    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    if (saved.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.up;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -332,7 +334,8 @@ test("the machine-wide update lock reclaims dead owners without deleting success
     expect(acquireUpdateLock(t0 + 11 * 60_000, () => true)).toBe(true);
     releaseUpdateLock();
   } finally {
-    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    if (saved.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.up;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -349,7 +352,8 @@ test("a manual updater waits for an active auto-updater instead of failing immed
     expect(await acquireUpdateLockWithin(250, 5)).toBe(true);
     releaseUpdateLock();
   } finally {
-    process.env.USERPROFILE = saved.up; process.env.HOME = saved.home;
+    if (saved.up === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.up;
+    if (saved.home === undefined) delete process.env.HOME; else process.env.HOME = saved.home;
     rmSync(home, { recursive: true, force: true });
   }
 });
