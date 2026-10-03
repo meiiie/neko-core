@@ -55,6 +55,9 @@ and every assertion remain unchanged. The seven-file affected run with the absen
 profile passes 118 tests, 5 explicit skips, 682 assertions; typecheck/lint pass.
 The full Windows/native results above precede only these fixture cleanups. The
 next complete cross-platform CI validates the final test fixtures before merge.
+The website's baked Windows ZIP fallback is refreshed from 40 to 42 MB: the local
+release build's Optimal ZIP measures 42,304,008 bytes. Public asset sizes are checked
+again after publication; fallback deployment uses the existing authenticated account.
 
 An earlier broad run hit an isolated Windows EPERM while renaming an existing
 schema-1 import fixture. Its focused four-test rerun and the final complete shards
