@@ -90,8 +90,10 @@ published/latest verification, or the never-retag rule. Cross-platform full-suit
 acceptance is incomplete; real-model integration quality remains unverified.
 
 The merge attempt under that exception did not execute: automatic approval review
-rejected the relayed authorization. The owner then requested fixing the two tests
-and returning to the original full CI gate before merge/tag. The scroll test now
+rejected the relayed authorization. The executor then continued test repairs
+within the original release scope as the coordinator's safer alternative; this
+was not a new direct owner instruction and did not withdraw the owner's exception.
+This continuation satisfies the original full CI gate before merge/tag. The scroll test now
 uses Ink's synchronous rerender to flush queued React state, rather than sampling
 the previous frame 40 ms after `down()`. It retains both held-position assertions
 and strengthens the final assertion to the exact new bottom (`off=50`). No timeout
@@ -113,6 +115,16 @@ and one unrelated Bash approval failure: trace proved `uv_spawn` of the installe
 Git Bash was refused with EPERM. The officially approved native run executes
 `echo hi` successfully, retains all seven approval assertions, and passes the
 complete affected run above. No shell permission or product policy was changed.
+On `6dd170c98ce20c8388a433359fb778ea98772477`, the complete four-shard Windows
+suite passes 2,042 tests / 26 explicit skips / 26,099 assertions. Typecheck, lint,
+doctor, policy, build/render/input/ACP/startup, both lifecycle renderers, three
+ConPTY ghost/typing probes, prebuilt autoload, required Windows ACL/MCP and colored
+selection gates pass. Doctor/policy retain their explicit WARN findings. Native
+probes make exactly three localhost scripted requests and no external model call.
+The two scroll samples measure 6/101 ms (default response/settle) and 7/77 ms
+(forced incremental), with movement, startup, resize, menu and keyboard asserted.
+The subsequent source-of-instruction correction and this evidence update change
+only the worklog; the final head still needs the complete PR/main CI gate.
 
 An earlier broad run hit an isolated Windows EPERM while renaming an existing
 schema-1 import fixture. Its focused four-test rerun and the final complete shards
