@@ -26,16 +26,18 @@ test("useScroll: sticky pins to the bottom and follows growth (derived, no effec
 test("useScroll: scrolling up breaks sticky FROM the current bottom and holds place as content grows", async () => {
   let api: ScrollApi | null = null;
   const c = render(<Probe total={50} viewH={10} grab={(a) => (api = a)} />);
-  await tick();
-  api!.up(3); // from the derived bottom (40) -> 37, sticky broken
-  await tick();
-  expect(strip(c.lastFrame())).toContain("off=37;bottom=false");
-  c.rerender(<Probe total={60} viewH={10} grab={(a) => (api = a)} />); // grows below; reading position holds
-  expect(strip(c.lastFrame())).toContain("off=37;bottom=false");
-  api!.down(50); // overshoot to the bottom -> clamps + re-arms sticky
-  await tick();
-  expect(strip(c.lastFrame())).toContain("bottom=true");
-  c.unmount();
+  try {
+    await tick();
+    api!.up(3); // from the derived bottom (40) -> 37, sticky broken
+    // Ink's rerender flushes queued React work synchronously; a 40 ms sleep does not.
+    c.rerender(<Probe total={50} viewH={10} grab={(a) => (api = a)} />);
+    expect(strip(c.lastFrame())).toContain("off=37;bottom=false");
+    c.rerender(<Probe total={60} viewH={10} grab={(a) => (api = a)} />); // grows below; reading position holds
+    expect(strip(c.lastFrame())).toContain("off=37;bottom=false");
+    api!.down(50); // overshoot to the bottom -> clamps + re-arms sticky
+    c.rerender(<Probe total={60} viewH={10} grab={(a) => (api = a)} />);
+    expect(strip(c.lastFrame())).toContain("off=50;bottom=true");
+  } finally { c.unmount(); }
 });
 
 function RowProbe({ total, viewH, grab, onHop }: { total: number; viewH: number; grab?: (api: RowScrollApi) => void; onHop?: (d: number) => void }) {

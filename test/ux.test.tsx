@@ -314,14 +314,17 @@ test("fullscreen resume never paints reasoning fields or tool-attached progress"
     ],
   };
   const c = renderFullscreen(<ChatApp fullscreen={false} yolo provider={new Echo()} resumedSession={resumed} sessionId={resumed.id} />);
-  await tick(250);
-  const frames = strip(c.frames.join("\n"));
-  expect(frames).toContain("PUBLIC FINAL ANSWER");
-  expect(frames).toContain("intermediate progress update hidden on resume");
-  expect(frames).not.toContain("PRIVATE PROGRESS TEXT");
-  expect(frames).not.toContain("PRIVATE RAW REASONING");
-  expect(frames).not.toContain("PRIVATE REASONING SUMMARY");
-  c.unmount();
+  try {
+    // Resume imports and flushes history asynchronously; readiness is not a fixed 250 ms delay.
+    expect(await until(c, () => strip(c.lastFrame()).includes("PUBLIC FINAL ANSWER")
+      && !strip(c.lastFrame()).includes("Loading earlier history"))).toBe(true);
+    const frames = strip(c.frames.join("\n"));
+    expect(frames).toContain("PUBLIC FINAL ANSWER");
+    expect(frames).toContain("intermediate progress update hidden on resume");
+    expect(frames).not.toContain("PRIVATE PROGRESS TEXT");
+    expect(frames).not.toContain("PRIVATE RAW REASONING");
+    expect(frames).not.toContain("PRIVATE REASONING SUMMARY");
+  } finally { c.unmount(); }
 });
 
 test("RichView pastes exactly the visible window of cached rows (tail and scrolled)", () => {

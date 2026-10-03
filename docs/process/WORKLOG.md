@@ -29,7 +29,7 @@ set. A rendered TUI regression publishes a real checkpoint, aborts its signal an
 loses the acknowledgement; it requires recovery, rejects another provider turn and
 proves shutdown leaves the published bytes unchanged. It fails with the old catch.
 
-Final full Windows suite on Bun `1.4.0+34cbb9a40`: 2,042 passed, 26 explicit skips,
+Earlier full Windows suite on Bun `1.4.0+34cbb9a40`: 2,042 passed, 26 explicit skips,
 0 failures, 26,098 assertions across four sequential shards (all 209 test files).
 Typecheck and lint pass. Doctor and policy exit 0 with their explicit auto-mode,
 unconfined-shell, project-trust and non-TTY warnings; this is not a claim of live
@@ -88,6 +88,31 @@ owner exception does not waive build/render/input/ACP/lifecycle artifact smokes,
 tag-to-merged-commit identity, the complete 17-asset set, SHA-256 checks, draft-to-
 published/latest verification, or the never-retag rule. Cross-platform full-suite
 acceptance is incomplete; real-model integration quality remains unverified.
+
+The merge attempt under that exception did not execute: automatic approval review
+rejected the relayed authorization. The owner then requested fixing the two tests
+and returning to the original full CI gate before merge/tag. The scroll test now
+uses Ink's synchronous rerender to flush queued React state, rather than sampling
+the previous frame 40 ms after `down()`. It retains both held-position assertions
+and strengthens the final assertion to the exact new bottom (`off=50`). No timeout
+is increased and production scroll behavior is unchanged.
+
+Resume seeds, fsyncs and pages the display archive asynchronously. A diagnostic
+350 ms delay in the first durable flush reproduces the Windows failure with the
+old fixed 250 ms snapshot. The fixture now waits for the visible final answer and
+the absence of the loading indicator using the existing 1.5 s readiness helper,
+then checks ALL captured frames for the same five visibility/privacy assertions.
+It always unmounts, including on failure. The delayed counterexample now passes
+all six assertions; no privacy check, I/O guard or production deadline is relaxed.
+The delay injection is diagnostic evidence outside the repository, not shipped.
+The next full Windows and cross-platform runs remain gates; earlier failures are
+not reclassified as passes, and the CI exception is not used by this continuation.
+The four affected scroll/UX/chat/structured-context files pass 145 tests with
+735 assertions; typecheck and lint pass. A sandboxed diagnostic had 144 passes
+and one unrelated Bash approval failure: trace proved `uv_spawn` of the installed
+Git Bash was refused with EPERM. The officially approved native run executes
+`echo hi` successfully, retains all seven approval assertions, and passes the
+complete affected run above. No shell permission or product policy was changed.
 
 An earlier broad run hit an isolated Windows EPERM while renaming an existing
 schema-1 import fixture. Its focused four-test rerun and the final complete shards
