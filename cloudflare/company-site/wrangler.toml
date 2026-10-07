@@ -1,0 +1,22 @@
+# holilihu.online — company site for HoLiLiHu.
+# Static assets plus a thin Worker. Do not point this config at cloudflare/site/.
+name = "holilihu-site"
+main = "worker.js"
+compatibility_date = "2026-07-27"
+workers_dev = true
+
+# Zone routes, not custom domains. DNS for the apex and www already exists and
+# is proxied; custom_domain would try to replace those records.
+routes = [
+  { pattern = "holilihu.online/*", zone_name = "holilihu.online" },
+  { pattern = "www.holilihu.online/*", zone_name = "holilihu.online" },
+]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# Unknown paths serve public/404.html with a real 404 status.
+not_found_handling = "404-page"
+# Every request hits the Worker so www can redirect to the apex and every
+# response gets the same headers. The asset layer still chooses 404.html.
+run_worker_first = true
