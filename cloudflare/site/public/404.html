@@ -23,7 +23,8 @@
   .lost .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; justify-content: center; }
   @media (min-width: 860px) { .lost .actions { justify-content: flex-start; } }
   .lost .hero-art { max-width: 280px; }
-  footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; }
+  footer .byline, footer .foot-legal { flex: 1 0 100%; }
 </style>
 </head>
 <body class="band-ink">
@@ -65,6 +66,8 @@
 
   <footer class="band-ink">
     <div class="wrap">
+      <p class="small byline" data-t="by">Neko Core is a product of HoLiLiHu (The Wiii Lab).</p>
+      <p class="foot-legal"><span data-t="legal">© 2025–2026 HoLiLiHu · Hai Phong, Vietnam · contact </span><a href="mailto:admin@holilihu.online">admin@holilihu.online</a></p>
       <span class="mono-label">NEKO CORE / HAI PHONG, VIET NAM</span>
       <span class="small" data-t="sov">Hoang Sa and Truong Sa belong to Vietnam.</span>
     </div>
@@ -79,6 +82,8 @@
     home: "Về trang đầu",
     repo: "Mở mã nguồn",
     looking: "ĐANG TÌM",
+    by: "Neko Core là sản phẩm của HoLiLiHu (The Wiii Lab).",
+    legal: "© 2025–2026 HoLiLiHu · Hải Phòng, Việt Nam · liên hệ ",
     sov: "Hoàng Sa và Trường Sa thuộc chủ quyền Việt Nam."
   };
   var nodes = [].slice.call(document.querySelectorAll("[data-t]"));

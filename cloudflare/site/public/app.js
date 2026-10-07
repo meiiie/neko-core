@@ -99,7 +99,17 @@
     "dl.foot": "Mọi bản dựng đều công bố trên GitHub kèm mã SHA-256, ra thẳng từ quy trình dựng công khai.",
     "dl.foot.link": "Tất cả bản phát hành <span class=\"arrow\">&rarr;</span>",
 
-    "foot.by": "Do The Wiii Lab xây dựng. AGPL core với giấy phép thương mại kép.",
+    "co.label": "Công ty",
+    "co.title": "Neko Core là sản phẩm của HoLiLiHu.",
+    "co.body": "HoLiLiHu xây dựng Neko Core tại Hải Phòng, Việt Nam. The Wiii Lab vẫn là tên dự án. Câu hỏi về công ty gửi tới <a href=\"mailto:admin@holilihu.online\">admin@holilihu.online</a>.",
+    "co.f1.t": "Công ty",
+    "co.f2.t": "Địa điểm",
+    "co.f2.d": "Hải Phòng, Việt Nam",
+    "co.f3.t": "Liên hệ",
+
+    "foot.by": "Neko Core là sản phẩm của HoLiLiHu (The Wiii Lab). AGPL core với giấy phép thương mại kép.",
+    "foot.company": "Công ty",
+    "foot.legal": "© 2025–2026 HoLiLiHu · Hải Phòng, Việt Nam · liên hệ <a href=\"mailto:admin@holilihu.online\">admin@holilihu.online</a>",
     "foot.releases": "Bản phát hành",
     "foot.changelog": "Nhật ký thay đổi",
     "foot.security": "Bảo mật",
