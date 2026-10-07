@@ -349,6 +349,21 @@ section { padding-block: 96px; }
 .fact:first-child { border-top: 0; padding-top: 0; }
 .fact b { display: block; font-size: 17px; font-weight: 600; margin-bottom: 4px; }
 .fact span { font-size: 16px; color: var(--fg-2); }
+@media (min-width: 940px) {
+  .facts-row { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 32px; }
+  .facts-row .fact { border-top: 0; padding-top: 0; padding-left: 24px; border-left: 1px solid var(--hair); }
+  .facts-row .fact:first-child { padding-left: 0; border-left: 0; }
+}
+.sec-head .body a,
+.foot-legal a,
+.fact > a {
+  color: var(--accent-text);
+  text-decoration-line: underline;
+  text-underline-offset: 3px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
 
 /* ============ code panels — always ink, whatever band they sit in ============ */
 .panel { border-radius: var(--r); background: var(--ink-900); overflow: hidden; border: 1px solid var(--ink-700); }
@@ -430,6 +445,7 @@ footer { padding-top: 64px; overflow: hidden; }
 .foot-links { display: flex; flex-wrap: wrap; gap: 8px; font-size: 16px; margin-inline: -8px; }
 .foot-links a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 8px; color: var(--fg-2); transition: color .16s var(--ease-out); }
 .foot-links a:hover { color: var(--accent-text); }
+.foot-legal { margin-top: 32px; font-size: 16px; color: var(--fg-2); }
 .foot-meta { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--hair); display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
 
 /* The signature: an oversized outlined wordmark across the full width, bleeding off the bottom edge.
