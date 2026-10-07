@@ -262,7 +262,14 @@ section h2 {
   font-size: 18px;
   overflow-wrap: anywhere;
 }
-.facts a { overflow-wrap: anywhere; }
+.facts a,
+.person a,
+.legal a {
+  display: inline-block;
+  padding-block: 12px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
 
 .points {
   list-style: none;

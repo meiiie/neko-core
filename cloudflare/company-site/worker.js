@@ -44,9 +44,11 @@ function withHeaders(response, extra) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const host = url.hostname;
 
-    if (host === "www.holilihu.online" || (host === "holilihu.online" && url.protocol !== "https:")) {
+    // www always lands on the canonical https apex. Apex HTTP is left to
+    // Cloudflare's edge redirect — doing it here makes `wrangler dev` loop,
+    // because local preview is plain HTTP on the zone hostname.
+    if (url.hostname === "www.holilihu.online") {
       url.hostname = "holilihu.online";
       url.protocol = "https:";
       return withHeaders(Response.redirect(url.toString(), 301));
