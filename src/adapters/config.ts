@@ -59,6 +59,9 @@ export const DEFAULTS: any = {
   max_retries: 4,
   retry_base_delay_seconds: 1.5,
   retry_max_delay_seconds: 30,
+  // HTTP 429 gets its own wall-clock budget: provider quota windows (e.g. Z.AI code 1302) outlast the
+  // ~22 s that max_retries x exponential backoff gives, which killed long unattended runs mid-task.
+  rate_limit_retry_seconds: 600,
   offline_retry_seconds: 1800, // keep retrying a dropped connection (laptop slept) for up to 30 min
   codex_keepalive: 15, // GPT-5.6 App Server idle minutes; 0 keeps it alive until logout/exit
   // `approval` is omitted so the mode getter can distinguish legacy user intent from the default.
@@ -767,6 +770,8 @@ export class NekoConfig {
   get maxRetries(): number { return Math.max(0, Number(this.data.max_retries ?? 4)); }
   get retryBaseDelaySeconds(): number { return Number(this.data.retry_base_delay_seconds ?? 1.5); }
   get retryMaxDelaySeconds(): number { return Number(this.data.retry_max_delay_seconds ?? 30); }
+  /** Wall-clock budget for retrying HTTP 429 after max_retries is spent (0 = legacy behaviour). */
+  get rateLimitRetrySeconds(): number { return Math.max(0, Number(this.data.rate_limit_retry_seconds ?? 600)); }
   /** How long to keep retrying a dropped connection (offline / laptop asleep) before giving up. */
   get offlineRetrySeconds(): number { return Math.max(0, Number(this.data.offline_retry_seconds ?? 1800)); }
   get codexKeepalive(): number { return Math.max(0, Number(this.data.codex_keepalive ?? 15)); }
