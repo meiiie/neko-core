@@ -1127,3 +1127,7 @@ regression verifies that unmount aborts the outstanding summary request as well 
 
 - Follow-on fixes: reject an already oversized summarizer request estimate before calling a small-window provider; bind sticky prompt pointer targets to the painted frame's semantic ID. The latter fixed a reproduced React/render race rather than relaxing the click assertion.
 - Final Linux gate: 1,945 tests with updater stub plus 20 updater tests separately, 40 skips, zero failures; typecheck/lint/build/PTY/doctor/policy completed. Native offline prompt 65/57 navigation verified on 43f3189ece0c… . Earlier live 200-turn evidence predates these two follow-on fixes; network policy still blocks further Coding Plan calls.
+
+## 2026-11-08 — LifeMate domain adapter review
+
+Completed 144 valid GLM-5.3 trajectories via the existing zai/Anthropic provider. Fixed missing system policy when history is preloaded (f8f8edf); invalid candidate pass retained separately. Domain text-history composition improves local fit/check matcher score and request count, but loses two check states; no production promotion. Native history/repair not selected. Shared coding runtime, providers and installed CLI unchanged. Evidence: neighboring artifacts/neko-domain-train-20261107/REPORT.md. Solo implementation and review; no subagents or automation.
