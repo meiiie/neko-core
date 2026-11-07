@@ -207,4 +207,5 @@ test("protocol detector ignores arbitrary prose, data objects and unknown tool n
   expect(textToolEnvelope('{"name":"Mai","arguments":{}}', names)).toBe(false);
   expect(textToolEnvelope('```json\n{"name":"phone.call","arguments":{}}\n```', names)).toBe(true);
   expect(textToolEnvelope('<tool_call>{"name":"phone.call","arguments":{}}</tool_call>', names)).toBe(true);
+  expect(textToolEnvelope('Tôi sẽ gọi.\n{"tool_calls":[{"name":"phone.call","arguments":{}}],"tool_results":[{"ok":true}]}', names)).toBe(true);
 });

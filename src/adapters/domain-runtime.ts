@@ -37,7 +37,8 @@ export interface DomainRuntimeOptions {
 export function textToolEnvelope(text: string, names: ReadonlySet<string>): boolean {
   const candidates = [text.trim(),
     ...Array.from(text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g), (m) => m[1]),
-    ...Array.from(text.matchAll(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g), (m) => m[1])];
+    ...Array.from(text.matchAll(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g), (m) => m[1]),
+    ...Array.from(text.matchAll(/\n\s*(?=[{\[])/g), (m) => text.slice(m.index).trim())];
   const isCall = (value: JsonValue): boolean => {
     if (!isJsonObject(value)) return false;
     const fn = isJsonObject(value.function) ? value.function : value;
