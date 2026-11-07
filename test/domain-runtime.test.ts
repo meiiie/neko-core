@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDomainRuntime, DomainRequestLimit, DomainUncertainMutation, textToolEnvelope } from "../src/adapters/domain-runtime.ts";
 import { nativeDomainHistory } from "../src/adapters/domain-history.ts";
+import { toAnthropicMessages } from "../src/adapters/anthropic.ts";
 import type { Provider, ProviderResponse } from "../src/core/ports.ts";
 import type { JsonObject } from "../src/shared/wire.ts";
 
@@ -44,6 +45,28 @@ function fixture(script: ProviderResponse[], overrides: Partial<Parameters<typeo
   });
   return { runtime, executions, messages, async close() { await runtime.close(); rmSync(root, { recursive: true, force: true }); } };
 }
+
+test("preloaded text and native history retain the host policy on every provider request", async () => {
+  for (const history of [
+    [{ role: "user", content: "Earlier request" }, { role: "assistant", content: "Earlier result" }],
+    nativeDomainHistory([
+      { role: "user", text: "Earlier request" },
+      { role: "assistant", text: "Earlier result", tool_calls: [{ name: "contacts.search", arguments: {} }], tool_results: [{ ok: true }] },
+    ], "lifemate"),
+  ]) {
+    const f = fixture([call(read), final("Done")]);
+    try {
+      f.runtime.agent.messages.push(...structuredClone(history));
+      await f.runtime.run("Current request");
+      expect(f.messages).toHaveLength(2);
+      for (const messages of f.messages) {
+        expect(messages.filter((m) => m.role === "system")).toHaveLength(1);
+        expect(toAnthropicMessages(messages).system.trim()).toBe("Isolated tool simulation.");
+        expect(toAnthropicMessages(messages).msgs[0].role).toBe("user");
+      }
+    } finally { await f.close(); }
+  }
+});
 
 test("no-op finishes without forcing a verification read or exposing host tools", async () => {
   const f = fixture([final("Giữ nguyên, không thay đổi.")]);

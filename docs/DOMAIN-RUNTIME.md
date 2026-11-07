@@ -10,7 +10,7 @@ A successful `ask` receipt stops further execution, including later actions in t
 
 Explicit tool-call JSON/XML in a final text response can trigger **one** native-protocol repair. No text is executed or treated as tool evidence. The repair shares the original request budget and deadline, keeps already-executed calls, and does not infer missing parameters. Persistent malformed output remains `unresolved_tool_text`.
 
-`nativeDomainHistory` accepts only host-supplied paired calls/results, preserves them as native assistant/tool messages, and never executes them. Missing results fail rather than manufacturing evidence. Historical entity IDs remain scoped to their task.
+`nativeDomainHistory` accepts only host-supplied paired calls/results, preserves them as native assistant/tool messages, and never executes them. Missing results fail rather than manufacturing evidence. Historical entity IDs remain scoped to their task. The adapter seeds the system policy before the host appends history: the shared Agent only auto-seeds an empty message list. A regression check covers both text/native history through Anthropic message conversion.
 
 Verification: `bun test test/domain-runtime.test.ts test/architecture.test.ts test/agent.test.ts test/providers.test.ts`, `bun run typecheck`, `bun run lint`. The new adapter is opt-in and does not modify shared loop, transport, authority or persistence implementation. No CLI release/build is claimed.
 

@@ -139,6 +139,7 @@ export function createDomainRuntime(options: DomainRuntimeOptions) {
       options.onEvent?.(kind, detail);
     }, onCheckpoint: options.onCheckpoint,
   });
+  agent.appendSystem("");
   return {
     agent,
     registry,
