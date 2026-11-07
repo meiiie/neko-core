@@ -4,6 +4,7 @@ import type { McpTools, Provider } from "../core/ports.ts";
 import { ToolRegistry, type ApprovalGate } from "../core/tool-runtime.ts";
 import { isJsonObject, isText, type JsonValue } from "../shared/wire.ts";
 import { messageOf } from "../shared/debug.ts";
+import { DomainWorkingMemory } from "./domain-memory.ts";
 
 export type DomainEffect = "read" | "write" | "ask";
 export type ReceiptOutcome = "succeeded" | "failed" | "unknown";
@@ -28,6 +29,7 @@ export interface DomainRuntimeOptions {
   mode?: ToolRegistry["mode"];
   maxRequests?: number;
   repairTextTools?: boolean;
+  workingNote?: boolean;
   onEvent?: EventHook;
   onCheckpoint?: () => void | Promise<void>;
 }
@@ -78,6 +80,7 @@ export function createDomainRuntime(options: DomainRuntimeOptions) {
   const maxRequests = options.maxRequests ?? 16;
   if (!Number.isSafeInteger(maxRequests) || maxRequests < 1) throw new Error("Invalid domain request budget");
   const receipts: DomainReceipt[] = [];
+  const memory = options.workingNote ? new DomainWorkingMemory() : undefined;
   let requests = 0;
   let started = false;
   let closed = false;
@@ -124,7 +127,9 @@ export function createDomainRuntime(options: DomainRuntimeOptions) {
       if (waitingForUser) return { content: "Đã yêu cầu bổ sung thông tin.", tool_calls: [] };
       if (requests >= maxRequests) throw new DomainRequestLimit();
       requests++;
-      return options.provider.complete(messages, schema, delta, signal, opts);
+      const response = await options.provider.complete(memory ? memory.context(messages, receipts) : messages, schema, delta, signal, opts);
+      if (memory?.observe(response.content)) options.onEvent?.("domain_working_note", memory.snapshot());
+      return response;
     },
   };
   const registry = new ToolRegistry(options.root, options.mode ?? "default", options.approval, tools);
@@ -147,6 +152,7 @@ export function createDomainRuntime(options: DomainRuntimeOptions) {
     async run(instruction: string, signal?: AbortSignal) {
       if (started || closed) throw new Error("Create a fresh domain runtime for each independent task");
       started = true;
+      memory?.start(instruction);
       let answer = await agent.runResilient(instruction, { signal, maxRecoveries: 0 });
       let repairs = 0;
       if (!signal?.aborted && options.repairTextTools !== false && requests < maxRequests && textToolEnvelope(answer, toolNames)) {
@@ -161,7 +167,8 @@ export function createDomainRuntime(options: DomainRuntimeOptions) {
         );
       }
       return {
-        answer, requests, repairs,
+        answer: memory ? memory.visibleAnswer(answer) : answer, requests, repairs,
+        workingMemory: memory?.snapshot(),
         protocolStatus: signal?.aborted ? "interrupted" : stepLimitReached ? "step_limit"
           : waitingForUser ? "waiting_for_user" : textToolEnvelope(answer, toolNames) ? "unresolved_tool_text" : "finished",
         semanticSuccess: null,

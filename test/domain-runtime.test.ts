@@ -80,6 +80,24 @@ test("no-op finishes without forcing a verification read or exposing host tools"
   } finally { await f.close(); }
 });
 
+test("working note carries across tool turns without changing calls, reasoning or ask-stop semantics", async () => {
+  const response = call(read, { query: "Minh" });
+  response.content = "<task_note>Need to identify Minh; no contact selected yet.</task_note>";
+  const f = fixture([response, call(ask, { tool_name: "phone.call", params: ["contact_id"] })], { workingNote: true });
+  try {
+    const result = await f.runtime.run("Gọi Minh.");
+    expect(f.messages).toHaveLength(2);
+    expect(f.messages[1][0].content).toContain("Need to identify Minh");
+    expect(f.messages[1][0].content).toContain('"outcome":"succeeded"');
+    expect(f.messages[1].find((m) => m.tool_calls?.length)?.provider_data).toEqual(response.continuation);
+    expect(f.executions).toEqual([{ name: read, args: { query: "Minh" } },
+      { name: ask, args: { tool_name: "phone.call", params: ["contact_id"] } }]);
+    expect(result.workingMemory?.originalRequest).toBe("Gọi Minh.");
+    expect(result.protocolStatus).toBe("waiting_for_user");
+    expect(result.semanticSuccess).toBeNull();
+  } finally { await f.close(); }
+});
+
 test("a transaction receipt does not force an extra read and records a write, not evidence", async () => {
   const f = fixture([call(write, { contact_id: "person_1" }), final("Đã gọi.")]);
   try {

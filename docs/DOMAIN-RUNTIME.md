@@ -1,17 +1,31 @@
-# Embedded domain runtime (experimental)
+# Domain runtime and task-local working notes
 
-`src/adapters/domain-runtime.ts` composes the existing `Agent`, `ToolRegistry` and provider/MCP ports for one isolated transactional task. It follows [EXTENDING](EXTENDING.md); LifeMate-specific schemas, prompts, receipt interpretation and evaluation stay in the embedding application. The installed CLI and shared coding composition are unchanged.
+`src/adapters/domain-runtime.ts` composes Neko's Agent, provider port and tool registry for one domain task. The caller supplies the system policy, exact MCP tools, trusted read/write/ask effects and receipt classifier. The generic coding verifier is replaced by actual domain receipts; no-op tasks can finish without an extra read.
 
-The host supplies an exact capability/effect map (`read`, `write`, `ask`) and classifies authoritative tool observations. The registry still enforces permissions. This adapter exposes no file, shell, computer, memory or delegation tools. A runtime is single-use and owns its provider/transport lifetime.
+Following [EXTENDING](EXTENDING.md), domain schemas, prompts and receipt interpretation stay in the embedding application. The installed CLI and shared coding composition are unchanged. This adapter exposes no file, shell, computer, personal-memory or delegation tools and owns its provider/transport lifetime.
 
-Coding verification gates are disabled **only in this composition**. The host-owned receipt ledger records mutations accurately without requiring unrelated reads after every transaction. Core coding heuristics and cost telemetry are unchanged; use `runtime.receipts` for domain effects. A successful receipt means execution succeeded, not that the chosen recipient/amount was correct. `semanticSuccess` is always null; a separate task evaluator must decide it.
+Create a fresh runtime per independent task. Native calls still pass through the registry. A successful ask ends the turn; an unknown write outcome preserves the receipt and stops automatic continuation. `semanticSuccess` remains unknown until the application evaluates the outcome. A receipt proves execution, not correct intent.
 
-A successful `ask` receipt stops further execution, including later actions in the same batch. Failed asks remain repairable. Plain-text questions are not counted as executed asks. Legitimate no-op answers finish without compulsory verification reads.
+Failed asks remain repairable; successful asks also prevent later actions in the same native batch. Plain-text questions do not count as executed asks. Explicit tool-call JSON/XML in a final response can trigger one optional native-protocol repair within the original request/deadline budget; prose is never executed or trusted as a receipt. Persistent malformed output remains `unresolved_tool_text`.
 
-Explicit tool-call JSON/XML in a final text response can trigger **one** native-protocol repair. No text is executed or treated as tool evidence. The repair shares the original request budget and deadline, keeps already-executed calls, and does not infer missing parameters. Persistent malformed output remains `unresolved_tool_text`.
+`nativeDomainHistory` preserves trusted historical call/result pairs with a separate ID namespace. System policy is seeded before preloading history, avoiding the Agent's empty-message initialization branch. Neither native history nor text-tool repair has demonstrated a reliable quality benefit in the earlier LifeMate144-run comparison; its records remain in `artifacts/neko-domain-train-20261107` in the embedding workspace.
 
-`nativeDomainHistory` accepts only host-supplied paired calls/results, preserves them as native assistant/tool messages, and never executes them. Missing results fail rather than manufacturing evidence. Historical entity IDs remain scoped to their task. The adapter seeds the system policy before the host appends history: the shared Agent only auto-seeds an empty message list. A regression check covers both text/native history through Anthropic message conversion.
+## Optional working note
 
-Verification: `bun test test/domain-runtime.test.ts test/architecture.test.ts test/agent.test.ts test/providers.test.ts`, `bun run typecheck`, `bun run lint`. The new adapter is opt-in and does not modify shared loop, transport, authority or persistence implementation. No CLI release/build is claimed.
+`workingNote: true` enables `DomainWorkingMemory`. The model writes a brief `<task_note>` in its normal assistant response, then uses the original native tools. There is no additional planner request, note-writing business tool, or execution of note text.
 
-LifeMate integration and evidence live in the neighboring `zaic2026-lifemate/integrations/neko` and `artifacts/neko-domain-train-20261107`. The 2026-11-08 experiment completed 96 fit trajectories and 48 separate TRAIN check trajectories through the existing `zai` provider. Domain composition with text history improved local matcher score and request count, but regressed two check states; it remains experimental. Native history and text-tool repair have not demonstrated a reliable benefit. See REPORT.md for scores, invalid-pass preservation, system-policy propagation fix, and limits. Oracle replay verifies wiring only. Remaining risks include natural-language questions without native asks, wrong entity selection, omitted independent actions and invented optional values.
+The provider-facing context adds a bounded view containing the host's exact original request, the latest model-authored note and recent execution receipt identities/outcomes. Complete observations and arguments remain in the canonical trajectory. The memory view is data, not an authorization source. It does not overwrite the stored system policy, user messages, tool results or opaque provider continuation. Only well-formed bounded notes replace the last usable note; rejected notes are counted without an automatic repair loop.
+
+The returned result includes `workingMemory`, and `domain_working_note` events expose concise note revisions for auditing. The final display answer omits well-formed note tags, while canonical messages keep them. Notes are ephemeral to this runtime: no personal/global memory store is read and no task can reuse an already-started runtime.
+
+## Offline consolidation
+
+A product may curate workflow lessons from prior development traces, including successful examples, failures and counterconditions. Review the resulting bundle, then pass its concise applicable guidance as part of the domain policy. The core does not autonomously read experiment labels, update skills, schedule background jobs or promote candidate guidance.
+
+The LifeMate integration in the sibling repository implements this as an explicit offline `dream.ts` step and a reviewed `lessons.json` bundle. This is an adaptation of memory consolidation using Neko's configured provider, not Anthropic's Managed Agents Dreams service.
+
+## Evidence and limits
+
+`test/domain-runtime.test.ts` covers preserved native calls/continuation, ask stop, missing observations, no-op completion and isolation. `test/domain-memory.test.ts` covers immutable source messages, rejection of malformed notes, fallible-note separation from receipts and cross-task isolation. Passing these checks does not establish task-quality improvement; compare notes on/off using the same model, data and budget.
+
+A note can confidently preserve a wrong plan. It can also duplicate context or add latency. Keep the feature optional until domain measurements justify it; retain original request and raw tool observations so a later decision can contradict the note.
