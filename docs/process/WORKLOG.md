@@ -5,6 +5,20 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-11-07 - opt-in domain adapter for LifeMate evaluation
+
+Added an isolated domain composition through existing Agent/ToolRegistry/provider/MCP ports,
+with host-supplied effect receipts, terminal clarification, paired native history and bounded
+native-protocol repair. It does not change the shared coding loop, provider, permissions,
+installed CLI or version. Unknown write outcomes are retained and stop automatic repeats.
+See [domain runtime](../DOMAIN-RUNTIME.md). The host integration lives in the neighboring
+LifeMate project; model quality is a separate TRAIN experiment, not inferred from unit tests.
+
+Verified typecheck/lint, scoped agent/provider/architecture/Anthropic/MCP regressions and a real
+MCP→BTC ToolEnv oracle replay on24 TRAIN (24 exact calls/state, zero inference requests).
+The live comparison uses the existing `zai` Anthropic provider, confirmed with a read-only
+quota query and an actual GLM5.3 response. No endpoint fallback, new training or public submission.
+
 ## 2026-10-03 - v1.8.0 Windows release continuation
 
 Continue the owner's authorized PR/CI/merge/release on DESKTOP-PLLO4HG in a fresh
