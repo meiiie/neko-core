@@ -7,7 +7,7 @@ import { messageOf } from "../shared/debug.ts";
 import { DomainWorkingMemory } from "./domain-memory.ts";
 
 export type DomainEffect = "read" | "write" | "ask";
-export type ReceiptOutcome = "succeeded" | "failed" | "unknown";
+export type ReceiptOutcome = "succeeded" | "noop" | "failed" | "unknown";
 
 export interface DomainReceipt {
   sequence: number;

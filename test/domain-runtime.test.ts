@@ -157,6 +157,22 @@ test("a failed ask is not a waiting state and does not prevent correction", asyn
   } finally { await f.close(); }
 });
 
+test("a known no-op remains distinct from success and allows a corrected action", async () => {
+  let count = 0;
+  const f = fixture([call(write), call(write), final("Done")], {
+    workingNote: true,
+    classifyReceipt: () => ++count === 1 ? "noop" : "succeeded",
+  });
+  try {
+    const result = await f.runtime.run("Finish the requested action.");
+    expect(result.receipts.map((r) => r.outcome)).toEqual(["noop", "succeeded"]);
+    expect(f.messages[1][0].content).toContain('"outcome":"noop"');
+    expect(f.executions).toHaveLength(2);
+    expect(result.protocolStatus).toBe("finished");
+    expect(result.semanticSuccess).toBeNull();
+  } finally { await f.close(); }
+});
+
 test("unknown mutation outcome is preserved and stops automatic repeat writes", async () => {
   const response = call(write);
   response.tool_calls.push({ id: "duplicate_write", name: write, arguments: {} });

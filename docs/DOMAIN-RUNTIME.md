@@ -6,6 +6,8 @@ Following [EXTENDING](EXTENDING.md), domain schemas, prompts and receipt interpr
 
 Create a fresh runtime per independent task. Native calls still pass through the registry. A successful ask ends the turn; an unknown write outcome preserves the receipt and stops automatic continuation. `semanticSuccess` remains unknown until the application evaluates the outcome. A receipt proves execution, not correct intent.
 
+Receipt classifiers can return `noop` for a known execution with no effect, separately from `succeeded`, `failed` or `unknown`. A no-op does not prove the requested goal was completed and does not block correction. In LifeMate, top-level `ok=true, done=false` is the executor's explicit no-op contract; a nested `item.done=false` on a newly created task is different and remains a successful creation.
+
 Failed asks remain repairable; successful asks also prevent later actions in the same native batch. Plain-text questions do not count as executed asks. Explicit tool-call JSON/XML in a final response can trigger one optional native-protocol repair within the original request/deadline budget; prose is never executed or trusted as a receipt. Persistent malformed output remains `unresolved_tool_text`.
 
 `nativeDomainHistory` preserves trusted historical call/result pairs with a separate ID namespace. System policy is seeded before preloading history, avoiding the Agent's empty-message initialization branch. Neither native history nor text-tool repair has demonstrated a reliable quality benefit in the earlier LifeMate144-run comparison; its records remain in `artifacts/neko-domain-train-20261107` in the embedding workspace.
