@@ -5,6 +5,33 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-11-08 - domain protocol and bounded decision review handoff
+
+The embedded domain adapter quarantines explicit text tool envelopes, including mixed
+native/text proposals, before executing the batch. One native repair shares the original
+request budget. Optional terminal review compares the request with actual receipts;
+prewrite, evidence and clarification review remain independent opt-ins. No coding CLI,
+installed release, provider credentials or shared cross-task memory is changed.
+
+The LifeMate host uses terminal review + reviewed TRAIN lessons; working notes, evidence
+and clarification review are disabled in the current full-run configuration. Domain runtime
+reports protocol status, not semantic success. This branch is a teammate handoff, not a new
+Neko release. Verified 33 domain/memory regressions, typecheck and lint on Bun 1.4.0.
+
+## 2026-11-07 - opt-in domain adapter for LifeMate evaluation
+
+Added an isolated domain composition through existing Agent/ToolRegistry/provider/MCP ports,
+with host-supplied effect receipts, terminal clarification, paired native history and bounded
+native-protocol repair. It does not change the shared coding loop, provider, permissions,
+installed CLI or version. Unknown write outcomes are retained and stop automatic repeats.
+See [domain runtime](../DOMAIN-RUNTIME.md). The host integration lives in the neighboring
+LifeMate project; model quality is a separate TRAIN experiment, not inferred from unit tests.
+
+Verified typecheck/lint, scoped agent/provider/architecture/Anthropic/MCP regressions and a real
+MCP→BTC ToolEnv oracle replay on24 TRAIN (24 exact calls/state, zero inference requests).
+The live comparison uses the existing `zai` Anthropic provider, confirmed with a read-only
+quota query and an actual GLM5.3 response. No endpoint fallback, new training or public submission.
+
 ## 2026-10-03 - v1.8.0 Windows release continuation
 
 Continue the owner's authorized PR/CI/merge/release on DESKTOP-PLLO4HG in a fresh
@@ -1113,3 +1140,7 @@ regression verifies that unmount aborts the outstanding summary request as well 
 
 - Follow-on fixes: reject an already oversized summarizer request estimate before calling a small-window provider; bind sticky prompt pointer targets to the painted frame's semantic ID. The latter fixed a reproduced React/render race rather than relaxing the click assertion.
 - Final Linux gate: 1,945 tests with updater stub plus 20 updater tests separately, 40 skips, zero failures; typecheck/lint/build/PTY/doctor/policy completed. Native offline prompt 65/57 navigation verified on 43f3189ece0c… . Earlier live 200-turn evidence predates these two follow-on fixes; network policy still blocks further Coding Plan calls.
+
+## 2026-11-08 — LifeMate domain adapter review
+
+Completed 144 valid GLM-5.3 trajectories via the existing zai/Anthropic provider. Fixed missing system policy when history is preloaded (f8f8edf); invalid candidate pass retained separately. Domain text-history composition improves local fit/check matcher score and request count, but loses two check states; no production promotion. Native history/repair not selected. Shared coding runtime, providers and installed CLI unchanged. Evidence: neighboring artifacts/neko-domain-train-20261107/REPORT.md. Solo implementation and review; no subagents or automation.
