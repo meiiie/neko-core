@@ -5,6 +5,9 @@ import { ToolRegistry, type ApprovalGate } from "../core/tool-runtime.ts";
 import { isJsonObject, isText, type JsonValue } from "../shared/wire.ts";
 import { messageOf } from "../shared/debug.ts";
 import { DomainWorkingMemory } from "./domain-memory.ts";
+import { decisionEvidence } from "./domain-evidence.ts";
+import { reviewInstruction, type PendingActions } from "./domain-review.ts";
+import { clarificationContext } from "./domain-clarification.ts";
 
 export type DomainEffect = "read" | "write" | "ask";
 export type ReceiptOutcome = "succeeded" | "noop" | "failed" | "unknown";
@@ -30,6 +33,9 @@ export interface DomainRuntimeOptions {
   maxRequests?: number;
   repairTextTools?: boolean;
   workingNote?: boolean;
+  decisionEvidence?: boolean;
+  decisionReview?: "terminal" | "prewrite";
+  clarificationReview?: boolean;
   onEvent?: EventHook;
   onCheckpoint?: () => void | Promise<void>;
 }
@@ -37,6 +43,8 @@ export interface DomainRuntimeOptions {
 /** Detect explicit tool envelopes, not ordinary questions or JSON arguments in prose.
  * This function never turns text into an executable call. */
 export function textToolEnvelope(text: string, names: ReadonlySet<string>): boolean {
+  if (/(?:^|\n)\s*[\[{][\s\S]*?"tool_(?:calls|results)"\s*:/.test(text)
+      && [...names].some((name) => text.includes(JSON.stringify(name)))) return true;
   const candidates = [text.trim(),
     ...Array.from(text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g), (m) => m[1]),
     ...Array.from(text.matchAll(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g), (m) => m[1]),
@@ -87,6 +95,13 @@ export function createDomainRuntime(options: DomainRuntimeOptions) {
   let stepLimitReached = false;
   let waitingForUser = false;
   let uncertainMutation = false;
+  let originalRequest = "";
+  let quarantinedProtocol = false;
+  let pendingWrite: PendingActions | undefined;
+  let reviewingNextResponse = false;
+  let heldClarification: PendingActions | undefined;
+  let holdCurrentBatch = false;
+  let clarificationReviews = 0;
   const toolNames = new Set(names.flatMap((name) => [name, name.replace(/^mcp__.+?__/, "")]));
   const tools: McpTools = {
     toolSchemas: () => structuredClone(schemas),
@@ -96,6 +111,8 @@ export function createDomainRuntime(options: DomainRuntimeOptions) {
       if (!names.includes(name)) throw new Error("Tool outside domain capability ceiling");
       if (waitingForUser) return "Error: clarification already executed; wait for the next user turn.";
       if (uncertainMutation) throw new DomainUncertainMutation();
+      if (holdCurrentBatch) return JSON.stringify({ ok: false, executed: false, user_asked: false,
+        status: "held_for_clarification_review", message: "This entire proposed batch is unexecuted. Reconsider the missing fields using the conversation before issuing the next native actions." });
       let observation: string;
       let outcome: ReceiptOutcome = "unknown";
       let observed = false;
@@ -127,8 +144,40 @@ export function createDomainRuntime(options: DomainRuntimeOptions) {
       if (waitingForUser) return { content: "Đã yêu cầu bổ sung thông tin.", tool_calls: [] };
       if (requests >= maxRequests) throw new DomainRequestLimit();
       requests++;
-      const response = await options.provider.complete(memory ? memory.context(messages, receipts) : messages, schema, delta, signal, opts);
+      let context = memory ? memory.context(messages, receipts) : messages;
+      if (options.decisionEvidence) context = decisionEvidence(context, originalRequest, receipts);
+      if (heldClarification) {
+        context = clarificationContext(context, originalRequest, receipts, heldClarification);
+        heldClarification = undefined;
+      }
+      holdCurrentBatch = false;
+      const isReviewResponse = reviewingNextResponse;
+      reviewingNextResponse = false;
+      const response = await options.provider.complete(context, schema, delta, signal,
+        options.decisionReview || options.clarificationReview ? { ...opts, onToolCallReady: undefined, executeTool: undefined } : opts);
+      if (options.repairTextTools !== false && textToolEnvelope(response.content ?? "", toolNames)) {
+        quarantinedProtocol = true;
+        options.onEvent?.("domain_protocol_quarantine", {
+          text: response.content, native_proposals_not_executed: response.tool_calls,
+        });
+        return { content: "Invalid text tool envelope quarantined. No tool in this response was executed; claimed tool results are not observations.",
+          tool_calls: [], usage: response.usage };
+      }
+      if (options.decisionReview === "prewrite" && !isReviewResponse
+          && response.tool_calls.some((call) => effects[call.name] === "write")) {
+        pendingWrite = structuredClone(response.tool_calls.map(({ name, arguments: args }) => ({ name, arguments: args })));
+        options.onEvent?.("domain_pending_actions", { proposals_not_executed: pendingWrite });
+        return { content: "Proposed actions held for pre-execution review. No tool from this response has executed.",
+          tool_calls: [], usage: response.usage };
+      }
       if (memory?.observe(response.content)) options.onEvent?.("domain_working_note", memory.snapshot());
+      if (options.clarificationReview && clarificationReviews === 0 && requests < maxRequests
+          && response.tool_calls.some((call) => effects[call.name] === "ask")) {
+        heldClarification = structuredClone(response.tool_calls.map(({ name, arguments: args }) => ({ name, arguments: args })));
+        holdCurrentBatch = true;
+        clarificationReviews++;
+        options.onEvent?.("domain_clarification_review", { attempt: clarificationReviews, held_proposals: heldClarification });
+      }
       return response;
     },
   };
@@ -152,25 +201,42 @@ export function createDomainRuntime(options: DomainRuntimeOptions) {
     async run(instruction: string, signal?: AbortSignal) {
       if (started || closed) throw new Error("Create a fresh domain runtime for each independent task");
       started = true;
+      originalRequest = instruction;
       memory?.start(instruction);
       let answer = await agent.runResilient(instruction, { signal, maxRecoveries: 0 });
       let repairs = 0;
-      if (!signal?.aborted && options.repairTextTools !== false && requests < maxRequests && textToolEnvelope(answer, toolNames)) {
-        repairs++;
-        options.onEvent?.("domain_protocol_repair", { reason: "text_tool_envelope", attempt: repairs });
-        answer = await agent.runResilient(
+      let terminalReviews = 0;
+      let writeReviews = 0;
+      while (!signal?.aborted && requests < maxRequests && !waitingForUser && !stepLimitReached) {
+        let instruction: string;
+        if (pendingWrite) {
+          instruction = reviewInstruction(originalRequest, receipts, pendingWrite);
+          pendingWrite = undefined;
+          reviewingNextResponse = true;
+          writeReviews++;
+          options.onEvent?.("domain_write_review", { attempt: writeReviews });
+        } else if (options.repairTextTools !== false && quarantinedProtocol && repairs < 1) {
+          repairs++;
+          quarantinedProtocol = false;
+          options.onEvent?.("domain_protocol_repair", { reason: "text_tool_envelope", attempt: repairs });
+          instruction =
           "PROTOCOL REPAIR: The last answer contained tool-call JSON as text; that text did not execute any tool. " +
           "If an action or clarification is still required, issue the actual native tool call using the advertised name/schema. " +
           "Do not replay successful calls already present in tool results, invent results, or perform a lookup merely to verify completion. " +
-          "If no action remains, answer briefly in ordinary text.",
-          { signal, internal: true, maxRecoveries: 0 },
-        );
+          "If no action remains, answer briefly in ordinary text.";
+        } else if (options.decisionReview && !quarantinedProtocol && terminalReviews === 0) {
+          instruction = reviewInstruction(originalRequest, receipts);
+          terminalReviews++;
+          options.onEvent?.("domain_terminal_review", { attempt: terminalReviews });
+        } else break;
+        answer = await agent.runResilient(instruction, { signal, internal: true, maxRecoveries: 0 });
       }
       return {
         answer: memory ? memory.visibleAnswer(answer) : answer, requests, repairs,
+        terminalReviews, writeReviews, clarificationReviews,
         workingMemory: memory?.snapshot(),
-        protocolStatus: signal?.aborted ? "interrupted" : stepLimitReached ? "step_limit"
-          : waitingForUser ? "waiting_for_user" : textToolEnvelope(answer, toolNames) ? "unresolved_tool_text" : "finished",
+        protocolStatus: signal?.aborted ? "interrupted" : stepLimitReached || pendingWrite || heldClarification ? "step_limit"
+          : waitingForUser ? "waiting_for_user" : quarantinedProtocol || textToolEnvelope(answer, toolNames) ? "unresolved_tool_text" : "finished",
         semanticSuccess: null,
         receipts: structuredClone(receipts),
       };

@@ -31,3 +31,15 @@ The LifeMate integration in the sibling repository implements this as an explici
 `test/domain-runtime.test.ts` covers preserved native calls/continuation, ask stop, missing observations, no-op completion and isolation. `test/domain-memory.test.ts` covers immutable source messages, rejection of malformed notes, fallible-note separation from receipts and cross-task isolation. Passing these checks does not establish task-quality improvement; compare notes on/off using the same model, data and budget.
 
 A note can confidently preserve a wrong plan. It can also duplicate context or add latency. Keep the feature optional until domain measurements justify it; retain original request and raw tool observations so a later decision can contradict the note.
+
+## Decision review options (2026-11-08)
+
+`decisionReview: "terminal"` permits one bounded end-of-turn review against actual receipts.
+`"prewrite"` holds draft writes before execution; `decisionEvidence` and
+`clarificationReview` are separate experimental switches. All consume the same request
+budget. A held proposal is not an executed receipt and cannot authorize a mutation.
+Quarantined tool text is never converted into tool calls. Successful native clarification
+still ends the turn. Fresh independent tasks require fresh runtime instances.
+
+The host must evaluate quality separately: fewer writes or more questions alone do not
+prove a better agent. Defaults of the installed Neko CLI are unchanged.

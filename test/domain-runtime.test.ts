@@ -266,3 +266,138 @@ test("protocol detector ignores arbitrary prose, data objects and unknown tool n
   expect(textToolEnvelope('<tool_call>{"name":"phone.call","arguments":{}}</tool_call>', names)).toBe(true);
   expect(textToolEnvelope('Tôi sẽ gọi.\n{"tool_calls":[{"name":"phone.call","arguments":{}}],"tool_results":[{"ok":true}]}', names)).toBe(true);
 });
+
+test("malformed tool envelope is repaired without trusting its fabricated receipt", async () => {
+  const bad = final('{"tool_calls":[{"name":"phone.call","arguments":{}}], "tool_results":[{"id":"fabricated_target"}');
+  const f = fixture([bad, call(ask, { tool_name: "phone.call", params: ["contact_id"] })]);
+  try {
+    const result = await f.runtime.run("Gọi người chưa xác định.");
+    expect(result.repairs).toBe(1);
+    expect(f.executions.map((c) => c.name)).toEqual([ask]);
+    expect(JSON.stringify(f.messages[1])).not.toContain("fabricated_target");
+  } finally { await f.close(); }
+});
+
+test("mixed fake lookup and native mutation are quarantined before the mutation", async () => {
+  const bad = call(write, { contact_id: "fabricated_target" });
+  bad.content = '{"tool_calls":[{"name":"contacts.search","arguments":{}}],"tool_results":[{"id":"fabricated_target"}]}';
+  const f = fixture([bad, call(read, { query: "Mai" }), call(write, { contact_id: "actual_target" }), final("Done")]);
+  try {
+    const result = await f.runtime.run("Gọi Mai.");
+    expect(result.repairs).toBe(1);
+    expect(f.executions).toEqual([{ name: read, args: { query: "Mai" } }, { name: write, args: { contact_id: "actual_target" } }]);
+    expect(f.messages[1].some((m) => m.provider_data)).toBe(false);
+    expect(JSON.stringify(f.messages[1])).not.toContain("fabricated_target");
+  } finally { await f.close(); }
+});
+
+test("evidence view uses the exact request and observed tool data without modifying the conversation", async () => {
+  const f = fixture([call(read, { query: "Mai" }), call(ask, { tool_name: "phone.call", params: ["contact_id"] })], { decisionEvidence: true });
+  const originalSystem = f.runtime.agent.messages[0].content;
+  try {
+    await f.runtime.run("Gọi Mai đồng nghiệp; đừng gọi người nhà.");
+    expect(f.messages[0][0].content).toContain("Gọi Mai đồng nghiệp; đừng gọi người nhà.");
+    expect(f.messages[1][0].content).toContain('"source":"receipt:1"');
+    expect(f.messages[1][0].content).toContain('"query":"Mai"');
+    expect(f.messages[1][0].content).toContain('\"receipt_count\":1');
+    expect(f.runtime.agent.messages[0].content).toBe(originalSystem);
+    expect(f.executions.map((c) => c.name)).toEqual([read, ask]);
+  } finally { await f.close(); }
+});
+
+test("terminal review can replace a prose question with a native clarification", async () => {
+  const f = fixture([final("Bạn chọn người nào?"), call(ask, { tool_name: "phone.call", params: ["contact_id"] })], { decisionReview: "terminal" });
+  try {
+    const result = await f.runtime.run("Tìm người đúng rồi hỏi tôi chọn trước khi gọi.");
+    expect(result.terminalReviews).toBe(1);
+    expect(result.protocolStatus).toBe("waiting_for_user");
+    expect(f.executions.map((c) => c.name)).toEqual([ask]);
+    expect(JSON.stringify(f.messages[1])).toContain("Tìm người đúng rồi hỏi tôi chọn trước khi gọi.");
+  } finally { await f.close(); }
+});
+
+test("terminal review accepts a no-op without forcing tool use or looping", async () => {
+  const f = fixture([final("Không làm gì thêm."), final("Đã giữ nguyên.")], { decisionReview: "terminal" });
+  try {
+    const result = await f.runtime.run("Hủy yêu cầu vừa rồi, không cần làm gì nữa.");
+    expect(result.requests).toBe(2);
+    expect(result.terminalReviews).toBe(1);
+    expect(f.executions).toEqual([]);
+  } finally { await f.close(); }
+});
+
+test("clarification review preserves native continuation, holds the whole batch, and may retrieve then act", async () => {
+  const draft = call(ask, { tool_name: "phone.call", params: ["contact_id"] });
+  draft.tool_calls.push({ id: "unreviewed_write", name: write, arguments: { contact_id: "wrong" } });
+  const f = fixture([draft, call(read, { query: "Mai" }), call(write, { contact_id: "right" }), final("Done")], { clarificationReview: true });
+  try {
+    const result = await f.runtime.run("Gọi Mai đồng nghiệp, tra danh bạ nếu cần.");
+    expect(result.clarificationReviews).toBe(1);
+    expect(result.protocolStatus).toBe("finished");
+    expect(f.executions).toEqual([{ name: read, args: { query: "Mai" } }, { name: write, args: { contact_id: "right" } }]);
+    expect(f.messages[1].find((m) => m.tool_calls?.length)?.provider_data).toEqual(draft.continuation);
+    expect(f.messages[1].filter((m) => m.role === "tool")).toHaveLength(2);
+    expect(f.messages[1][0].content).toContain("CLARIFICATION REVIEW");
+    expect(f.messages[2][0].content).not.toContain("CLARIFICATION REVIEW");
+    expect(result.receipts.map((r) => r.effect)).toEqual(["read", "write"]);
+  } finally { await f.close(); }
+});
+
+test("clarification review allows the necessary question once and cannot loop", async () => {
+  const question = call(ask, { tool_name: "phone.call", params: ["contact_id"] });
+  const f = fixture([question, question], { clarificationReview: true });
+  try {
+    const result = await f.runtime.run("Tôi chưa chọn Mai nào.");
+    expect(result.requests).toBe(2);
+    expect(result.clarificationReviews).toBe(1);
+    expect(result.protocolStatus).toBe("waiting_for_user");
+    expect(f.executions).toEqual([{ name: ask, args: question.tool_calls[0].arguments }]);
+  } finally { await f.close(); }
+});
+
+test("clarification review leaves direct actions alone and does not hold the last available request", async () => {
+  for (const response of [call(write, { contact_id: "known" }), call(ask)]) {
+    const f = fixture([response], { clarificationReview: true, maxRequests: 1 });
+    try {
+      const result = await f.runtime.run("Current request");
+      expect(result.clarificationReviews).toBe(0);
+      expect(f.executions).toHaveLength(1);
+      expect(f.messages[0][0].content?.trim()).toBe("Isolated tool simulation.");
+    } finally { await f.close(); }
+  }
+});
+
+test("prewrite review never executes the unreviewed draft or replays its continuation", async () => {
+  const f = fixture([call(write, { contact_id: "unsupported_person" }), call(ask, { tool_name: "phone.call", params: ["contact_id"] })], { decisionReview: "prewrite" });
+  try {
+    const result = await f.runtime.run("Gọi Mai, tôi chưa chọn Mai nào.");
+    expect(result.writeReviews).toBe(1);
+    expect(f.executions.map((c) => c.name)).toEqual([ask]);
+    expect(f.messages[1].some((m) => m.provider_data)).toBe(false);
+    expect(JSON.stringify(f.messages[1])).toContain("unexecuted_proposal");
+    expect(f.messages[1].filter((m) => m.role === "tool")).toEqual([]);
+  } finally { await f.close(); }
+});
+
+test("reviewed write keeps native arguments and successful receipts through completion", async () => {
+  const revised = call(write, { contact_id: "correct_person" });
+  const f = fixture([call(write, { contact_id: "wrong_person" }), revised, final("Đã gọi."), final("Hoàn tất.")], { decisionReview: "prewrite" });
+  try {
+    const result = await f.runtime.run("Gọi đúng người đã chọn.");
+    expect(result.writeReviews).toBe(1);
+    expect(result.terminalReviews).toBe(1);
+    expect(f.executions).toEqual([{ name: write, args: { contact_id: "correct_person" } }]);
+    expect(f.messages[2].find((m) => m.tool_calls?.length)?.provider_data).toEqual(revised.continuation);
+    expect(f.messages[3].at(-1)?.content).toContain('"outcome":"succeeded"');
+  } finally { await f.close(); }
+});
+
+test("a draft cannot execute when no request budget remains to review it", async () => {
+  const f = fixture([call(write, { contact_id: "unreviewed" })], { decisionReview: "prewrite", maxRequests: 1 });
+  try {
+    const result = await f.runtime.run("Gọi Mai.");
+    expect(result.protocolStatus).toBe("step_limit");
+    expect(result.requests).toBe(1);
+    expect(f.executions).toEqual([]);
+  } finally { await f.close(); }
+});

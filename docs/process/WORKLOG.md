@@ -5,6 +5,19 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-11-08 - domain protocol and bounded decision review handoff
+
+The embedded domain adapter quarantines explicit text tool envelopes, including mixed
+native/text proposals, before executing the batch. One native repair shares the original
+request budget. Optional terminal review compares the request with actual receipts;
+prewrite, evidence and clarification review remain independent opt-ins. No coding CLI,
+installed release, provider credentials or shared cross-task memory is changed.
+
+The LifeMate host uses terminal review + reviewed TRAIN lessons; working notes, evidence
+and clarification review are disabled in the current full-run configuration. Domain runtime
+reports protocol status, not semantic success. This branch is a teammate handoff, not a new
+Neko release. Verified 33 domain/memory regressions, typecheck and lint on Bun 1.4.0.
+
 ## 2026-11-07 - opt-in domain adapter for LifeMate evaluation
 
 Added an isolated domain composition through existing Agent/ToolRegistry/provider/MCP ports,
