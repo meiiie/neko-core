@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTaskScope } from "../src/core/task-scope.ts";
@@ -12,7 +12,10 @@ import { DreamStore } from "../src/adapters/dream-store.ts";
 import { DisplayHistory } from "../src/adapters/display-history.ts";
 
 function fixture() {
-  const home = mkdtempSync(join(tmpdir(), "neko-dream-runtime-")), root = join(home, "repo"); mkdirSync(root);
+  const home = mkdtempSync(join(tmpdir(), "neko-dream-runtime-")), root = join(home, "repo-alias");
+  const physicalRoot = join(home, "repo"); mkdirSync(physicalRoot);
+  // Exercise canonical task admission even on Linux, where tmpdir is usually already physical.
+  symlinkSync(physicalRoot, root, process.platform === "win32" ? "junction" : "dir");
   const scope = createTaskScope("task", root);
   const task: TaskRuntimeInput = { scope, root: scope.canonicalRoot, taskId: scope.id, label: "test", sessionId: "session",
     messages: [{ role: "system", content: "SECRET POLICY" }, { role: "user", content: "Use bun to run tests." },
@@ -49,7 +52,7 @@ test("dream captures only this task/home and calls one tool-free provider before
 test("display originals survive working history compaction and oversize evidence is reported, not clipped", async () => {
   const f = fixture();
   try {
-    const display = new DisplayHistory(f.home, { sessionId: f.task.sessionId, taskId: f.task.taskId, root: f.root });
+    const display = new DisplayHistory(f.home, { sessionId: f.task.sessionId, taskId: f.task.taskId, root: f.task.root });
     display.append("user", "Use bun to run tests.");
     display.append("tool_result", "x".repeat(100_000));
     f.task.displayHistory = await display.flush();
@@ -122,7 +125,7 @@ test("in-flight cancellation, disabled memory and source changes never create an
 test("display checkpoint reconciliation keeps later cross-client corrections and rejects legacy summaries", async () => {
   const f = fixture();
   try {
-    const display = new DisplayHistory(f.home, { sessionId: f.task.sessionId, taskId: f.task.taskId, root: f.root });
+    const display = new DisplayHistory(f.home, { sessionId: f.task.sessionId, taskId: f.task.taskId, root: f.task.root });
     const prefix = [{ role: "user", content: "Use npm for this repository." }];
     display.append("user", "Use npm for this repository."); await display.flush();
     f.task.displayHistory = display.captureCheckpoint(prefix);
@@ -141,7 +144,7 @@ test("memory tool results and unbound display tool observations cannot launder i
       { role: "tool", tool_call_id: "m1", content: "Unverified idea: release is safe." }];
     let input = await buildDreamInput(f.home, f.task);
     expect(input.sources.some(source => source.kind === "tool")).toBe(false);
-    const display = new DisplayHistory(f.home, { sessionId: f.task.sessionId, taskId: f.task.taskId, root: f.root });
+    const display = new DisplayHistory(f.home, { sessionId: f.task.sessionId, taskId: f.task.taskId, root: f.task.root });
     display.append("tool_result", "Unverified idea: release is safe.");
     f.task.displayHistory = await display.flush(); f.task.messages = [];
     input = await buildDreamInput(f.home, f.task);
