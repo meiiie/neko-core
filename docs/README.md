@@ -28,6 +28,7 @@ the documents listed here.
 - [Feedback and privacy](process/FEEDBACK.md) — reviewed private email reports, from v1.6.0.
 - [Office artifacts](process/OFFICE.md)
 - [Oracle](process/ORACLE.md)
+- [Task memory dreaming](process/DREAMING.md)
 - [Sandbox](process/SANDBOX.md)
 - [Web and search](process/WEB.md)
 - [Scheduling and automation](process/AUTOMATION.md)

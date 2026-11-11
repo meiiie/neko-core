@@ -284,6 +284,7 @@ Commands:
                 'setup ocr' installs the Vietnamese OCR pack so 'computer ocr' reads accented text
   chat          interactive session (default - same as bare 'neko' / 'neko core')
   run <task>    one-shot: run a single instruction
+  dream         preview, prepare, review, apply or roll back task-scoped memory
   task-session  create, switch, inspect, or explicitly import v1 task labels in this root
   bench         run a tiny agentic-coding benchmark against the configured model (pass@1)
   bench hard    the higher-complexity regression tier (historically saturated)
@@ -1784,6 +1785,14 @@ async function main(): Promise<number> {
       }
       case "run": return await cmdRun(args);
       case "task-session": return await cmdTaskSession(args);
+      case "dream": {
+        const { dreamCommand } = await import("../src/adapters/dream-cli.ts");
+        const controller = new AbortController();
+        const cancel = () => controller.abort(new Error("Dream cancelled"));
+        process.once("SIGINT", cancel);
+        try { console.log(await dreamCommand(load(args), process.cwd(), args.positionals, controller.signal)); return 0; }
+        finally { process.off("SIGINT", cancel); }
+      }
       case "setup": {
         if (args.positionals[0]?.toLowerCase() === "codex") return await cmdCodexSupport("install");
         if (args.positionals[0]?.toLowerCase() === "gemini") return await cmdGeminiSupport("install");
