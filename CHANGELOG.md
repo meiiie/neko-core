@@ -6,6 +6,47 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-11
+
+### Added
+
+- Explicit reviewed task-memory dreaming with `neko dream preview`, `prepare`,
+  `show`, `apply` and `rollback`. Preparation is tool-free; candidate memories
+  become active only after review and explicit apply. Original-evidence citations,
+  correction links and observed/inferred distinctions remain available for inspection.
+- Isolated embedded domain runtime with host-supplied tools and execution receipts,
+  optional task-local working notes, and bounded terminal/prewrite decision review.
+  Unknown write outcomes stop automatic continuation; successful clarification ends
+  the turn. These options do not change the installed coding CLI defaults.
+- HoLiLiHu company information on the product site and a separate company-site
+  implementation. Repository content alone does not establish deployment status.
+
+### Fixed
+
+- Domain tasks retain their system policy when native history is preloaded.
+  Explicit text tool envelopes are quarantined rather than executed as prose,
+  with at most one native-protocol repair inside the original request budget.
+- Domain receipts distinguish a known no-op from a successful effect, preserving
+  the opportunity to correct an incomplete action.
+
+### Compatibility and limits
+
+- Dream memory remains task/home scoped, uses stale-source and memory-revision
+  checks, and supports inspectable activation retries and rollback. Automatic
+  recall includes only a small validated index of observed claim titles, not full
+  summaries. Summaries have no separate 120-character cap; total response and
+  input budgets still apply.
+- Dream preparation can send selected task evidence to the configured provider.
+  Candidates retain evidence and prior note bytes for review/rollback; deleting
+  the active note does not erase audit records or original transcripts.
+- No background scheduler, global memory promotion, new runtime dependency, or
+  automatic session migration. Existing provider configuration, ACP protocol and
+  authority defaults remain unchanged.
+- Deterministic regression tests establish mechanism behavior, not recall,
+  coding-quality or domain-task quality gains. Wiii end-to-end acceptance is not
+  claimed. See [dreaming](docs/process/DREAMING.md) and
+  [domain runtime](docs/DOMAIN-RUNTIME.md) for usage, recovery and evidence limits.
+
 ## [1.8.0] - 2026-10-03
 
 ### Added
