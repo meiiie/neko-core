@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-10-03) - v1.8.0
+## Current status (2026-11-11) - v1.9.0 release candidate
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The current 1.x platform includes:
@@ -25,7 +25,15 @@ The current 1.x platform includes:
 - resumable, disk-streamed release downloads plus compressed transfer artifacts, with final binary digest and
   embedded-version verification before atomic activation.
 
-**Branch:** `main`. **Current release:** [v1.8.0](https://github.com/meiiie/neko-core/releases/tag/v1.8.0)
+**Branch:** `main`. **Current release:** [v1.8.0](https://github.com/meiiie/neko-core/releases/tag/v1.8.0).
+**Prepared release:** v1.9.0; publication remains pending the exact-candidate release gates.
+
+The candidate adds explicit reviewed task-memory dreaming and the isolated embedded
+domain runtime with optional working notes and bounded decision review. Dream recall
+is task scoped and title-only; domain execution receipts do not prove semantic success.
+No scheduler, automatic migration or measured quality improvement is claimed. See
+[dreaming](DREAMING.md) and [domain runtime](../DOMAIN-RUNTIME.md).
+
 Experimental structured context is explicitly opt-in with `--context-memory` in
 TUI/CLI/ACP; display history is independent of the compacted model context. Existing
 schema 2 sessions, provider configuration and authority defaults remain compatible.

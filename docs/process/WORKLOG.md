@@ -5,6 +5,35 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-11-11 - v1.9.0 release preparation
+
+Prepared the minor-version candidate from merged main `0bca69c64571ecc1df53d2170697bb5b325583e5`.
+The isolated verification baseline matches upstream tree
+`884e8dbd00a125da655d3ab18611cc6071004ffb`; the preparation changes version metadata
+and release documentation only. The v1.8.0 comparison includes reviewed task-memory
+dreaming (#92), the isolated domain runtime/review (#91), and company-site work
+(#87/#88). No recall/coding-quality gain, Wiii acceptance or site deployment is claimed.
+
+Fresh Linux verification of the 1.9.0 runtime candidate on Bun `1.4.0+34cbb9a40`:
+typecheck and lint pass; full suite 2,090 pass, 40 skip, 0 fail, 26,284 assertions
+across 215 files with an isolated home. Doctor and policy exit 0 with explicit
+empty-profile, untrusted-project, non-TTY and unconfined-auto warnings. Build,
+compiled render, real-PTY keyboard, ACP v1, startup input and both startup/exit
+renderers pass. Documentation links/paths and diff whitespace were checked.
+
+The release-preparation diff has no gitleaks findings. The redacted local history
+scan reports three existing synthetic secret-rejection fixtures at
+`test/dream.test.ts:68-69`; these are not real credentials and were already present
+in #92. The history scan is not reported as a clean pass.
+
+Publication is still pending: require the final main commit's cross-platform CI,
+applicable Windows real-terminal ghost/typing probes, a new v1.9.0 tag, all 17 release
+assets and latest-release/site verification. Refresh the roadmap's published-release
+pointer only after publication is verified. The site fallback version is prepared;
+asset-size fallbacks still require measurement against the final binaries, and a
+site redeploy is not part of this preparation. No tag, GitHub release or deployment
+was created by this change. ProgramBench remains paused.
+
 ## 2026-11-10 - explicit task memory dreaming (local implementation)
 
 Added a bounded, tool-free dream preparation pipeline with separate preview/review/apply/rollback,
