@@ -5,6 +5,21 @@ in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recov
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and
 process documents, not in an old log entry.
 
+## 2026-11-10 - explicit task memory dreaming (local implementation)
+
+Added a bounded, tool-free dream preparation pipeline with separate preview/review/apply/rollback,
+source-linked corrections, observed/inferred claims, original-citation carry-forward, and a small
+receipt-validated recall index. Original task notes/transcripts remain intact. Shared scoped-memory
+writer exclusion, content-revision checks, cancellation, secret checks and rollback recovery preserve
+task/home and authority boundaries. No scheduler, global promotion, release or model-quality claim.
+See [dreaming](DREAMING.md) for commands, audit retention and coverage/durability limits.
+
+Verified on Bun 1.4.0: typecheck, lint, 71 focused tests, and the full suite (2,086 pass,
+40 existing skips, zero failures) in an isolated temporary home. Doctor/policy return 0
+with expected empty-profile/unconfined-default warnings. Compiled UI, real-PTY input, ACP v1 and
+startup lifecycle/input probes pass. Real paid model evaluation, Windows/macOS CI and Wiii end-to-end
+acceptance were not run. Main and its unrelated local test artifacts are untouched; no push/deploy.
+
 ## 2026-11-08 - domain protocol and bounded decision review handoff
 
 The embedded domain adapter quarantines explicit text tool envelopes, including mixed
@@ -1144,3 +1159,19 @@ regression verifies that unmount aborts the outstanding summary request as well 
 ## 2026-11-08 — LifeMate domain adapter review
 
 Completed 144 valid GLM-5.3 trajectories via the existing zai/Anthropic provider. Fixed missing system policy when history is preloaded (f8f8edf); invalid candidate pass retained separately. Domain text-history composition improves local fit/check matcher score and request count, but loses two check states; no production promotion. Native history/repair not selected. Shared coding runtime, providers and installed CLI unchanged. Evidence: neighboring artifacts/neko-domain-train-20261107/REPORT.md. Solo implementation and review; no subagents or automation.
+
+## 2026-11-11 - Dream cross-platform fixture correction
+
+PR #92 CI exposed three display-history fixture failures on macOS and Windows.
+The fixture passed its raw root while Dream and the real task-session UI use the
+admitted canonical root. A symlink/junction fixture now reproduces that mismatch
+on Linux too; all display fixtures use the admitted task root. The three failures
+were reproduced before the fix and the existing assertions are unchanged. No
+production identity check, path boundary, or source-selection behavior was relaxed.
+Fresh Bun 1.4.0 verification: 34 scoped tests and the full suite (2,090 passed,
+40 skipped, zero failed), typecheck, lint, diff check and redacted fix-diff secret
+scan passed. Cross-platform CI must confirm the corrected candidate.
+
+## 2026-11-11 — Dream summary freedom and filename guidance
+
+Removed the independent 120-character Dream summary cap without truncating content or expanding injected recall. Retained Neko's total response, source, citation and runtime budgets, and documented that these are engineering choices rather than Anthropic's internal specification. Requests now enumerate allowed memory filenames and explain that correction/related links reference files, not claim titles. Invalid filename diagnostics identify the claim field without echoing untrusted output. Added long Vietnamese summary, retained-budget, link-error and second-pass prompt regressions.

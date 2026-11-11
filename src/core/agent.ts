@@ -9,6 +9,7 @@
  * The maxSteps cap is load-bearing: an agent without one can loop forever and burn money.
  * Tool observations (errors + denials) are fed back so the model adapts rather than crash.
  */
+import { isInternalUserMessage } from "./message-origin.ts";
 import { createHash } from "node:crypto";
 import { CostTracker, type Usage } from "./cost.ts";
 import {
@@ -88,23 +89,6 @@ export {
 export { isValidationBashCommand } from "./validation-command.ts";
 export type { EventHook, AgentOptions };
 
-/** Controller turns saved before `_neko_internal` existed. An explicit marker always wins, so a
- * current user can still begin a real message with one of these strings without being hidden. */
-const LEGACY_INTERNAL_USER_PREFIXES = [
-  "[Summary of earlier conversation]",
-  "CLOSED-LOOP REVIEW (",
-  "PLAN NOT COMPLETE:",
-  "VALIDATION FAILED:",
-  "VALIDATION REQUIRED:",
-  "OUTCOME VERIFICATION REQUIRED:",
-  "NO VERIFICATION EVIDENCE YET:",
-  "VERIFY BEFORE FINISHING:",
-  "[budget]",
-  "[delivery]",
-  "Step limit (",
-  "Continue the task from where it was interrupted.",
-];
-
 function isDeliveryArtifactEdit(call: { name: string; arguments?: any }): boolean {
   if (!EDIT_TOOLS.has(call.name.toLowerCase())) return false;
   const rawPath = call.arguments?.path;
@@ -112,13 +96,6 @@ function isDeliveryArtifactEdit(call: { name: string; arguments?: any }): boolea
   if (!path) return false;
   const parts = path.toLowerCase().split("/").filter(Boolean);
   return !parts.some((part) => /^\.?(?:probes?|scratch|temp|tmp)(?:[-_.].*)?$/.test(part));
-}
-
-function isInternalUserMessage(message: any): boolean {
-  if (message?._neko_internal === true) return true;
-  if (message?._neko_internal === false || message?.role !== "user" || !isText(message.content)) return false;
-  const content = message.content.trimStart();
-  return LEGACY_INTERNAL_USER_PREFIXES.some((prefix) => content.startsWith(prefix));
 }
 
 /** Neko-local durability metadata belongs in the session file, never an LLM wire payload. */

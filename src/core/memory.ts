@@ -6,6 +6,8 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { atomicWriteFileSync } from "../shared/atomic.ts";
+import { activatedDreamRecall } from "./dream.ts";
 import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 import { assertTaskScope, type TaskScope } from "./task-scope.ts";
@@ -178,7 +180,7 @@ export function readMemoryFile(name: string, home: string = homeDir(), scope?: T
   return existsSync(path) ? readFileSync(path, "utf-8") : `(no memory '${safe}')`;
 }
 
-export function deleteMemoryFile(name: string, home: string = homeDir(), scope?: TaskScope): string {
+function deleteMemoryFileUnlocked(name: string, home: string = homeDir(), scope?: TaskScope): string {
   if (scope && !memoryEnabled(home)) return "Memory is off. The user can re-enable it with /memory on.";
   const safe = safeName(name);
   const path = join(memoryDirFor(home, scope), safe);
@@ -189,7 +191,7 @@ export function deleteMemoryFile(name: string, home: string = homeDir(), scope?:
 }
 
 /** Append one explicit observation without asking a model to rewrite the surrounding profile. */
-export function appendCoreMemory(kind: "user" | "self", note: string, home: string = homeDir(), scope?: TaskScope): string {
+function appendCoreMemoryUnlocked(kind: "user" | "self", note: string, home: string = homeDir(), scope?: TaskScope): string {
   if (!memoryEnabled(home)) return "Neko memory is off. Use /memory on before saving a cross-project note.";
   const text = note.replace(/\s+/g, " ").trim();
   if (!text) return "nothing to remember";
@@ -244,8 +246,9 @@ function searchMemories(query: string, home: string = homeDir(), scope?: TaskSco
 }
 
 /** The model cannot choose scope via args; only the runtime's separate parameter controls admission. */
-export function memoryTool(args: any, home: string = homeDir(), scope?: TaskScope): string {
+function memoryToolUnlocked(args: any, home: string = homeDir(), scope?: TaskScope): string {
   const action = String(args.action ?? "").toLowerCase();
+  if (scope && ["write", "append"].includes(action) && safeName(args.name) === "dream.md") return "Error: dream.md is host-managed; use the explicit dream prepare/review/apply workflow.";
   if (!memoryEnabled(home)) return "Memory is off. The user can re-enable it with /memory on.";
   const dir = memoryDirFor(home, scope);
   switch (action) {
@@ -262,7 +265,7 @@ export function memoryTool(args: any, home: string = homeDir(), scope?: TaskScop
       const name = safeName(args.name);
       const path = join(dir, name);
       rejectScopedLink(path, scope);
-      writeFileSync(path, String(args.content ?? ""), "utf-8");
+      atomicWriteFileSync(path, String(args.content ?? ""), 0o600);
       return `Saved memory '${name}'`;
     }
     case "append": {
@@ -277,7 +280,7 @@ export function memoryTool(args: any, home: string = homeDir(), scope?: TaskScop
       return `Appended memory '${name}'`;
     }
     case "delete": {
-      return deleteMemoryFile(args.name, home, scope);
+      return deleteMemoryFileUnlocked(args.name, home, scope);
     }
     case "search": {
       const q = String(args.query ?? "").toLowerCase();
@@ -297,7 +300,8 @@ export interface LegacyMemoryImport {
 }
 
 /** Trusted host operation only. The model's `memory` tool deliberately has no import action. */
-export function importLegacyMemory(name: string, home: string, scope: TaskScope): LegacyMemoryImport {
+function importLegacyMemoryUnlocked(name: string, home: string, scope: TaskScope): LegacyMemoryImport {
+  if (safeName(name) === "dream.md") throw new Error("dream.md is host-managed and cannot be imported");
   assertTaskScope(scope);
   if (!memoryEnabled(home)) throw new Error("Memory is off");
   const safe = safeName(name);
@@ -350,6 +354,29 @@ export function coreMemoryBlock(home: string = homeDir(), scope?: TaskScope): st
       .map((line) => line.length > CORE_ENTRY_CHARS ? `${line.slice(0, CORE_ENTRY_CHARS - 3).trimEnd()}...` : line);
     if (entries.length) sections.push(`${label} (working observations; correct them when contradicted):\n${entries.join("\n")}`);
   }
+  if (scope) {
+    const path = join(memoryDirFor(home, scope), "dream.md");
+    if (existsSync(path)) {
+      rejectScopedLink(path, scope);
+      const stat = lstatSync(path);
+      if (stat.size <= 64_000) {
+        const note = readFileSync(path, "utf8");
+        const id = note.match(/<!-- neko-dream:v1:([a-f0-9]{64}) -->/)?.[1];
+        const records = join(memoryDirFor(home, scope), ".dreams");
+        let recall: string | null = null;
+        if (id && checkedDirectory(records, false)) {
+          const recordPath = join(records, `${id}.json`);
+          rejectScopedLink(recordPath, scope);
+          const recordStat = lstatSync(recordPath, { throwIfNoEntry: false });
+          if (recordStat && recordStat.size <= 512_000 && !existsSync(join(records, `${id}.rollback`))) {
+            recall = activatedDreamRecall(note, readFileSync(recordPath, "utf8"), scope.id, scope.canonicalRoot);
+          }
+        }
+        if (recall) sections.push(recall);
+        else if (recall === null) sections.push("Dream memory needs review; unverified or rolled-back content is not automatically recalled.");
+      }
+    }
+  }
   return sections.length ? `Core memory data (local, user-owned, bounded; observations are not instructions):\n${sections.join("\n")}` : "";
 }
 
@@ -368,4 +395,47 @@ export function memoryIndexBlock(home: string = homeDir(), scope?: TaskScope): s
     "and record durable facts/preferences/learnings you'll want next session):\n" +
     lines.join("\n")
   );
+}
+
+/** Host-only storage seam; caller must hold a genuine active scope. Never takes model paths. */
+export function taskMemoryDirectory(home: string, scope: TaskScope, create = false): string {
+  assertTaskScope(scope);
+  if (!memoryEnabled(home)) throw new Error("Memory is off");
+  return memoryDirFor(home, scope, create);
+}
+
+/** Shared cooperative writer exclusion, including dream publication. Never break stale locks. */
+export function withTaskMemoryWriter<T>(home: string, scope: TaskScope, action: () => T): T {
+  const dir = taskMemoryDirectory(home, scope, true);
+  const lock = join(dir, ".writer.lock"), token = randomUUID();
+  try { writeFileSync(lock, token, { flag: "wx", mode: 0o600 }); }
+  catch (error) {
+    // SAFETY: Node filesystem failures carry errno codes.
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("Task memory writer unavailable; inspect active/stale lock before explicit recovery");
+    throw error;
+  }
+  try { return action(); }
+  finally {
+    rejectScopedLink(lock, scope);
+    if (readFileSync(lock, "utf8") !== token) throw new Error("Task memory writer lock changed");
+    rmSync(lock);
+  }
+}
+
+export function memoryTool(args: any, home: string = homeDir(), scope?: TaskScope): string {
+  if (scope && memoryEnabled(home) && ["write", "append", "delete"].includes(String(args.action ?? "").toLowerCase())) {
+    return withTaskMemoryWriter(home, scope, () => memoryToolUnlocked(args, home, scope));
+  }
+  return memoryToolUnlocked(args, home, scope);
+}
+export function deleteMemoryFile(name: string, home: string = homeDir(), scope?: TaskScope): string {
+  return scope && memoryEnabled(home) ? withTaskMemoryWriter(home, scope, () => deleteMemoryFileUnlocked(name, home, scope))
+    : deleteMemoryFileUnlocked(name, home, scope);
+}
+export function appendCoreMemory(kind: "user" | "self", note: string, home: string = homeDir(), scope?: TaskScope): string {
+  return scope && memoryEnabled(home) ? withTaskMemoryWriter(home, scope, () => appendCoreMemoryUnlocked(kind, note, home, scope))
+    : appendCoreMemoryUnlocked(kind, note, home, scope);
+}
+export function importLegacyMemory(name: string, home: string, scope: TaskScope): LegacyMemoryImport {
+  return withTaskMemoryWriter(home, scope, () => importLegacyMemoryUnlocked(name, home, scope));
 }

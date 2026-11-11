@@ -78,7 +78,7 @@ test("command registry covers every canonical public CLI dispatch", () => {
   const names = new Set(listCommands().map((command) => command.name));
   const dispatched = [
     "chat", "resume", "run", "acp", "oracle", "bench",
-    "config", "doctor", "profiles", "init-user", "init", "login", "logout", "update",
+    "config", "doctor", "dream", "profiles", "init-user", "init", "login", "logout", "update",
     "tools", "agents", "commands", "capabilities", "policy", "trust", "handoff", "context",
     "sessions", "skills", "procurement", "recipes", "mcp", "support", "browser", "meeting", "setup",
     "version", "help",

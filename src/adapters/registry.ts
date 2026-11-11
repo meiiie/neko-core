@@ -85,6 +85,7 @@ export interface CommandSpec {
 }
 
 export const COMMANDS: CommandSpec[] = [
+  { name: "dream", group: "agent", summary: "Review and explicitly activate evidence-backed task memory; prepare calls the model once.", example: "neko dream preview <task-session-id>" },
   { name: "chat", group: "agent", summary: "Interactive agentic session (REPL).", example: "neko chat" },
   { name: "resume", group: "agent", summary: "Resume the latest or an exact saved session.", example: "neko resume <session-id>" },
   { name: "run", group: "agent", summary: "One-shot: run a single instruction.", example: "neko run 'add a test for X'" },
