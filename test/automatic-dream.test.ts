@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "../src/core/agent.ts";
@@ -174,5 +174,21 @@ test("explicit task sessions use their existing scope and reject a switched snap
     expect(await runAutomaticDream({ ...f, taskInput: () => input })).toBe("applied");
     expect(f.registry.taskScope).toBe(scope);
     expect(await f.registry.execute("memory", { action: "read", name: "dream.md" })).toContain("Use Bun");
+  } finally { rmSync(f.home, { recursive: true, force: true }); }
+});
+
+ test("task Dream accepts aliased home paths using physical identity", async () => {
+  const { createTaskScope } = await import("../src/core/task-scope.ts");
+  const f = await fixture();
+  try {
+    const alias = join(f.home, "home-alias");
+    symlinkSync(f.home, alias, "junction");
+    f.cfg.resolvedHome = alias;
+    f.registry.memoryHome = alias;
+    const scope = createTaskScope("aliased-home-task", f.root);
+    f.registry.bindTaskScope(scope);
+    bindAutomaticDream(f);
+    expect(await runAutomaticDream(f)).toBe("applied");
+    expect(f.calls()).toBe(1);
   } finally { rmSync(f.home, { recursive: true, force: true }); }
 });

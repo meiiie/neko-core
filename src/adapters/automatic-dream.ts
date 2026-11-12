@@ -68,7 +68,9 @@ export async function runAutomaticDream(options: AutomaticDreamOptions): Promise
   const notify = (message: string) => { try { options.notify?.(message); } catch { /* UI delivery cannot change memory publication. */ } };
   let provider: Provider | undefined;
   try {
-    const memoryHome = cfg.resolvedHome;
+    const configuredHome = cfg.resolvedHome;
+    const memoryHome = realpathSync.native(configuredHome);
+    if (realpathSync.native(registry.memoryHome) !== memoryHome) throw new Error("Dream memory home mismatch");
     const scope = registry.dreamScope ?? bindAutomaticDream(options);
     if (!scope) return "skipped";
     const task = (): TaskRuntimeInput => {
@@ -79,9 +81,9 @@ export async function runAutomaticDream(options: AutomaticDreamOptions): Promise
       return value;
     };
     const secrets = [cfg.apiKey, ...cfg.childSecretEnvNames.map(name => process.env[name] ?? "")].filter(Boolean);
-    const input = await buildDreamInput(cfg.resolvedHome, task(), secrets);
+    const input = await buildDreamInput(memoryHome, task(), secrets);
     if (!input.sources.some(source => source.kind === "user") || cfg.provider === "moa") return "skipped";
-    const store = new DreamStore(cfg.resolvedHome, scope);
+    const store = new DreamStore(memoryHome, scope);
     // Deduplicate original recent data, not refreshed system context or the recalled note.
     // Retained citations disappear after rollback and must not re-trigger the same turn.
     const automaticDigest = createHash("sha256").update(JSON.stringify(input.sources
@@ -94,16 +96,17 @@ export async function runAutomaticDream(options: AutomaticDreamOptions): Promise
     bounded.data.offline_retry_seconds = 0;
     provider = (options.providerFactory ?? getProvider)(bounded);
     const profileIdentity = JSON.stringify([cfg.provider, cfg.model, cfg.baseUrl]);
-    const result = await prepareDream({ home: cfg.resolvedHome, task: task(), provider,
+    const result = await prepareDream({ home: memoryHome, task: task(), provider,
       providerName: cfg.provider, model: cfg.model, secrets, signal: options.signal,
       maxInputTokens: bounded.contextWindow - bounded.maxTokens - 2000,
       onUsage: usage => agent.cost.add(usage) });
     if (!result.candidate) { notify("Dream: nothing to retain.\n"); return "empty"; }
     options.signal?.throwIfAborted();
     if (dreamMode(cfg) !== "auto" || String(registry.mode) === "plan" || !registry.isToolAvailable("memory") || registry.dreamScope !== scope
-      || cfg.resolvedHome !== memoryHome || registry.memoryHome !== memoryHome
+      || cfg.resolvedHome !== configuredHome || realpathSync.native(cfg.resolvedHome) !== memoryHome
+      || realpathSync.native(registry.memoryHome) !== memoryHome
       || profileIdentity !== JSON.stringify([cfg.provider, cfg.model, cfg.baseUrl])) throw new Error("Dream scope changed");
-    const current = await buildDreamInput(cfg.resolvedHome, task(), secrets);
+    const current = await buildDreamInput(memoryHome, task(), secrets);
     const status = store.apply(result.candidate.id, current, automaticDigest);
     notify(`Dream: ${status}; candidate ${result.candidate.id}. Inspect/rollback with neko dream show|rollback ${registry.taskScope ? options.sessionId : `${options.authority === "acp" ? "acp-session" : "session"}:${options.sessionId}`} <candidate-id>.\n`);
     return status;
