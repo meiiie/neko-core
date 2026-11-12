@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-11-12) - v1.9.1 published
+## Current status (2026-11-12) - v1.9.2 prepared; v1.9.1 published
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The current 1.x platform includes:
@@ -27,6 +27,11 @@ The current 1.x platform includes:
 
 **Branch:** `main`. **Current release:** [v1.9.1](https://github.com/meiiie/neko-core/releases/tag/v1.9.1).
 Publication verified: latest points to v1.9.1, not draft, with all 17 release assets.
+
+The v1.9.2 candidate fixes foreground blocking during interactive Dream and adds
+sanitized attempt diagnostics. It has not yet been published; the current
+release above remains v1.9.1 until tag/build verification completes. One-shot
+CLI still drains its pass after the answer. See [candidate record](RELEASE-1.9.2.md).
 
 This release adds dedicated managed Chrome and explicit consent-based personal
 Chrome setup, plus automatic session-scoped Dream consolidation after eligible
