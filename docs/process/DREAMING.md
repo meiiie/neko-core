@@ -1,10 +1,58 @@
 # Task memory dreaming
 
-Neko can explicitly consolidate one task's original evidence into a reviewed cross-session note. The design is inspired by [The components of agent memory](https://www.anthropic.com/research/components-of-agent-memory) (Anthropic, 2026-11-06): original transcripts, fallible notes, linked representations, and a small injected navigation layer. This is not compaction, model training, or an autonomous background agent.
+Neko consolidates eligible completed sessions automatically by default, while retaining the explicit reviewed workflow. The design is inspired by [The components of agent memory](https://www.anthropic.com/research/components-of-agent-memory) (Anthropic, 2026-11-06): original transcripts, fallible notes, linked representations, and a small injected navigation layer. This is not compaction, model training, or an autonomous background agent.
 
 ## Use
 
-Dreaming currently requires an existing opt-in **task session**, the same configured profile/context mode, and that session's original root. It operates on the active task in that session. It cannot read another task, import an ordinary legacy session, or change an ACP host's authority.
+## Default automatic mode
+
+`dream_mode` defaults to `auto`. After a successful ordinary CLI, TUI, or standard
+ACP turn, the host makes one bounded, tool-free request to the configured model,
+validates the candidate and automatically applies it. No `prepare`/`apply` command
+is required. This can add latency and normal provider charges; the host announces
+the pass and includes received usage reports, even for rejected candidates, in the session's cost counters.
+There is no timer or overnight daemon. Failed/interrupted turns, plan mode,
+memory-off, unavailable memory tools, MoA profiles, restricted ACP hosts and
+caller-injected runtimes without an explicit Dream provider do not automatically
+consolidate.
+
+Ordinary sessions keep their existing transcript format, profile changes, skills,
+and shared-memory behavior. A separate Dream sidecar is bound to the trusted
+session ID, physical root and host authority. It is not a project-wide shared
+bucket and does not put legacy sessions into task mode. Resuming the same session
+recalls its note; a new session has a different sidecar. One-shot `neko run` prints
+its Dream session/candidate identifiers. Scoped task sessions reuse their original
+store, original-evidence journal/display history and task isolation.
+
+Set `"dream_mode": "manual"` in config to stop additional automatic requests and
+keep reading previously activated notes. Set `"dream_mode": "off"` to stop the
+automatic sidecar as well. `/memory off` disables all memory, including existing
+scoped task recall. No option deletes original transcripts or audit records.
+
+Automatic activation uses the same citation validation, memory revision checks,
+atomic publication and rollback as explicit apply. Validation proves source
+provenance, **not truth**. A failed or stale pass leaves the old note intact. The
+same evidence is claimed before requesting the model, so a failure, crash or
+rollback does not silently repeat spending for identical evidence. A new completed
+turn can produce a new candidate. There are no automatic repair calls.
+
+The completion notice gives the exact command selector:
+
+```sh
+neko dream show session:<ordinary-session-id> <candidate-id>
+neko dream rollback session:<ordinary-session-id> <candidate-id>
+# For standard ACP sidecars, use acp-session:<session-id> instead.
+```
+
+Run these in the original root and home. These legacy selectors support only
+inspection and rollback; they do not migrate a legacy transcript into a task
+session. For explicit scoped tasks, the original commands below remain available.
+
+## Explicit task workflow
+
+The explicit workflow requires an opt-in **task session**, the same configured
+profile/context mode, and its original root. It operates on the active task and
+cannot read another task or change an ACP host's authority.
 
 ```sh
 neko task-session new "My project"
@@ -22,7 +70,7 @@ neko dream rollback <session-id> <candidate-id>
 - **apply:** activate that exact candidate locally after rechecking evidence and memory revisions. No model call.
 - **rollback:** restore the prior note only if this candidate's output is still current. No model call. Newer edits are never overwritten.
 
-There is no timer, overnight service, default background spending, or automatic apply. `prepare` caps output at 4,096 tokens, disables configured retries/offline retries, checks the input against the configured model context with a response reserve, and has a 120-second cancellation deadline. Mixture-of-agents profiles are rejected because a single logical request could fan out. A provider may still implement its own transport behavior; this is not a precise monetary spending cap.
+There is no timer or overnight service. Explicit `prepare` still never automatically applies; only the post-turn automatic host path does. `prepare` caps output at 4,096 tokens, disables configured retries/offline retries, checks the input against the configured model context with a response reserve, and has a 120-second cancellation deadline. Mixture-of-agents profiles are rejected because a single logical request could fan out. A provider may still implement its own transport behavior; this is not a precise monetary spending cap.
 
 ## Research alignment and implementation limits
 
@@ -40,7 +88,7 @@ The pass reads a bounded recent window, up to 128 sources and 96 KB of serialize
 
 This is **not a complete-history sweep** or an incremental backlog processor. No watermark is advanced. `hasOlder` and `omitted` must not be interpreted as a successfully processed backlog. A long source that cannot fit is omitted whole and reported, not clipped into an apparently complete quote. Information absent from the available original stores cannot be reconstructed. The model can still prune older claims it judges unhelpful, so this is not a lossless archive.
 
-Claims have an `observed` or `inferred` status and exact source quotations. Assistant-only claims cannot be `observed`. Exact matching verifies provenance, **not semantic entailment, truth, freshness, or successful execution**. Tool output, user quotations, and old notes remain untrusted data; none grants permission or becomes system policy. Model judgment can still be wrong, which is why activation is separate.
+Claims have an `observed` or `inferred` status and exact source quotations. Assistant-only claims cannot be `observed`. Exact matching verifies provenance, **not semantic entailment, truth, freshness, or successful execution**. Tool output, user quotations, and old notes remain untrusted data; none grants permission or becomes system policy. Model judgment can still be wrong. Choose manual mode when every proposed consolidation requires review before activation.
 
 ## Storage and recall
 
@@ -62,4 +110,4 @@ The guarantee covers **process interruption**, not uniform power-loss durability
 
 Deterministic tests use temporary homes and fake/loopback providers. They cover source correction lineage, repeated-compaction originals, cross-client tail reconciliation, inferred/observed separation, input/output secret patterns, scope/home isolation, context bounds, cancellation, stale writes, link rejection, activation retry, rollback interruption, and recall integrity.
 
-These tests establish implementation behavior. They do not establish a model-quality gain, actual provider charges, long-running overnight operation, or Wiii end-to-end acceptance. Real model evaluations and any scheduler require separate scope and authorization. ProgramBench remains paused.
+These tests establish implementation behavior. They do not establish a model-quality gain, actual provider charges, long-running overnight operation, or Wiii end-to-end acceptance. Automatic host tests additionally cover ordinary CLI/TUI/ACP, same-evidence deduplication, rollback, source changes, cancellation and opt-out. Live quality/cost evaluation and any overnight scheduler remain separate work. ProgramBench remains paused.

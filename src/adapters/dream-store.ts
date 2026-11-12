@@ -72,6 +72,19 @@ export class DreamStore {
   }
   private target(): string { return join(taskMemoryDirectory(this.home, this.scope), DREAM_NOTE); }
 
+  /** Claim before spending. Same evidence is not retried after failure, crash, or rollback. */
+  claimAutomatic(evidenceDigest: string): boolean {
+    if (!HASH.test(evidenceDigest)) throw new Error("Invalid automatic Dream evidence");
+    return withTaskMemoryWriter(this.home, this.scope, () => {
+      const path = join(this.directory(true), "automatic.json");
+      const previous = readDreamFile(path);
+      if (previous === evidenceDigest) return false;
+      writeDreamFile(path, evidenceDigest);
+      return true;
+    });
+  }
+
+
   prepare(input: DreamInput, proposal: DreamProposal, identity: { provider: string; model: string }): DreamCandidate {
     return withTaskMemoryWriter(this.home, this.scope, () => {
       if (input.taskId !== this.scope.id || input.root !== this.scope.canonicalRoot) throw new Error("Dream belongs to another task/root");
@@ -134,9 +147,10 @@ export class DreamStore {
     return current === candidate.before ? "prepared" : "conflict";
   }
 
-  apply(id: string, currentInput: DreamInput): "applied" | "already_applied" {
+  apply(id: string, currentInput: DreamInput, automaticEvidence?: string): "applied" | "already_applied" {
     return withTaskMemoryWriter(this.home, this.scope, () => {
       const candidate = this.read(id);
+      if (automaticEvidence !== undefined && readDreamFile(join(this.directory(), "automatic.json")) !== automaticEvidence) throw new Error("Automatic Dream was superseded by a newer turn");
       if (readDreamFile(join(this.directory(), `${id}.rollback`)) !== null) throw new Error("Dream rollback requested; finish rollback before preparing a new candidate");
       if (readDreamFile(this.target()) === candidate.after) return "already_applied";
       if (currentInput.taskId !== this.scope.id || currentInput.root !== this.scope.canonicalRoot

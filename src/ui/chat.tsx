@@ -1,3 +1,4 @@
+import { bindAutomaticDream, runAutomaticDream } from "../adapters/automatic-dream.ts";
 import {bindStructuredContext} from "../adapters/context/compactor.ts";
 import { promptAnchorMarker } from "./frame-diff.ts";
 import { useHistorySearch } from "./history-search.ts";
@@ -47,7 +48,7 @@ import { toolResultDisplayLines, TranscriptLine, type Line, type LineKind } from
 
 import { Agent, COMPACT_AT, DEFAULT_SYSTEM_PROMPT, estimateRequestTokens, estimateTokens } from "../core/agent.ts";
 import { effectiveContextTokens, type Usage } from "../core/cost.ts";
-import { loadConfig } from "../adapters/config.ts";
+import { loadConfig, type NekoConfig } from "../adapters/config.ts";
 import { loadAgent } from "../adapters/agents.ts";
 import { ensureNekoHome, rememberNote } from "../adapters/context.ts";
 import { disposeClipboardImageReader, readClipboardImage, warmClipboardImageReader, writeClipboardText } from "../adapters/clipboard.ts";
@@ -149,6 +150,7 @@ interface ChatProps {
   sessionId?: string;
   mcpHub?: McpHub;
   provider?: Provider; // injected in tests; production uses getProvider(cfg)
+  automaticDreamProvider?: (cfg: NekoConfig) => Provider;
   clearScreen?: () => void; // Ink's synchronized clear (app.clear), threaded from runChat
   frameDiffer?: FrameDiffer; // the stdout-layer differ; ChatApp feeds it the fullscreen scroll band
   preAltDispose?: (() => void) | null; // alt-screen guard installed by runChat BEFORE the first render (startup fullscreen)
@@ -200,7 +202,7 @@ export const STREAM_PUMP_SCROLLED_MS = 300;
 export const shouldStreamPump = (now: number, lastPump: number, scrolledAway: boolean): boolean =>
   now - lastPump >= (scrolledAway ? STREAM_PUMP_SCROLLED_MS : STREAM_PUMP_MS);
 
-export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, prepareChatGptSupport = provider ? undefined : prepareChatGptRequest, completionAlert, bridgeHolder, taskLifecycle }: ChatProps) {
+export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, sessionId, mcpHub, provider, automaticDreamProvider, clearScreen, frameDiffer, preAltDispose, fullscreen: fullscreenOverride, titleDriver, voiceFactory, browserVoiceFactory, openUrl, browserHint, setupBrowser, officeSupportStatus = discoverOfficeCli, installOfficeSupport = installOfficeSupportPack, prepareChatGptSupport = provider ? undefined : prepareChatGptRequest, completionAlert, bridgeHolder, taskLifecycle }: ChatProps) {
   const { exit, suspendTerminal } = useApp();
   const { stdout } = useStdout();
   // Clear the terminal the Ink-SAFE way: Ink 7 uses synchronized output + manages its own ANSI erase
@@ -3089,6 +3091,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
         [...agentRef.current!.messages, ...estimatedUser],
         registryRef.current!.schemas(),
       );
+      bindAutomaticDream({ cfg, registry: registryRef.current!, sessionId: sessionIdRef.current });
       const result = loopGoal
         ? await agentRef.current!.runUntilDone(loopGoal, { signal: controller.signal })
         : await agentRef.current!.runResilient(toSend, {
@@ -3143,6 +3146,13 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
         await runCompaction("auto");
       }
       turnCompleted = result !== "[interrupted]" && agentRef.current!.completionStatus.ok;
+      if (turnCompleted && !internal && (!provider || automaticDreamProvider)) {
+        await persist();
+        await runAutomaticDream({ cfg, registry: registryRef.current!, agent: agentRef.current!,
+          sessionId: sessionIdRef.current, signal: controller.signal, providerFactory: automaticDreamProvider,
+          taskInput: taskSessionRef.current ? () => taskSessionRef.current!.dreamInput() : undefined,
+          notify: message => addLine("info", message.trim()) });
+      }
     } catch (error) {
       flushStream();
       if (preparingChatGpt) setInput(text);

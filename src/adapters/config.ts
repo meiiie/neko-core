@@ -46,6 +46,7 @@ export interface Profile {
 }
 
 export const DEFAULTS: any = {
+  dream_mode: "auto", // bounded post-turn prepare + apply; manual/off disables extra requests
   provider: "openai_compat",
   model: "",
   base_url: "https://integrate.api.nvidia.com/v1",

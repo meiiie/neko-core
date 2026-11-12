@@ -19,6 +19,8 @@ export interface PrepareDreamOptions {
   /** Host budget after response/policy reserves, checked before any paid request. */
   maxInputTokens?: number;
   signal?: AbortSignal;
+  /** Account received usage even when validation rejects the response. */
+  onUsage?: (usage: Usage | undefined) => void;
 }
 export interface DreamPreparation { input: DreamInput; candidate: DreamCandidate | null; usage?: Usage }
 export async function prepareDream(options: PrepareDreamOptions): Promise<DreamPreparation> {
@@ -42,6 +44,7 @@ export async function prepareDream(options: PrepareDreamOptions): Promise<DreamP
     signal.throwIfAborted();
     response = await Promise.race([options.provider.complete(messages, [], undefined, signal), aborted]);
   } finally { signal.removeEventListener("abort", rejectAbort); }
+  options.onUsage?.(response.usage);
   signal.throwIfAborted();
   assertTaskScope(options.task.scope);
   if (!memoryEnabled(options.home)) throw new Error("Memory is off");

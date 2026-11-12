@@ -1,3 +1,4 @@
+import { bindAutomaticDream, runAutomaticDream } from "../src/adapters/automatic-dream.ts";
 import {bindStructuredContext} from "../src/adapters/context/compactor.ts";
 import {estimateRequestTokens} from "../src/core/agent-constants.ts";
 import {structuredScopeDigest} from "../src/core/context/state.ts";
@@ -38,7 +39,7 @@ import { evaluateMeetingAsr, renderMeetingEval } from "../src/adapters/meeting-e
 import { FRONTIER_TASKS, HARD_TASKS, renderBenchReport, renderCompletionCampaignReport, renderCompletionLiftReport, renderLiftReport, runBench, runCompletionCampaign, runCompletionLift, runEval, renderEvalReport, runHarnessLift } from "../src/adapters/bench.ts";
 import { sandboxActive } from "../src/core/sandbox.ts";
 import { addMcpServer, clearApiKey, initProject, initUser, removeMcpServer, setActiveProfile, setApiKey } from "../src/adapters/project.ts";
-import { renderSessions } from "../src/adapters/session.ts";
+import { newSessionId, renderSessions } from "../src/adapters/session.ts";
 import { SessionHandoffStore } from "../src/adapters/session-handoff.ts";
 import { renderRecipes } from "../src/adapters/recipes.ts";
 import { applySkillPolicyForTurn, loadSkill, renderSkills } from "../src/adapters/skills.ts";
@@ -1299,6 +1300,8 @@ async function cmdRun(args: Args): Promise<number> {
     })).active.runtime
     : await buildAgent(cfg, args.yolo, onDelta, !!args.noTools);
   const { agent, registry } = runtime;
+  const dreamSessionId = args.taskSessionId ?? newSessionId();
+  bindAutomaticDream({ cfg, registry, sessionId: dreamSessionId });
   let lease: ReturnType<ToolRegistry["enterTurn"]>;
   try {
     const plan = planTurnCapabilities({
@@ -1396,6 +1399,12 @@ async function cmdRun(args: Args): Promise<number> {
       : await agent.runResilient(instruction, { images: images.length ? images : undefined });
     process.stdout.write("\n");
     if (streamed === 0 && answer.trim()) console.log(terminalSafeText(answer, { preserveLineBreaks: true })); // synthetic/non-streamed result
+    if (agent.completionStatus.ok) {
+      taskSession?.checkpoint();
+      await runAutomaticDream({ cfg, registry, agent, sessionId: dreamSessionId,
+        taskInput: taskSession ? () => taskSession!.dreamInput() : undefined,
+        notify: message => writeTerminalSafe(process.stderr, message) });
+    }
     console.log(`[${agent.cost.summary()}]`);
     const outcome = headlessRunOutcome(!process.stdin.isTTY, agent.completionStatus, denials);
     exitCode = outcome.exitCode;
