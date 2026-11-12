@@ -6,6 +6,48 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-12
+
+### Added
+
+- Managed Chrome browser mode with a dedicated persistent profile and multi-tab
+  control, without requiring an extension click for every task. Run
+  `neko browser managed` to configure it. Existing browser configuration is not
+  silently migrated.
+- Explicit personal Chrome mode via Chrome 144+ connection consent. Run
+  `neko browser personal` only when you want to connect the personal session;
+  extension mode remains an explicit fallback, never an automatic substitution.
+- Automatic session-scoped Dream consolidation after eligible successful CLI,
+  TUI and standard ACP turns. It makes at most one additional bounded provider
+  request and applies a validated candidate. Set `"dream_mode": "manual"` to
+  retain explicit review, or `"dream_mode": "off"` to disable the sidecar.
+  `/memory off` also disables reading existing memory.
+
+### Fixed
+
+- Configured MCP browsers no longer route through extension-only onboarding.
+- Sensitive editable values are excluded from extension snapshot labels;
+  newly generated SearXNG configurations use a fresh random secret.
+- Browser extension bundles include the sidepanel assets required by the
+  manifest, including installations from packaged executables.
+
+### Compatibility and limits
+
+- Dream's default changes from explicit-only to automatic post-turn operation.
+  Selected session evidence can be sent to the configured provider, with extra
+  latency and provider usage. There is no overnight scheduler, cross-session
+  promotion or measured recall-quality improvement claim.
+- Managed browser multi-tab operations and profile persistence were exercised
+  on Windows, including the Neko MCP wrapper. Personal Chrome consent,
+  rejection and revocation have not been verified end-to-end. Its permission
+  may cover all open tabs; it is not limited to task-owned tabs.
+- Browser configuration is not proof of a live connection. MCP auto mode does
+  not imply a prompt for every action; snapshot redaction is not universal
+  data-loss prevention or browser sandboxing.
+- Existing provider configuration, ACP protocol and 1.x CLI remain compatible.
+  Browser dependencies are pinned; Chrome and a supported package runner are
+  required for the new managed/personal modes.
+
 ## [1.9.0] - 2026-11-11
 
 ### Added
