@@ -250,7 +250,7 @@ function searchMemories(query: string, home: string = homeDir(), scope?: TaskSco
 function memoryToolUnlocked(args: any, home: string = homeDir(), scope?: TaskScope): string {
   const action = String(args.action ?? "").toLowerCase();
   if (action === "journal" || action === "journal_search" || action === "journal_read") {
-    return journalTool(args, home);
+    return journalTool(args, home, scope);
   }
   if (scope && ["write", "append"].includes(action) && safeName(args.name) === "dream.md") return "Error: dream.md is host-managed; use the explicit dream prepare/review/apply workflow.";
   if (!memoryEnabled(home)) return "Memory is off. The user can re-enable it with /memory on.";
