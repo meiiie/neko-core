@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isJsonObject, isText } from "../src/shared/wire.ts";
+import { legacyDreamScope } from "../src/adapters/automatic-dream.ts";
+import { DreamStore } from "../src/adapters/dream-store.ts";
 import { parseDreamInput } from "../src/core/dream.ts";
 
 const entry = join(import.meta.dir, "../bin/neko.ts");
@@ -57,6 +59,10 @@ test.each(["legacy", "structured"] as const)("CLI dream preview/prepare/show/app
     const saved = JSON.parse(readFileSync(path, "utf8"));
     saved.tasks[0].messages = [{ role: "user", content: "Use bun to run tests." }, { role: "assistant", content: "Noted." }];
     writeFileSync(path, JSON.stringify(saved));
+    const beforeStatus = readFileSync(path, "utf8");
+    const status = json(await cli(home, root, ["dream", "status", id]));
+    expect(readFileSync(path, "utf8")).toBe(beforeStatus);
+    expect(status).toEqual({ automatic: null, modelCalls: 0 });
     const preview = json(await cli(home, root, ["dream", "preview", id]));
     expect(preview.modelCalls).toBe(0); expect(requests).toBe(0);
     const wrongRoot = await cli(home, other, ["dream", "prepare", id]);
@@ -73,3 +79,19 @@ test.each(["legacy", "structured"] as const)("CLI dream preview/prepare/show/app
     expect(after.tasks[0].messages).toEqual(saved.tasks[0].messages);
   } finally { server.stop(true); rmSync(home, { recursive: true, force: true }); }
 }, 60_000);
+
+
+test.each(["session:example", "acp-session:example"])("CLI dream status %s is local, candidate-free and readable without a configured provider", async selector => {
+  const home = mkdtempSync(join(tmpdir(), "neko-dream-status-")), root = join(home, "repo");
+  mkdirSync(root); mkdirSync(join(home, ".neko-core"));
+  writeFileSync(join(home, ".neko-core/config.json"), JSON.stringify({ dream_mode: "off", auto_update: false, auto_update_check: false }));
+  try {
+    expect(json(await cli(home, root, ["dream", "status", selector]))).toEqual({ automatic: null, modelCalls: 0 });
+    const scope = legacyDreamScope("example", root, selector.startsWith("acp-") ? "acp" : "local");
+    const store = new DreamStore(home, scope);
+    store.recordAutomaticStatus("failed", "invalid_response");
+    const saved = store.automaticStatus();
+    expect(JSON.stringify(json(await cli(home, root, ["dream", "status", selector])))).toBe(JSON.stringify({ automatic: saved, modelCalls: 0 }));
+    expect((await cli(home, root, ["dream", "status", selector, "unwanted-candidate"])).code).not.toBe(0);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

@@ -48,18 +48,51 @@ test("TUI default auto Dream completes without /task or prepare/apply and is rec
   }
 });
 
-test("ACP standard session host runs default automatic Dream; injected runtime opts in explicitly", async () => {
+test("TUI accepts next input while Dream provider is blocked and aborts on unmount", async () => {
+  const home = mkdtempSync(join(tmpdir(), "auto-dream-ui-")), root = join(home, "root");
+  mkdirSync(root); mkdirSync(join(home, ".neko-core"));
+  writeFileSync(join(home, ".neko-core/config.json"), JSON.stringify({ auto_update: false, auto_update_check: false, verify_before_exit: false, completion_sound: false }));
+  const old = { home: process.env.HOME, profile: process.env.USERPROFILE, root: process.cwd() };
+  process.env.HOME = home; process.env.USERPROFILE = home; process.chdir(root);
+  let dreams = 0; const contexts: string[] = [];
+  let release!: () => void; const blocked = new Promise<void>(resolve => { release = resolve; });
+  let dreamStarted = false; const dreamSignals: AbortSignal[] = [];
+  const slow = dreamProvider(() => dreams++);
+  const provider: Provider = { complete: async messages => { contexts.push(JSON.stringify(messages)); return { content: "Noted.", tool_calls: [] }; } };
+  const app = render(<ChatApp yolo={false} fullscreen={false} profile="local" provider={provider} automaticDreamProvider={() => ({ complete: async (...args) => { dreamStarted = true; if (args[3]) dreamSignals.push(args[3]); await blocked; return slow.complete(...args); } })} />);
+  try {
+    await tick(50); app.stdin.write("Use bun to run tests."); await tick(); app.stdin.write("\r");
+    expect(await until(() => dreamStarted)).toBe(true);
+    expect(dreams).toBe(0);
+    app.stdin.write("What do you remember?"); await tick(); app.stdin.write("\r");
+    expect(await until(() => contexts.length === 2)).toBe(true);
+    expect(dreams).toBe(0);
+    expect(dreamSignals[0]?.aborted).toBe(true);
+  } finally {
+    app.unmount(); await tick();
+    expect(dreamSignals.every(signal => signal.aborted)).toBe(true);
+    release(); await tick(50);
+    process.chdir(old.root);
+    if (old.home === undefined) delete process.env.HOME; else process.env.HOME = old.home;
+    if (old.profile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = old.profile;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("ACP returns end_turn and accepts next prompt while a slow Dream is outstanding", async () => {
   const home = mkdtempSync(join(tmpdir(), "auto-dream-acp-")), root = join(home, "root"); mkdirSync(root);
-  let calls = 0; const updates: string[] = [];
+  let calls = 0; let answers = 0; const updates: string[] = [];
+  let release!: () => void; const blocked = new Promise<void>(resolve => { release = resolve; });
+  const slow = dreamProvider(() => calls++);
   const cfg = loadConfig({ home, cwd: root });
   const app = createNekoAcpAgent({ config: cfg,
-    automaticDreamProvider: () => dreamProvider(() => calls++),
+    automaticDreamProvider: () => ({ complete: async (...args) => { await blocked; return slow.complete(...args); } }),
     buildRuntime: async (config, options) => {
       const registry = new ToolRegistry(root, options.mode, options.approval); registry.memoryHome = home;
       registry.sandboxBash = config.sandbox; registry.computerInputPolicy = config.computerUseInputPolicy;
       if (options.computer === false) registry.disabled.add("computer");
       if (options.taskScope) registry.bindTaskScope(options.taskScope);
-      const agent = new Agent({ provider: { complete: async () => ({ content: "Noted.", tool_calls: [] }) }, tools: registry,
+      const agent = new Agent({ provider: { complete: async () => { answers++; return { content: "Noted.", tool_calls: [] }; } }, tools: registry,
         onCheckpoint: options.onCheckpoint, onEvent: options.onEvent, verifyBeforeExit: false, verifyStateChangesBeforeExit: false });
       return { config, registry, agent, close: async () => {} };
     } });
@@ -67,10 +100,17 @@ test("ACP standard session host runs default automatic Dream; injected runtime o
     await acp.client({ name: "auto-dream-client" }).onNotification(acp.methods.client.session.update, ({ params }) => { updates.push(JSON.stringify(params)); }).connectWith(app, async ctx => {
       await ctx.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
       const created = await ctx.request(acp.methods.agent.session.new, { cwd: root, mcpServers: [] });
-      const result = await ctx.request(acp.methods.agent.session.prompt, { sessionId: created.sessionId, prompt: [{ type: "text", text: "Use bun to run tests." }] });
-      expect(result.stopReason).toBe("end_turn"); expect(calls).toBe(1);
-      expect(updates.some(text => text.includes("Dream: applied"))).toBe(true);
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        ctx.request(acp.methods.agent.session.prompt, { sessionId: created.sessionId, prompt: [{ type: "text", text: "Use bun to run tests." }] }),
+        new Promise<never>((_, reject) => { watchdog = setTimeout(() => { release(); reject(new Error("ACP waited for background Dream")); }, 2000); }),
+      ]).finally(() => clearTimeout(watchdog));
+      expect(result.stopReason).toBe("end_turn"); expect(calls).toBe(0);
+      const next = await ctx.request(acp.methods.agent.session.prompt, { sessionId: created.sessionId, prompt: [{ type: "text", text: "Use bun to run tests. Next turn." }] });
+      expect(next.stopReason).toBe("end_turn"); expect(answers).toBe(2);
+      release();
+      expect(await until(() => updates.some(text => text.includes("Dream: applied")))).toBe(true);
       await ctx.request(acp.methods.agent.session.close, { sessionId: created.sessionId });
     });
-  } finally { rmSync(home, { recursive: true, force: true }); }
+  } finally { release(); rmSync(home, { recursive: true, force: true }); }
 });

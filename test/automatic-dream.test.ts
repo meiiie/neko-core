@@ -75,6 +75,7 @@ test("failed proposal does not activate and is not secretly retried for identica
     expect(await runAutomaticDream({ ...f, providerFactory })).toBe("unchanged");
     expect(calls).toBe(1);
     expect(f.agent.cost.totalTokens).toBe(15);
+    expect(new DreamStore(f.home, f.registry.dreamScope!).automaticStatus()?.reason).toBe("invalid_response");
     expect(automaticDreamRecall(f.registry)).toBe("");
   } finally { rmSync(f.home, { recursive: true, force: true }); }
 });
@@ -191,4 +192,104 @@ test("explicit task sessions use their existing scope and reject a switched snap
     expect(await runAutomaticDream(f)).toBe("applied");
     expect(f.calls()).toBe(1);
   } finally { rmSync(f.home, { recursive: true, force: true }); }
+});
+
+test("background scheduling returns before model response; cancellation prevents activation", async () => {
+  const { scheduleAutomaticDream, cancelAutomaticDream, settleAutomaticDream } = await import("../src/adapters/automatic-dream.ts");
+  const f = await fixture();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let started = false;
+  try {
+    bindAutomaticDream(f);
+    const result = scheduleAutomaticDream({ ...f, providerFactory: () => ({ complete: async (...args) => {
+      started = true; await gate; return f.providerFactory().complete(...args);
+    } }) });
+    expect(result).toBeUndefined();
+    for (let n = 0; n < 50 && !started; n++) await Bun.sleep(5);
+    expect(started).toBe(true);
+    cancelAutomaticDream(f.registry);
+    release();
+    await settleAutomaticDream(f.registry);
+    expect(automaticDreamRecall(f.registry)).toBe("");
+  } finally { release(); rmSync(f.home, { recursive: true, force: true }); }
+});
+
+test("background worker snapshots evidence and coalesces to the latest pending job", async () => {
+  const { scheduleAutomaticDream, settleAutomaticDream } = await import("../src/adapters/automatic-dream.ts");
+  const f = await fixture(); let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let calls = 0, active = 0, peak = 0;
+  const inputs: string[] = [];
+  const providerFactory = (): Provider => ({ complete: async messages => {
+    calls++; active++; peak = Math.max(peak, active);
+    inputs.push(String(messages[1].content));
+    if (calls === 1) await gate;
+    active--;
+    return { content: JSON.stringify({ summary: "Nothing", claims: [] }), tool_calls: [] };
+  } });
+  try {
+    bindAutomaticDream(f);
+    scheduleAutomaticDream({ ...f, providerFactory });
+    for (let n = 0; n < 50 && calls === 0; n++) await Bun.sleep(5);
+    f.agent.messages.push({ role: "user", content: "Intermediate input" });
+    scheduleAutomaticDream({ ...f, providerFactory });
+    f.agent.messages.push({ role: "user", content: "Latest input" });
+    scheduleAutomaticDream({ ...f, providerFactory });
+    await Bun.sleep(20);
+    expect(calls).toBe(1);
+    release(); await settleAutomaticDream(f.registry);
+    expect(calls).toBe(2); expect(peak).toBe(1);
+    expect(inputs[0]).not.toContain("Latest input");
+    expect(inputs[1]).toContain("Latest input");
+    expect(automaticDreamRecall(f.registry)).toBe("");
+  } finally { release(); rmSync(f.home, { recursive: true, force: true }); }
+});
+
+test("background snapshot cannot absorb live mutations before its provider starts", async () => {
+  const { scheduleAutomaticDream, settleAutomaticDream } = await import("../src/adapters/automatic-dream.ts");
+  const f = await fixture(); let seen = "";
+  try {
+    bindAutomaticDream(f);
+    scheduleAutomaticDream({ ...f, providerFactory: () => ({ complete: async messages => {
+      seen = String(messages[1].content);
+      return f.providerFactory().complete(messages, []);
+    } }) });
+    f.agent.messages.push({ role: "user", content: "A new foreground turn" });
+    await settleAutomaticDream(f.registry);
+    expect(seen).not.toContain("A new foreground turn");
+    expect(automaticDreamRecall(f.registry)).toBe("");
+    expect(f.notices.join("")).toContain("stale_context");
+  } finally { rmSync(f.home, { recursive: true, force: true }); }
+});
+
+test("Dream failure reasons do not echo provider secrets", async () => {
+  const f = await fixture();
+  try {
+    bindAutomaticDream(f);
+    await runAutomaticDream({ ...f, providerFactory: () => ({ complete: async () => { throw new Error("private-credential-and-transcript"); } }) });
+    expect(f.notices.join("")).toContain("provider_error");
+    expect(f.notices.join("")).not.toContain("private-credential");
+    const receipt = new DreamStore(f.home, f.registry.dreamScope!).automaticStatus();
+    expect(receipt?.reason).toBe("provider_error");
+    expect(JSON.stringify(receipt)).not.toContain("private-credential");
+  } finally { rmSync(f.home, { recursive: true, force: true }); }
+});
+
+test("late provider usage after cancellation is counted once without activation", async () => {
+  const { scheduleAutomaticDream, cancelAutomaticDream, settleAutomaticDream } = await import("../src/adapters/automatic-dream.ts");
+  const f = await fixture(); let release!: () => void; let started = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  try {
+    bindAutomaticDream(f);
+    scheduleAutomaticDream({ ...f, providerFactory: () => ({ complete: async () => {
+      started = true; await gate;
+      return { content: "invalid", tool_calls: [], usage: { prompt_tokens: 10, completion_tokens: 5 } };
+    } }) });
+    for (let n = 0; n < 50 && !started; n++) await Bun.sleep(5);
+    cancelAutomaticDream(f.registry); await Bun.sleep(5); release();
+    await settleAutomaticDream(f.registry);
+    expect(f.agent.cost.totalTokens).toBe(15);
+    expect(automaticDreamRecall(f.registry)).toBe("");
+  } finally { release(); rmSync(f.home, { recursive: true, force: true }); }
 });

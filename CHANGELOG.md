@@ -6,6 +6,14 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Run automatic Dream in the background for interactive TUI/ACP turns rather
+  than blocking the next user input. Cancel superseded work, coalesce pending
+  snapshots, reject stale activations and fence apply/rollback cycles.
+- Report sanitized Dream failure reasons and account received late usage after
+  cancellation. One-shot CLI still explicitly drains its pass before exiting.
+
 ## [1.9.1] - 2026-11-12
 
 ### Added
