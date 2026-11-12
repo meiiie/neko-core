@@ -2862,7 +2862,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
       // wait for the explicit tab attachment, and every earlier state opens the one-time setup. The user
       // never has to learn the setup/status subcommands just to complete a browser task.
       let slashText = text;
-      if (text === "/browser") {
+      if (text === "/browser" && !cfg.mcpServers.browser) {
         const stage = browserBridgeStage();
         if (stage === "extension_connected") {
           offerBrowserAttach("");
@@ -2962,7 +2962,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
 
     const bypassBrowserSetup = browserRequestBypassRef.current === text;
     if (bypassBrowserSetup) browserRequestBypassRef.current = null;
-    else if (!voiceTurnRef.current && setupBrowser && isInteractiveBrowserRequest(text)) {
+    else if (!voiceTurnRef.current && !cfg.mcpServers.browser && setupBrowser && isInteractiveBrowserRequest(text)) {
       const status = readBrowserBridgeStatus();
       if (!status?.online || !status.attached) {
         offerBrowserSetup(text);

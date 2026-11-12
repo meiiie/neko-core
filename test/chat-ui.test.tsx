@@ -1837,3 +1837,30 @@ test("resumed session: ctx% reflects loaded context (not a misleading 0%) + disp
   expect(f).toMatch(/earlier line.*in context.*\/transcript/); // display bounded, rest in context + how to view it all
   unmount();
 }, 15000);
+
+test("configured browser MCP never falls back to extension onboarding for browser requests or status", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-browser-mcp-route-"));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  mkdirSync(join(home, ".neko-core"), { recursive: true });
+  writeFileSync(join(home, ".neko-core", "config.json"), JSON.stringify({
+    mcp_servers: { browser: { command: "npx", args: ["-y", "chrome-devtools-mcp@1.13.0", "--autoConnect"] } },
+  }));
+  let setups = 0;
+  const provider = new MockProvider([{ content: "Use the configured browser tools.", tool_calls: [] }]);
+  const rendered = render(<ChatApp fullscreen={false} yolo provider={provider} setupBrowser={async () => { setups++; return "unexpected fallback"; }} />);
+  try {
+    rendered.stdin.write("/browser"); await tick(20); rendered.stdin.write("\r");
+    expect(await until(() => rendered.frames.join("\n").includes("Browser MCP is configured"))).toBe(true);
+    expect(setups).toBe(0);
+    rendered.stdin.write("browse example.com in Chrome"); await tick(20); rendered.stdin.write("\r");
+    expect(await until(() => provider.index === 1)).toBe(true);
+    expect(setups).toBe(0);
+    expect(rendered.frames.join("\n")).not.toContain("Use your signed-in Chrome tab for this task?");
+  } finally {
+    rendered.unmount();
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
