@@ -107,3 +107,13 @@ should use the Chrome Web Store once the owner submits and the item passes revie
 
 Native messaging is not needed in the developer preview. Add it only if managed-browser policy blocks
 loopback WebSockets or a packaged enterprise installer needs OS-level host attestation.
+
+### Managed/personal alternatives
+
+This extension remains the explicit single-tab fallback. Use `neko browser managed`
+for a separate persistent multi-tab Chrome, or `neko browser personal` for Chrome's
+consented autoConnect session. See [WEB.md](WEB.md#browser-identity-modes-191) for
+scope and limitations; extension grants do not govern these separate MCP backends.
+Snapshot labels never fall back to form values or editable text. Sensitive input
+labels are redacted before serialization. This does not redact arbitrary secrets
+printed elsewhere in page text or other backends' snapshots.

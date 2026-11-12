@@ -70,9 +70,10 @@ expanding prompt and into a small executable helper. Research checkpoint:
 Stands up the whole SOTA web stack and wires it into config (idempotent, key-safe):
 SearXNG in Docker (JSON API on) + the browser MCP (headed real-Chrome). Verifies the JSON
 API, then `neko doctor` shows `web_search: searxng`. Sub-targets: `neko setup searxng` /
-`neko setup browser`. Browser setup defaults to a dedicated persistent Chrome profile, so login
-survives restarts. Use `neko setup browser attach` for an existing signed-in Chrome tab (official
-Playwright Extension), or `neko setup browser isolated` for disposable testing. (No Docker? It says
+`neko setup browser`. Browser setup now defaults to managed Chrome through a pinned Chrome DevTools MCP with a
+dedicated persistent profile. Use `neko setup browser personal` for Chrome's consented connection
+to an existing session, `attach` for the legacy Playwright Extension, or `isolated` for
+disposable testing. See the browser identity modes section below. (No Docker? It says
 so and you can use a Tavily key instead.) The
 manual recipe below is what it automates.
 
@@ -253,3 +254,57 @@ server's secret (kept in the gitignored user config / env), never Neko's — sam
 Drive/GitHub servers above. The MCP wiring itself is the exact path verified against
 `server-everything` (connect → list → call). Designing a custom server is unnecessary; if you ever
 need one, it's just a stdio MCP exposing Graph-API tools — drop it in the same `mcp_servers` block.
+
+## Browser identity modes (1.9.1)
+
+`neko browser managed` (equivalently `neko setup browser managed`) configures
+`chrome-devtools-mcp@1.13.0`, with a separate persistent profile under
+`~/.neko-core/browser/managed`. This is the default for a new `setup browser`.
+Existing configs are not migrated automatically. Restart Neko after setup.
+The backend exposes `list_pages`, `new_page`, `navigate_page`, `select_page`,
+`close_page` and page-scoped observation/input tools. Use the returned page IDs,
+not the currently focused tab. Sign in separately in this browser if needed;
+Neko does not copy your personal cookies. Only one session may own this profile;
+a profile-in-use error is not permission to kill the other browser.
+
+`neko browser personal` configures the same pinned server with `--autoConnect`.
+It requires stable Chrome 144+ and Node 20.19+, 22.12+ or a newer supported LTS.
+The owner must enable remote debugging at `chrome://inspect/#remote-debugging`
+and accept Chrome's connection dialog. Setup does not enable that setting or
+accept the dialog. Refusal/disconnection does not trigger an automatic fallback.
+The grant covers **all open tabs in that Chrome session**, not a per-task tab
+allowlist. This backend does not enforce ownership of individual personal tabs;
+only close tabs the owner authorized. Prefer managed mode and test accounts when
+that scope is too broad. Disconnect in Chrome to revoke access; exit Neko to close
+its MCP transport. Cancellation cannot undo an already-completed action.
+
+Both modes disable usage statistics, CrUX uploads, arbitrary JavaScript evaluation,
+file-URL navigation, network/memory/performance tool categories, automatic
+config discovery and update checks. These are reductions in capability, **not an
+OS sandbox, a complete data-loss prevention boundary, or universal redaction**.
+Pages can contain private data; snapshots/screenshots and permitted interactions
+can expose or change it. Existing Neko MCP permission modes still apply: `auto`
+allows MCP calls without per-action prompts, `default` asks, `plan` blocks gated
+MCP calls. Chrome's session consent remains independent of those modes. Existing
+ACP/turn-policy restrictions are not widened. No raw Python REPL is added.
+
+`neko browser status` distinguishes backend configuration from extension status;
+it is not a live managed/personal connection test. `neko mcp` checks tool discovery,
+then a successful page operation checks actual browser access. A connected MCP
+server alone does not prove Chrome is attached.
+
+Compatibility options remain explicit: `setup browser persistent`, `attach`
+(Playwright extension), and `isolated` use `@playwright/mcp@0.0.85`.
+The existing Neko-owned `browser install`/`bridge` is a separate minimal-permission
+single-tab fallback. Neither backend silently switches into a signed-in personal
+browser when another backend fails. To disable the configured MCP, use
+`neko mcp remove browser`; this does not delete saved browser profiles.
+
+Before claiming a host is verified, test: create two pages, list and select each by
+ID, navigate across origins, observe/type/click on a public test form, close only
+created pages, restart the managed profile and check persistence, deny/revoke a
+personal connection and confirm failure. Browser Use performance comparison is a
+separate experiment; no speed/quality improvement is claimed by this integration.
+
+Upstream contracts: [Chrome configuration](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/chrome-devtools-mcp-v1.13.0/docs/configuration.md)
+and [Chrome session connection](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session).

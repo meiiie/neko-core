@@ -94,7 +94,7 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/model", desc: "switch model or provider (/model list · /model <id>)" },
   { name: "/provider", desc: "switch provider (account) then pick its model - picker or /provider <name>" },
   { name: "/support", desc: "manage optional model and Office components" },
-  { name: "/browser", desc: "connect a signed-in Chrome tab (guided setup/status)" },
+  { name: "/browser", desc: "browser MCP status or explicit extension fallback setup" },
   { name: "/meeting", desc: "consented local meeting capture, transcription, and evidence" },
   { name: "/tools", desc: "list / toggle tools (/tools bash)" },
   { name: "/skill", desc: "load a skill (/skill name) · /skills to list" },
@@ -906,6 +906,9 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       const action = input.slice("/browser".length).trim().toLowerCase();
       if (action && action !== "install" && action !== "setup" && action !== "status") {
         return addLine("info", "usage: /browser [setup|status]");
+      }
+      if (ctx.cfg.mcpServers.browser && (!action || action === "status")) {
+        return addLine("info", "Browser MCP is configured; this is not a live connection probe. Use its page tools to verify access. No automatic extension fallback.\nConfigure identity outside this session: `neko browser managed` (separate profile) or `neko browser personal` (Chrome consent), then restart Neko. `/browser setup` explicitly opens the separate extension fallback.");
       }
       const capability = readBrowserCapability();
       const status = capability ? readBrowserBridgeStatus() : undefined;
