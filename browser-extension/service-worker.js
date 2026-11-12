@@ -351,12 +351,20 @@ function snapshotPage(maxItems) {
     const type = (element.getAttribute("type") || "").toLowerCase();
     const autocomplete = (element.getAttribute("autocomplete") || "").toLowerCase();
     const fieldName = `${element.getAttribute("name") || ""} ${element.getAttribute("aria-label") || ""}`.toLowerCase();
+    const sensitive = type === "password" || /(password|passcode|otp|one-time|cc-number|cc-csc|card number|cvv)/.test(`${autocomplete} ${fieldName}`);
+    const editable = /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName)
+      || element.getAttribute("role") === "textbox"
+      || ["", "true", "plaintext-only"].includes(element.getAttribute("contenteditable"));
+    // Do not promote form values/editable text into labels. Marking a secret sensitive AFTER
+    // serialization is not redaction: an unlabeled password used to leak through element.value.
+    const label = sensitive ? "[redacted]" : element.getAttribute("aria-label")
+      || element.getAttribute("placeholder") || (editable ? "" : element.innerText) || "";
     return {
       ref,
       role: element.getAttribute("role") || element.tagName.toLowerCase(),
-      name: (element.getAttribute("aria-label") || element.getAttribute("placeholder") || element.innerText || element.value || "").trim().slice(0, 240),
+      name: label.trim().slice(0, 240),
       box: [Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)],
-      sensitive: type === "password" || /(password|passcode|otp|one-time|cc-number|cc-csc|card number|cvv)/.test(`${autocomplete} ${fieldName}`),
+      sensitive,
     };
   });
   const visibleText = [];

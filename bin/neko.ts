@@ -278,7 +278,7 @@ Commands:
   oracle        ask a stronger model for a second opinion, with project files attached;
                 'oracle sessions' lists past consultations, 'oracle show <id>' reads one back
   setup [web]   one command to stand up the SOTA web stack (SearXNG + browser MCP, wired);
-                'setup browser [persistent|attach|isolated]' controls browser identity;
+                'setup browser [managed|personal|persistent|attach|isolated]' controls browser identity;
                 'setup tavily <key>' wires hosted search; 'setup codex' / 'setup gemini' add optional bridges;
                 'setup terminal' writes a Shift+Enter newline keybinding into Windows Terminal;
                 'setup ocr' installs the Vietnamese OCR pack so 'computer ocr' reads accented text
@@ -1113,11 +1113,24 @@ async function cmdBrowser(args: Args): Promise<number> {
   const { browserExtensionSetupMessage, openBrowserExtensionSetup } =
     await import("../src/adapters/browser-extension-install.ts");
   const sub = args.positionals[0]?.toLowerCase() ?? "bridge";
+  if (sub === "managed" || sub === "personal") {
+    const { setupWeb } = await import("../src/adapters/setup.ts");
+    return await setupWeb("browser", console.log, sub);
+  }
   if (sub === "path") {
     console.log(browserExtensionPath());
     return 0;
   }
   if (sub === "status") {
+    const configured = load(args).mcpServers.browser;
+    if (configured) {
+      const argv = configured.args ?? [];
+      const mode = argv.includes("chrome-devtools-mcp@1.13.0")
+        ? argv.includes("--autoConnect") ? "personal" : "managed" : "custom/legacy";
+      console.log(`browser MCP configured: ${mode} (configuration only, not a live browser probe).`);
+      console.log("Use `neko mcp` to inspect available tools; successful page operations verify the connection.");
+      console.log("Extension fallback status (independent of the browser MCP):");
+    }
     const capability = readBrowserCapability();
     const status = capability ? readBrowserBridgeStatus() : undefined;
     const stage = browserBridgeStage(capability, status);
@@ -1145,7 +1158,7 @@ async function cmdBrowser(args: Args): Promise<number> {
     return 0;
   }
   if (sub !== "bridge" && sub !== "install") {
-    console.error("usage: neko browser [install [port]|bridge [port]|status|path|rotate]");
+    console.error("usage: neko browser [managed|personal|install [port]|bridge [port]|status|path|rotate]");
     return 2;
   }
   const rawPort = args.positionals[1];
