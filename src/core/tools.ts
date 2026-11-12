@@ -268,9 +268,9 @@ export const TOOL_SPECS: ToolSpec[] = [
     name: "memory",
     permission: SAFE,
     gatedActions: ["write", "append", "delete"],
-    summary: "Your local cross-session memory (~/.neko-core/memory/*.md). list | read | write | append | delete | search. Mutations are approval-gated; user.md and self.md are bounded core profiles.",
+    summary: "Your local cross-session memory (~/.neko-core/memory/*.md). list | read | write | append | delete | search | journal. Mutations are approval-gated; user.md and self.md are bounded core profiles. journal = living-memory episodes. Consult it when the user references past work (\"lần trước\", \"còn nhớ\", \"tiếp\", \"hôm qua\", \"last time\") or when starting in a project folder — natural language, not a slash command.",
     parameters: {
-      action: { type: "string", enum: ["list", "read", "write", "append", "delete", "search"], description: "What to do." },
+      action: { type: "string", enum: ["list", "read", "write", "append", "delete", "search", "journal", "journal_search", "journal_read"], description: "What to do." },
       name: { type: "string", description: "Memory file name (for read/write/append/delete)." },
       content: { type: "string", description: "Content to store (write replaces; append adds one bullet)." },
       query: { type: "string", description: "Text to find across memories (for search)." },

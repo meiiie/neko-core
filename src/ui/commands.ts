@@ -20,6 +20,7 @@ import { listSkills, loadSkill } from "../adapters/skills.ts";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { listTools } from "../core/tools.ts";
 import { deleteMemoryFile, listMemories, memoryEnabled, memoryTool, readMemoryFile, setMemoryEnabled } from "../core/memory.ts";
+import { backfillJournals, journalSession, journalTool, setLivingEnabled, wakeRecap } from "../core/living-memory.ts";
 import { fmtBytes, relativeTime, trunc } from "./format.ts";
 import type { Overlay } from "./select-list.tsx";
 import type { Line, LineKind } from "./transcript.tsx";
@@ -76,7 +77,8 @@ export const HELP = [
   "Commands:",
   "  /help /cost /usage /voice /model /provider /support /browser /meeting /tools /skill(s) /init /clear /compact /transcript /reset /exit",
   "  /goal <text> · /loop <n> <task> · /auto <goal> · /contract · /sessions · /resume · /handoff · /continue · /retry · /effort · /context",
-  "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /paste · /rc · /relay · /coach · /login · /logout · /feedback",
+  "  /mcp · /mcp-prompt · /recipe(s) · /memory · /remember · /ngu (backfill) · /nho · /paste · /rc · /relay · /coach · /login · /logout · /feedback",
+  "Living memory is automatic. Say \"last time\", \"còn nhớ\", \"tiếp\" — no slash needed. /ngu is maintenance (backfill/on/off).",
   "Input: @path adds a file; end a line with \\ for multiline; # saves a memory note.",
     "Editing: Left/Right move the cursor, Ctrl+A/Ctrl+E start/end, Ctrl+W delete word, Ctrl+U clear line, Ctrl+G external editor.",
     "Keys: Shift+Tab cycle mode · Up/Down history · Alt+C copy draft · Alt+V paste image · Ctrl+O expand · Ctrl+B bash to background · Ctrl+L clear.",
@@ -118,6 +120,8 @@ export const SLASH: { name: string; desc: string }[] = [
   { name: "/effort", desc: "model-aware reasoning preference (/effort <level>|default|list)" },
   { name: "/context", desc: "window capacity, last request, and next-request estimate" },
   { name: "/memory", desc: "inspect/control local memory (/memory [on|off|list|read|forget|identity])" },
+  { name: "/ngu", desc: "living memory: journal this session + show last episodes (/ngu on|off|backfill)" },
+  { name: "/nho", desc: "search living-memory episodes (/nho [query])" },
   { name: "/remember", desc: "save a project note or explicit cross-project user observation" },
   { name: "/recipe", desc: "run a saved recipe (/recipe <name> [args])" },
   { name: "/recipes", desc: "list saved recipes" },
@@ -1506,12 +1510,49 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
         "core profiles: ~/.neko-core/memory/user.md + self.md (bounded in context)",
         `saved memory files: ${memories.length}`,
         "episodes: ~/.neko-core/sessions (raw history; not injected wholesale)",
+        "living journal: ~/.neko-core/memory/journal (heuristic digest; /ngu | /nho)",
         "procedures: ~/.neko-core/workflows + playbook.md",
         "controls: /memory list | read <name> | forget <name> | off | on | identity",
         "save an explicit preference: /remember --user <note>",
       ].join("\n"));
+      }
+    case "/ngu": {
+      const rest = input.slice("/ngu".length).trim();
+      if (rest === "on" || rest === "off") {
+        return addLine("info", setLivingEnabled(rest === "on", cfg.resolvedHome));
+      }
+      if (rest === "backfill") {
+        const metas = listSessionMetas()
+          .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+          .slice(0, 80);
+        const { written, skipped } = backfillJournals((id) => loadSession(id), metas.map((m) => m.id), cfg.resolvedHome, 80);
+        return addLine("info", `Backfilled ${written} journal(s) from saved sessions, skipped ${skipped}.`);
+      }
+      ctx.persistSession();
+      const saved = loadSession(ctx.currentSessionId);
+      const liveMessages = Array.isArray(ctx.agent.messages) ? ctx.agent.messages : [];
+      const payload = saved && saved.messages.length > liveMessages.length
+        ? saved
+        : {
+            id: ctx.currentSessionId,
+            createdAt: saved?.createdAt ?? new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            cwd: saved?.cwd ?? process.cwd(),
+            model: saved?.model ?? cfg.model,
+            messages: liveMessages.length ? liveMessages : saved?.messages ?? [],
+          };
+      const file = journalSession(payload, cfg.resolvedHome);
+      const recap = wakeRecap(cfg.resolvedHome, payload.cwd, { excludeSessionId: payload.id });
+      return addLine("info", [
+        file ? `Journaled this session: ${file}` : "This session is still too short to journal (need a few real turns).",
+        recap || "(no older episodes yet)",
+      ].join("\n"));
     }
-    case "/mcp": {
+    case "/nho": {
+      const q = input.slice("/nho".length).trim();
+      return addLine("info", journalTool(q ? { action: "journal_search", query: q } : { action: "journal" }, cfg.resolvedHome));
+    }
+      case "/mcp": {
       const mcp = ctx.registry.mcp;
       if (!mcp) return addLine("info", "no MCP servers connected (configure mcp_servers / neko mcp add)");
       const tools = mcp.toolSchemas().map((s: any) => s.function.name);

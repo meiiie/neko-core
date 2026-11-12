@@ -7,6 +7,7 @@ import { environmentBlock, projectContextBlock } from "./context.ts";
 import { matchSkills, skillsContextBlock } from "./skills.ts";
 import { dynamicToolRuntimeBlock } from "./tool-registry.ts";
 import { coreMemoryBlock, memoryIndexBlock } from "../core/memory.ts";
+import { livingWakeBlock } from "../core/living-memory.ts";
 import { playbookContextBlock } from "../core/playbook.ts";
 import type { ToolRegistry } from "../core/tool-runtime.ts";
 import { todosContextBlock } from "../core/tool-runtime.ts";
@@ -42,6 +43,7 @@ export function productionTurnContext(registry: ToolRegistry, options: Productio
     environmentBlock({ model: options.model, provider: options.provider }, registry.root, registry.taskScope),
     projectContextBlock(registry.root, home, registry.taskScope),
     coreMemoryBlock(home, registry.taskScope),
+    !registry.taskScope ? livingWakeBlock(home, registry.root) : "",
     automaticDreamRecall(registry),
     registry.isToolAvailable("task") ? agentsContextBlock(registry.root, home) : "",
     registry.isToolAvailable("skill") ? skillsContextBlock(registry, registry.root, home) : "",
