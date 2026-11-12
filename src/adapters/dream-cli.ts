@@ -2,24 +2,31 @@ import { legacyDreamScope } from "./automatic-dream.ts";
 /** Explicit host command; task-session admission, not model arguments, owns the memory scope. */
 import type { NekoConfig } from "./config.ts";
 import { getProvider } from "./providers.ts";
-import { loadTaskSession, taskSessionConfigId, taskSessionContextMode, type TaskRuntimeInput, type TaskSessionRuntime } from "./task-session.ts";
+import { inspectTaskSession, loadTaskSession, taskSessionConfigId, taskSessionContextMode, type TaskRuntimeInput, type TaskSessionRuntime } from "./task-session.ts";
+import { createTaskScope } from "../core/task-scope.ts";
 import { structuredScopeDigest } from "../core/context/state.ts";
 import { buildDreamInput } from "./dream-input.ts";
 import { DreamStore } from "./dream-store.ts";
 import { prepareDream } from "./dream.ts";
 
-export const DREAM_USAGE = "neko dream preview|prepare <task-session-id> | show|apply|rollback <task-session-id> <candidate-id>";
+export const DREAM_USAGE = "neko dream preview|prepare <task-session-id> | show|apply|rollback <task-session-id> <candidate-id> | status <task-session-id|session:id|acp-session:id>";
 export async function dreamCommand(cfg: NekoConfig, root: string, args: string[], signal?: AbortSignal): Promise<string> {
   const [action, sessionId, candidateId] = args;
-  if (!sessionId || !["preview", "prepare", "show", "apply", "rollback"].includes(action)
-    || (action === "preview" || action === "prepare" ? args.length !== 2 : args.length !== 3)) throw new Error(DREAM_USAGE);
+  if (!sessionId || !["preview", "prepare", "show", "apply", "rollback", "status"].includes(action)
+    || (action === "preview" || action === "prepare" || action === "status" ? args.length !== 2 : args.length !== 3)) throw new Error(DREAM_USAGE);
   if (sessionId.startsWith("session:") || sessionId.startsWith("acp-session:")) {
-    if (action !== "show" && action !== "rollback") throw new Error("Automatic legacy Dream supports show/rollback; new turns consolidate automatically.");
+    if (action !== "show" && action !== "rollback" && action !== "status") throw new Error("Automatic legacy Dream supports show/rollback/status; new turns consolidate automatically.");
     const scope = legacyDreamScope(sessionId.slice(sessionId.indexOf(":") + 1), root, sessionId.startsWith("acp-session:") ? "acp" : "local");
     const store = new DreamStore(cfg.resolvedHome, scope);
+    if (action === "status") return JSON.stringify({ automatic: store.automaticStatus(), modelCalls: 0 });
     if (action === "rollback") { store.rollback(candidateId); return JSON.stringify({ id: candidateId, status: store.status(candidateId) }); }
     const candidate = store.read(candidateId);
     return JSON.stringify({ ...candidate, status: store.status(candidateId) });
+  }
+  if (action === "status") {
+    const snapshot = inspectTaskSession({ home: cfg.resolvedHome, root, sessionId, authorityId: "local", configId: taskSessionConfigId(cfg) });
+    const scope = createTaskScope(snapshot.activeTaskId, root);
+    return JSON.stringify({ automatic: new DreamStore(cfg.resolvedHome, scope).automaticStatus(), modelCalls: 0 });
   }
   let input: TaskRuntimeInput | undefined;
   const session = await loadTaskSession({ home: cfg.resolvedHome, root, sessionId, authorityId: "local",

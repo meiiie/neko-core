@@ -9,8 +9,37 @@ Neko consolidates eligible completed sessions automatically by default, while re
 `dream_mode` defaults to `auto`. After a successful ordinary CLI, TUI, or standard
 ACP turn, the host makes one bounded, tool-free request to the configured model,
 validates the candidate and automatically applies it. No `prepare`/`apply` command
-is required. This can add latency and normal provider charges; the host announces
-the pass and includes received usage reports, even for rejected candidates, in the session's cost counters.
+is required. TUI and ACP queue the pass in the same process and release the
+foreground turn without waiting for its model response. A new submitted turn or
+session close cancels publication of the old pass; you can continue working with
+the previous memory. One-shot CLI explicitly waits after printing its answer
+because exiting the process would kill in-process work. It is not a detached daemon.
+
+Each interactive runtime keeps at most one active request and one latest queued
+snapshot. Superseded pending snapshots are dropped without a model call. Evidence
+is copied at admission, not borrowed from a live conversation. Scope/profile and
+source checks, generation cancellation, the single memory writer, and an activation
+epoch prevent stale output or an apply/rollback ABA cycle from overwriting memory.
+Closing the app does not resume jobs later.
+
+Dream still incurs normal provider charges. Cancellation cannot retract a request
+already sent. Received usage, including late responses and rejected candidates, is
+added to the session's counters; if the app exits before usage arrives it cannot
+report that usage. Background counter changes are persisted on the next normal
+session save. A provider ignoring cancellation holds its worker slot until its
+request settles, rather than starting overlapping automatic requests. A local
+per-scope lease also excludes another automatic worker in another process. Dead
+local-process leases can be recovered; a live/unknown/foreign-host lease is not
+stolen. A non-cooperating provider can therefore stall further Dream work until
+restart, but not foreground chat. This is not a cross-host transcript coordinator:
+separate legacy hosts editing the same transcript are not guaranteed a globally
+latest evidence snapshot. Memory revision checks still prevent lost updates.
+
+`neko dream status <session-selector>` reads the latest safe diagnostic receipt
+without a model call. It contains only status, time, an optional reason code and
+candidate ID. A crash may leave `running`; it is a receipt, not a liveness probe.
+Diagnostic persistence is best-effort and never overrides memory-off or a revoked
+scope.
 There is no timer or overnight daemon. Failed/interrupted turns, plan mode,
 memory-off, unavailable memory tools, MoA profiles, restricted ACP hosts and
 caller-injected runtimes without an explicit Dream provider do not automatically
@@ -31,7 +60,7 @@ scoped task recall. No option deletes original transcripts or audit records.
 
 Automatic activation uses the same citation validation, memory revision checks,
 atomic publication and rollback as explicit apply. Validation proves source
-provenance, **not truth**. A failed or stale pass leaves the old note intact. The
+provenance, **not truth**. A failed or stale pass leaves the old note intact. Failure notices use safe reason codes (`input_budget`, `invalid_response`, `provider_error`, `timeout`, `input_rejected`, `stale_context`, or `cancelled`) rather than echoing provider errors, credentials or source text. The
 same evidence is claimed before requesting the model, so a failure, crash or
 rollback does not silently repeat spending for identical evidence. A new completed
 turn can produce a new candidate. There are no automatic repair calls.

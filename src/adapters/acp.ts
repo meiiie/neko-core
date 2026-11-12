@@ -1,4 +1,4 @@
-import { bindAutomaticDream, runAutomaticDream } from "./automatic-dream.ts";
+import { bindAutomaticDream, cancelAutomaticDream, scheduleAutomaticDream } from "./automatic-dream.ts";
 import {bindStructuredContext} from "./context/compactor.ts";
 import {estimateRequestTokens} from "../core/agent-constants.ts";
 /** ACP v1 adapter: exposes the production Neko Agent over newline-delimited JSON-RPC stdio. */
@@ -873,6 +873,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         close: async () => {
           if (closed) return;
           closed = true;
+          cancelAutomaticDream(session.runtime.registry);
           session.pending?.abort();
           await session.pendingSettled?.catch(() => {});
           await sendChain.catch(() => {});
@@ -1281,6 +1282,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       throw new acp.RequestError(-32602, "Neko ACP v1 does not advertise image or audio prompt support.");
     }
     if (!input.text) throw new acp.RequestError(-32602, "ACP prompt must contain text or supported context.");
+    cancelAutomaticDream(session.runtime.registry);
     if (/^\/task(?:\s|$)/.test(input.text)) {
       const coordinator = taskSessions.get(params.sessionId);
       if (!coordinator) throw new acp.RequestError(-32602, "Task commands require an opt-in task session.");
@@ -1455,11 +1457,13 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         : { status: "idle", lastStopReason: stopReason, activeToolCallIds: [] };
       await persist(session, session.record.turnState);
       if (stopReason === "end_turn") {
-        await runAutomaticDream({ cfg: runtime.config, registry: runtime.registry, agent: runtime.agent,
-          sessionId: session.record.id, authority: "acp", restricted: Boolean(hostProfile) || Boolean(options.buildRuntime && !options.automaticDreamProvider), signal: pending.signal,
+        scheduleAutomaticDream({ cfg: runtime.config, registry: runtime.registry, agent: runtime.agent,
+          sessionId: session.record.id, authority: "acp", restricted: Boolean(hostProfile) || Boolean(options.buildRuntime && !options.automaticDreamProvider),
           providerFactory: options.automaticDreamProvider,
           taskInput: taskSessions.has(session.record.id) ? () => taskSessions.get(session.record.id)!.dreamInput() : undefined,
-          notify: message => { void client.notify(acp.methods.client.session.update, {
+          notify: message => {
+            if (sessions.get(session.record.id) !== session || session.runtime !== runtime) return;
+            void client.notify(acp.methods.client.session.update, {
             sessionId: session.record.id, ...taskOuterMeta(session), update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: message } },
           }).catch(() => {}); } });
         await persist(session, session.record.turnState);
@@ -1498,7 +1502,10 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
   app.onNotification("session/cancel", async ({ params }) => {
     const session = sessions.get(params.sessionId);
     // ACP cancel is a notification, so a stale/missing v1 echo is ignored before any abort.
-    if (session && matchesTaskEcho(session, params._meta)) session.pending?.abort();
+    if (session && matchesTaskEcho(session, params._meta)) {
+      cancelAutomaticDream(session.runtime.registry);
+      session.pending?.abort();
+    }
   });
 
   app.onRequest("session/close", async ({ params }) => {
@@ -1511,6 +1518,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     const session = sessions.get(params.sessionId);
     if (!session) return {};
     assertTaskEcho(session, params._meta);
+    cancelAutomaticDream(session.runtime.registry);
     const coordinator = taskSessions.get(params.sessionId);
     if (coordinator) {
       const closeMeta = taskOuterMeta(session);
@@ -1533,6 +1541,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       await Promise.allSettled([...taskTransitions.values()]);
       const open = [...sessions.values()].filter((session) => !session.taskMode);
       const scoped = [...taskSessions.values()];
+      for (const session of sessions.values()) cancelAutomaticDream(session.runtime.registry);
       sessions.clear();
       taskSessions.clear();
       taskTransitions.clear();

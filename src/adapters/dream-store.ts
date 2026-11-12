@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { constants, closeSync, fsyncSync, renameSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { hostname } from "node:os";
 import { isJsonObject } from "../shared/wire.ts";
 import { taskMemoryDirectory, withTaskMemoryWriter } from "../core/memory.ts";
 import type { TaskScope } from "../core/task-scope.ts";
@@ -10,6 +11,30 @@ import { assertDreamTextSafe, DREAM_INPUT_BYTES, DREAM_NOTE, dreamDigest, parseD
 
 const HASH = /^[a-f0-9]{64}$/;
 const MAX_RECORD_BYTES = 512_000;
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+// Retirement is local bookkeeping, not memory mutation while disabled/revoked.
+const retiredAutomaticLeases = new Map<string, string>();
+const AUTOMATIC_STATUSES = new Set(["running", "applied", "already_applied", "empty", "failed"]);
+const AUTOMATIC_REASONS = new Set(["input_budget", "invalid_response", "provider_error", "timeout", "input_rejected", "stale_context", "cancelled"]);
+export interface AutomaticDreamStatus {
+  version: 1;
+  updatedAt: string;
+  status: string;
+  reason?: string;
+  candidateId?: string;
+}
+function parseAutomaticStatus(raw: unknown): AutomaticDreamStatus {
+  if (!isJsonObject(raw) || raw.version !== 1 || typeof raw.updatedAt !== "string"
+    || !/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(raw.updatedAt)
+    || typeof raw.status !== "string" || !AUTOMATIC_STATUSES.has(raw.status)
+    || (raw.reason !== undefined && (typeof raw.reason !== "string" || !AUTOMATIC_REASONS.has(raw.reason)))
+    || (raw.candidateId !== undefined && (typeof raw.candidateId !== "string" || !HASH.test(raw.candidateId))))
+    throw new Error("Invalid automatic Dream status");
+  const result: AutomaticDreamStatus = { version: 1, updatedAt: raw.updatedAt, status: raw.status };
+  if (typeof raw.reason === "string") result.reason = raw.reason;
+  if (typeof raw.candidateId === "string") result.candidateId = raw.candidateId;
+  return result;
+}
 export interface DreamCandidate {
   version: 1;
   id: string;
@@ -71,6 +96,73 @@ export class DreamStore {
     return join(this.directory(), `${id}.json`);
   }
   private target(): string { return join(taskMemoryDirectory(this.home, this.scope), DREAM_NOTE); }
+
+  /** Safe latest diagnostic only; never persists raw errors, source text, or credentials. */
+  automaticStatus(): AutomaticDreamStatus | null {
+    const raw = readDreamFile(join(this.directory(), "automatic-status.json"), 4096);
+    return raw === null ? null : parseAutomaticStatus(JSON.parse(raw));
+  }
+  recordAutomaticStatus(status: string, reason?: string, candidateId?: string): void {
+    const value = parseAutomaticStatus({ version: 1, updatedAt: new Date().toISOString(), status, reason, candidateId });
+    withTaskMemoryWriter(this.home, this.scope, () => {
+      writeDreamFile(join(this.directory(true), "automatic-status.json"), JSON.stringify(value));
+    });
+  }
+
+  /** Opaque activation epoch. Unlike note bytes, rollback never restores this value. */
+  revision(): string {
+    const value = readDreamFile(join(this.directory(), "revision"), 64);
+    if (value === null) return "initial";
+    if (!UUID.test(value)) throw new Error("Invalid Dream revision");
+    return value;
+  }
+  private advanceRevision(): void {
+    // Publish the fence before changing memory. A crash may invalidate extra work, never admit stale work.
+    writeDreamFile(join(this.directory(true), "revision"), randomUUID());
+  }
+
+  /** One locally admitted model request per scope, without holding the memory writer during IO.
+   * Release only after the underlying request settles, not merely its abort/timeout race.
+   * Never steal a live/unknown/foreign-host lease. PID reuse can delay recovery, safely.
+   */
+  acquireAutomaticLease(): (() => void) | undefined {
+    return withTaskMemoryWriter(this.home, this.scope, () => {
+      const path = join(this.directory(true), "automatic-lease.json");
+      const previous = readDreamFile(path, 4096);
+      if (previous !== null) {
+        const value: unknown = JSON.parse(previous);
+        if (!isJsonObject(value) || value.version !== 1 || !Number.isSafeInteger(value.pid)
+          || typeof value.pid !== "number" || value.pid <= 0 || value.pid > 2147483647
+          || typeof value.host !== "string" || typeof value.nonce !== "string" || !UUID.test(value.nonce)) throw new Error("Invalid automatic Dream lease");
+        if (value.host !== hostname()) return undefined;
+        const retired = value.pid === process.pid && retiredAutomaticLeases.get(path) === value.nonce;
+        if (!retired) {
+          try { process.kill(value.pid, 0); return undefined; }
+          catch (error) {
+            // SAFETY: Node process.kill failures carry errno codes; unknown/permission failures mean busy.
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") return undefined;
+          }
+        }
+        rmSync(path);
+      }
+      const nonce = randomUUID();
+      const record = JSON.stringify({ version: 1, pid: process.pid, host: hostname(), nonce });
+      writeFileSync(path, record, { flag: "wx", mode: 0o600 });
+      retiredAutomaticLeases.delete(path);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        retiredAutomaticLeases.set(path, nonce);
+        try {
+          withTaskMemoryWriter(this.home, this.scope, () => {
+            if (readDreamFile(path, 4096) === record) rmSync(path);
+            retiredAutomaticLeases.delete(path);
+          });
+        } catch { /* Disabled/revoked/busy writer: next authorized acquisition reclaims this retired nonce. */ }
+      };
+    });
+  }
 
   /** Claim before spending. Same evidence is not retried after failure, crash, or rollback. */
   claimAutomatic(evidenceDigest: string): boolean {
@@ -147,9 +239,10 @@ export class DreamStore {
     return current === candidate.before ? "prepared" : "conflict";
   }
 
-  apply(id: string, currentInput: DreamInput, automaticEvidence?: string): "applied" | "already_applied" {
+  apply(id: string, currentInput: DreamInput, automaticEvidence?: string, expectedRevision?: string): "applied" | "already_applied" {
     return withTaskMemoryWriter(this.home, this.scope, () => {
       const candidate = this.read(id);
+      if (expectedRevision !== undefined && this.revision() !== expectedRevision) throw new Error("Dream revision changed; candidate is stale");
       if (automaticEvidence !== undefined && readDreamFile(join(this.directory(), "automatic.json")) !== automaticEvidence) throw new Error("Automatic Dream was superseded by a newer turn");
       if (readDreamFile(join(this.directory(), `${id}.rollback`)) !== null) throw new Error("Dream rollback requested; finish rollback before preparing a new candidate");
       if (readDreamFile(this.target()) === candidate.after) return "already_applied";
@@ -157,6 +250,7 @@ export class DreamStore {
         || currentInput.evidenceDigest !== candidate.input.evidenceDigest) throw new Error("Dream source snapshot changed; prepare again");
       if (memoryRevision(snapshotDreamMemories(this.home, this.scope)) !== memoryRevision(candidate.input.memories)) throw new Error("Task memories changed; dream candidate is stale");
       // Receipt exists first; after a crash exact target bytes distinguish not-applied/applied.
+      this.advanceRevision();
       writeDreamFile(this.target(), candidate.after);
       return "applied";
     });
@@ -166,6 +260,7 @@ export class DreamStore {
     withTaskMemoryWriter(this.home, this.scope, () => {
       const candidate = this.read(id), current = readDreamFile(this.target());
       if (current !== candidate.after && !(current === candidate.before && this.status(id) === "rolled_back")) throw new Error("Memory changed since activation; rollback would overwrite new work");
+      this.advanceRevision();
       // Intent first makes an interrupted rollback resumable, never an implicit replay of apply.
       const marker = join(this.directory(), `${id}.rollback`);
       if (readDreamFile(marker) === null) writeFileSync(marker, "Rollback requested\n", { flag: "wx", mode: 0o600 });

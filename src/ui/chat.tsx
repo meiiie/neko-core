@@ -1,4 +1,4 @@
-import { bindAutomaticDream, runAutomaticDream } from "../adapters/automatic-dream.ts";
+import { bindAutomaticDream, cancelAutomaticDream, scheduleAutomaticDream } from "../adapters/automatic-dream.ts";
 import {bindStructuredContext} from "../adapters/context/compactor.ts";
 import { promptAnchorMarker } from "./frame-diff.ts";
 import { useHistorySearch } from "./history-search.ts";
@@ -524,6 +524,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
     return () => { compactionMountedRef.current = false; compactionControllerRef.current?.abort(); };
   }, []);
   const interruptActiveWork = () => {
+    if (registryRef.current) cancelAutomaticDream(registryRef.current);
     const compact = compactionControllerRef.current;
     const turn = controllerRef.current;
     if (compact) compact.abort();
@@ -1043,6 +1044,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
   const taskSessionRef = useRef<TaskSessionCoordinator<ChatTaskRuntime> | null>(null);
   const taskTransitionRef = useRef(false);
   if (taskLifecycle) taskLifecycle.shutdown = async () => {
+    if (registryRef.current) cancelAutomaticDream(registryRef.current);
     const session = taskSessionRef.current;
     if (!session?.recoveryRequired) await persistRef.current();
     if (!session) return;
@@ -1096,6 +1098,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
         await display.flush();
       },
       close: async () => {
+        cancelAutomaticDream(registry);
         await display.flush();
         if (!provider) await agent.currentProvider().dispose?.();
       },
@@ -1106,6 +1109,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
   // Agent.setProvider already disposes every superseded instance. An explicitly injected provider is
   // caller-owned (tests and embedders rely on that seam), so never close it here.
   useEffect(() => () => {
+    if (registryRef.current) cancelAutomaticDream(registryRef.current);
     const taskSession = taskSessionRef.current;
     if (taskSession) {
       if (!taskLifecycle) void taskSession.close().catch(() => { /* a failed lock remains fail-closed */ });
@@ -1258,6 +1262,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
   const doResume = async (target: Session, mode: "summary" | "full") => {
     if (resumeTransitionRef.current) return addLine("info", "A session resume is already in progress.");
     resumeTransitionRef.current = true;
+    if (registryRef.current) cancelAutomaticDream(registryRef.current);
     queuePauseNoticeShownRef.current = false;
     setQueueHoldNotice(null);
     const previousHistory = displayRef.current;
@@ -2328,6 +2333,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
   const activateTask = (session: TaskSessionCoordinator<ChatTaskRuntime>) => {
     void adoptDisplay(Promise.resolve(session.active.runtime.display));
     const { agent, registry } = session.active.runtime;
+    if (registryRef.current) cancelAutomaticDream(registryRef.current);
     // Approval grants belong to the preceding task's interactive lifetime, not this one.
     alwaysApproved.current.clear();
     gateChain.current = Promise.resolve();
@@ -2447,6 +2453,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
       addLine("error", "Task transition is in progress; input was not run.");
       return;
     }
+    if (registryRef.current) cancelAutomaticDream(registryRef.current);
     if (/^\/task(?:\s|$)/.test(text)) return runTaskCommand(text);
     if (text.startsWith("#")) {
       const scope = registryRef.current!.taskScope;
@@ -3148,10 +3155,14 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
       turnCompleted = result !== "[interrupted]" && agentRef.current!.completionStatus.ok;
       if (turnCompleted && !internal && (!provider || automaticDreamProvider)) {
         await persist();
-        await runAutomaticDream({ cfg, registry: registryRef.current!, agent: agentRef.current!,
-          sessionId: sessionIdRef.current, signal: controller.signal, providerFactory: automaticDreamProvider,
+        const dreamRegistry = registryRef.current!;
+        const dreamSession = sessionIdRef.current;
+        scheduleAutomaticDream({ cfg, registry: dreamRegistry, agent: agentRef.current!,
+          sessionId: dreamSession, providerFactory: automaticDreamProvider,
           taskInput: taskSessionRef.current ? () => taskSessionRef.current!.dreamInput() : undefined,
-          notify: message => addLine("info", message.trim()) });
+          notify: message => {
+            if (compactionMountedRef.current && registryRef.current === dreamRegistry && sessionIdRef.current === dreamSession) addLine("info", message.trim());
+          } });
       }
     } catch (error) {
       flushStream();
