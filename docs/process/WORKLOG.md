@@ -1,5 +1,22 @@
 # Neko Core work log
 
+## 2026-11-12 — browser-extension release packaging repair (PR, not released)
+
+- Root cause: `release.yml` bypassed `package-browser-extension.ts` with a hand-written
+  ZIP file list that omitted the side-panel HTML and JavaScript declared by the manifest.
+- Route releases through the same developer/store packager, retaining the public asset
+  naming convention and developer extension key. No version/tag/public artifact is changed.
+- Validate manifest entry points, local HTML/CSS dependencies, static JS imports and
+  scripting file lists; extract the resulting ZIP and compare its entire inventory and
+  file bytes with staging before an upload is allowed.
+- Regressions execute the actual release packaging command and both packaging modes;
+  deleting sidepanel HTML/JS, popup CSS, an icon or the injected script fails packaging.
+  The original release command reproduces a missing `sidepanel.html`; the fixed command passes.
+- Bun 1.4.0: typecheck/lint and 18 targeted packaging/bridge tests pass locally.
+  A local full-suite attempt hit unrelated read-only HOME errors in UI fixtures; cross-platform
+  PR CI is the full-suite verification. This does not claim a live Chrome interaction test.
+
+
 This is the compact current engineering record. User-facing release history belongs
 in [CHANGELOG.md](../../CHANGELOG.md); older implementation detail remains recoverable
 from Git. Current product truth lives in the code, tests, ROADMAP, architecture, and

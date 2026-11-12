@@ -38,11 +38,13 @@ jobs:
             state=draft
           fi
           echo "state=$state" >> "$GITHUB_OUTPUT"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
       - name: package the auditable unpacked browser extension
         shell: bash
         run: |
-          cd browser-extension
-          zip -r "../neko-browser-extension-$GITHUB_REF_NAME.zip" manifest.json service-worker.js control-indicator.js popup.html popup.css popup.js icons
+          bun scripts/package-browser-extension.ts --output "neko-browser-extension-$GITHUB_REF_NAME.zip"
       - name: attach browser extension bundle to the release
         if: ${{ steps.release_state.outputs.state == 'draft' }}
         env:
