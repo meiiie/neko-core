@@ -1,3 +1,4 @@
+import { automaticDreamRecall } from "./automatic-dream.ts";
 /** Turn-scoped model context. Catalog text is coupled to the exact executable tool surface so a
  * narrowed turn never advertises an action the registry will reject. */
 import { agentsContextBlock } from "./agents.ts";
@@ -41,6 +42,7 @@ export function productionTurnContext(registry: ToolRegistry, options: Productio
     environmentBlock({ model: options.model, provider: options.provider }, registry.root, registry.taskScope),
     projectContextBlock(registry.root, home, registry.taskScope),
     coreMemoryBlock(home, registry.taskScope),
+    automaticDreamRecall(registry),
     registry.isToolAvailable("task") ? agentsContextBlock(registry.root, home) : "",
     registry.isToolAvailable("skill") ? skillsContextBlock(registry, registry.root, home) : "",
     registry.isToolAvailable("memory") ? memoryIndexBlock(home, registry.taskScope) : "",

@@ -333,6 +333,7 @@ test("CLI scoped runtime exposes read-only historical source lookup after restar
       } },
       verify_before_exit: false, max_retries: 0, offline_retry_seconds: 0,
       completion_sound: false, mode: "auto",
+      dream_mode: "manual", // isolate historical lookup request counts; auto Dream has separate host tests.
     }));
     const created = jsonLine<{ sessionId: string; activeTaskId: string }>(
       await runCli(["task-session", "new", "Task A"], root, home),

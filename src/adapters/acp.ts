@@ -1,3 +1,4 @@
+import { bindAutomaticDream, runAutomaticDream } from "./automatic-dream.ts";
 import {bindStructuredContext} from "./context/compactor.ts";
 import {estimateRequestTokens} from "../core/agent-constants.ts";
 /** ACP v1 adapter: exposes the production Neko Agent over newline-delimited JSON-RPC stdio. */
@@ -9,7 +10,7 @@ import { Readable, Writable } from "node:stream";
 
 import { classifyToolObservation } from "../core/agent.ts";
 import { assertNoConfiguredCredentialInSourceEvents, type CompactionSourceEvent } from "../core/compaction-source.ts";
-import type { ToolCall } from "../core/ports.ts";
+import type { Provider, ToolCall } from "../core/ports.ts";
 import type { PermissionMode } from "../core/permissions.ts";
 import type { TaskScope } from "../core/task-scope.ts";
 import type { JsonValue } from "../shared/wire.ts";
@@ -172,6 +173,8 @@ export interface AcpRuntimeFactoryOptions {
   config?: NekoConfig;
   configForRoot?: (root: string, profile?: string | null) => NekoConfig;
   buildRuntime?: typeof buildAgentRuntime;
+  /** Explicit Dream seam for injected runtimes; production uses its configured provider. */
+  automaticDreamProvider?: (cfg: NekoConfig) => Provider;
   /** Internal lifecycle seam: production stdio awaits every connection-owned cleanup task. */
   trackCleanup?: (task: Promise<void>) => void;
   /** Optional exclusive authority selected by the trusted process launcher, never by ACP input. */
@@ -1426,6 +1429,8 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         activeToolCallIds: [],
       };
       // Handle an early provider failure while the accepted prompt is checkpointed.
+      bindAutomaticDream({ cfg: runtime.config, registry: runtime.registry, sessionId: session.record.id,
+        authority: "acp", restricted: Boolean(hostProfile) || Boolean(options.buildRuntime && !options.automaticDreamProvider) });
       const answerResult = runtime.agent.runResilient(input.text, {
         signal: pending.signal,
         images: input.images.length ? input.images : undefined,
@@ -1449,6 +1454,16 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         ? { status: "interrupted", lastStopReason: stopReason, activeToolCallIds: [...session.activeToolCallIds] }
         : { status: "idle", lastStopReason: stopReason, activeToolCallIds: [] };
       await persist(session, session.record.turnState);
+      if (stopReason === "end_turn") {
+        await runAutomaticDream({ cfg: runtime.config, registry: runtime.registry, agent: runtime.agent,
+          sessionId: session.record.id, authority: "acp", restricted: Boolean(hostProfile) || Boolean(options.buildRuntime && !options.automaticDreamProvider), signal: pending.signal,
+          providerFactory: options.automaticDreamProvider,
+          taskInput: taskSessions.has(session.record.id) ? () => taskSessions.get(session.record.id)!.dreamInput() : undefined,
+          notify: message => { void client.notify(acp.methods.client.session.update, {
+            sessionId: session.record.id, ...taskOuterMeta(session), update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: message } },
+          }).catch(() => {}); } });
+        await persist(session, session.record.turnState);
+      }
       await syncSessionState(session, client);
       return { stopReason, ...taskOuterMeta(session) };
     } catch (error) {

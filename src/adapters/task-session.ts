@@ -970,6 +970,17 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
     };
   }
 
+  /** Host-only original-evidence snapshot for post-turn Dream; no task switch or migration. */
+  dreamInput(): TaskRuntimeInput {
+    this.assertReady();
+    const snapshot = this.capture();
+    const task = snapshot.tasks.find(item => item.id === snapshot.activeTaskId)!;
+    return { sessionId: this.id, taskId: task.id, label: task.label, root: task.canonicalRoot,
+      scope: this.scope, messages: task.messages, sourceEvents: task.sourceEvents,
+      contextMode: snapshot.schemaVersion === 3 ? "structured" : undefined,
+      contextState: task.contextState, displayHistory: task.displayHistory, displayPending: task.displayPending };
+  }
+
   /** Synchronous serialization under the writer lease captures one ordered message snapshot. */
   checkpoint(): void {
     this.assertReady();

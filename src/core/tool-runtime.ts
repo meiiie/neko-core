@@ -626,6 +626,16 @@ export class ToolRegistry {
   private configuredMemoryHome = homeDir();
   /** Runtime-owned memory admission scope. A registry remains bound to one task/root. */
   get taskScope(): TaskScope | undefined { return this.boundTaskScope; }
+  private boundDreamScope?: TaskScope;
+  get dreamScope(): TaskScope | undefined { return this.boundDreamScope; }
+  /** Separate read-only Dream sidecar; never changes normal tool or memory authority. */
+  bindDreamScope(scope: TaskScope | undefined): void {
+    if (scope) {
+      assertTaskScope(scope);
+      if (scope.canonicalRoot !== (process.platform === "win32" ? realpathSync.native(this.root).toLowerCase() : realpathSync.native(this.root))) throw new Error("Dream root mismatch");
+    }
+    this.boundDreamScope = scope;
+  }
 
   /** Legacy sessions may change home; a task-bound registry pins its canonical home. */
   get memoryHome(): string { return this.configuredMemoryHome; }
@@ -1739,7 +1749,9 @@ export class ToolRegistry {
           : "Error: disk_cleanup_scan is disabled because read_outside_root=false sets a hard project read wall.")
         : name === "network_probe" ? await runNetworkProbe(args, signal)
         : name === "skill" ? this.runSkill(args)
-        : name === "memory" ? memoryTool(args, this.memoryHome, this.boundTaskScope)
+        : name === "memory" ? (!this.boundTaskScope && this.boundDreamScope && args.name === "dream.md"
+          ? (args.action === "read" ? memoryTool(args, this.memoryHome, this.boundDreamScope) : "Error: Dream memory is host-managed; use dream show/rollback.")
+          : memoryTool(args, this.memoryHome, this.boundTaskScope))
         : name === "computer" ? await this.runComputer(args, signal)
         : await DISPATCH[name](this.root, args, {
           readOutsideRoot: this.readOutsideRoot,
