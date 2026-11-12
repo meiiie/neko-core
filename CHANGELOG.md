@@ -6,6 +6,8 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-11-12
+
 ### Fixed
 
 - Run automatic Dream in the background for interactive TUI/ACP turns rather
@@ -13,6 +15,23 @@ All notable changes to Neko Core are documented here. The format follows
   snapshots, reject stale activations and fence apply/rollback cycles.
 - Report sanitized Dream failure reasons and account received late usage after
   cancellation. One-shot CLI still explicitly drains its pass before exiting.
+- Add `neko dream status` to inspect the latest sanitized attempt receipt without
+  making a provider request. A receipt is not a live-worker health check.
+
+### Compatibility and limits
+
+- Interactive TUI/ACP can accept the next turn while Dream is working; the
+  foreground continues with the last committed memory. There is no detached
+  daemon or overnight scheduler. Existing `dream_mode=manual|off` controls remain.
+- One-shot CLI still waits for its Dream pass after printing the answer. A
+  provider that ignores cancellation can keep a worker slot occupied until the
+  request settles or the process restarts; interactive input remains available.
+- Memory revision and lease guards prevent conflicting activation, but this
+  does not guarantee the freshest transcript across simultaneous legacy hosts.
+  Background usage is persisted on the next normal session save.
+- The specific failure previously printed as “consolidation did not activate”
+  cannot be recovered from older receipts that did not record its reason.
+- Provider configuration, ACP protocol, memory files and 1.x CLI remain compatible.
 
 ## [1.9.1] - 2026-11-12
 
