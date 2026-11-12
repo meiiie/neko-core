@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { verifyBrowserExtension } from "../scripts/verify-browser-extension.ts";
 
 const root = resolve(import.meta.dir, "..");
 async function fixture() {
@@ -37,6 +38,7 @@ for (const mode of [[], ["--store-first-upload"]]) {
         ? Bun.spawn(["powershell", "-NoProfile", "-Command", `Expand-Archive -LiteralPath '${output.replaceAll("'", "''")}' -DestinationPath '${unpack.replaceAll("'", "''")}'`], { stdout: "pipe", stderr: "pipe" })
         : Bun.spawn(["unzip", "-q", output, "-d", unpack], { stdout: "pipe", stderr: "pipe" });
       expect(await proc.exited).toBe(0);
+      await verifyBrowserExtension(unpack);
       const manifest = JSON.parse(await readFile(join(unpack, "manifest.json"), "utf8"));
       expect(Boolean(manifest.key)).toBe(mode.length === 0);
       for (const file of [manifest.side_panel.default_path, "sidepanel.js", "control-indicator.js", "popup.css", "popup.js", "service-worker.js", "icons/icon-32.png"]) {

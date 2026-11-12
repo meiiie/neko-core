@@ -42,7 +42,7 @@ export async function verifyBrowserExtension(root: string): Promise<void> {
   const paths: Array<string | undefined> = [manifest.background?.service_worker, manifest.side_panel?.default_path,
     manifest.action?.default_popup, manifest.options_page, manifest.options_ui?.page,
     ...Object.values(manifest.icons ?? {}), ...Object.values(manifest.chrome_url_overrides ?? {})];
-  const icon = manifest.action?.default_icon;
+  const icon: string | Record<string, string> | undefined = manifest.action?.default_icon;
   paths.push(...(isResourcePath(icon) ? [icon] : Object.values(icon ?? {})));
   for (const entry of manifest.content_scripts ?? []) paths.push(...(entry.js ?? []), ...(entry.css ?? []));
   for (const path of paths) if (isResourcePath(path)) await resource(path);
