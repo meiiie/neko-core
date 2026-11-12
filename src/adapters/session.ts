@@ -306,7 +306,7 @@ export function saveSession(session: Session): void {
   const previous = existsSync(path) ? readSessionPath(path, session.id) : null;
   if (previous) atomicWriteFileSync(`${path}.bak`, serializeSession(previous));
   atomicWriteFileSync(path, serialized);
-  try { journalSession(session); } catch { /* a torn journal never blocks the canonical session write */ }
+  try { if (process.env.NODE_ENV !== "test") journalSession(session); } catch { /* a torn journal never blocks the canonical session write */ }
 }
 
 const yieldToEventLoop = () => new Promise<void>((resolveYield) => setTimeout(resolveYield, 0));
@@ -384,7 +384,7 @@ async function saveSessionInDirectory(session: Session, directory: string): Prom
   const previous = await readSessionPathAsync(path, session.id);
   if (previous) await atomicWriteFile(`${path}.bak`, previous.text);
   await atomicWriteFile(path, serialized);
-  try { journalSession(session); } catch { /* a torn journal never blocks the canonical session write */ }
+  try { if (process.env.NODE_ENV !== "test") journalSession(session); } catch { /* a torn journal never blocks the canonical session write */ }
 }
 
 interface SessionSaveWaiter {

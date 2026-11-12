@@ -90,7 +90,17 @@ test("secrets are redacted before they touch disk", () => {
 test("wakeRecap prefers same cwd and can exclude the resumed session", () => {
   const home = freshHome();
   journalSession(session({ id: "20261112-120000-000-aaaaaaaaaaaaaaaa", cwd: "E:\\proj" }));
-  journalSession(session({ id: "20261112-130000-000-bbbbbbbbbbbbbbbb", cwd: "E:\\proj", messages: session().messages.map((m, i) => i === 1 ? { ...m, content: "lam tiep" } : m) }));
+  journalSession(session({
+    id: "20261112-130000-000-bbbbbbbbbbbbbbbb",
+    cwd: "E:\\proj",
+    messages: [
+      { role: "system", content: "You are Neko." },
+      { role: "user", content: "lam tiep" },
+      { role: "assistant", content: "Xong. Đã sửa hàm verify." },
+      { role: "user", content: "ok" },
+      { role: "assistant", content: "ok them" },
+    ],
+  }));
   journalSession(session({
     id: "20261112-140000-000-cccccccccccccccc",
     cwd: "D:\\other",

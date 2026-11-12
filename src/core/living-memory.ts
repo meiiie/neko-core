@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
+import { isJsonObject, isText, type JsonObject } from "../shared/wire.ts";
 
 const SCHEMA = "neko.journal/v1";
 const DIR_NAME = "journal";
@@ -80,17 +81,49 @@ export function setLivingEnabled(enabled: boolean, home: string = homeDir()): st
   return "Living memory off. Existing journal files are kept, not deleted.";
 }
 
-function isText(value: unknown): value is string {
-  return typeof value === "string";
+interface JournalMessage {
+  role?: any;
+  content?: any;
+  _neko_internal?: any;
+  tool_calls?: any;
 }
 
-function partText(content: unknown): string {
+interface UserSpan {
+  first: string;
+  last: string;
+  count: number;
+}
+
+interface Frontmatter {
+  schema?: string;
+  sessionId?: string;
+  cwd?: string;
+  startedAt?: string;
+  endedAt?: string;
+  model?: string;
+  turns?: string;
+  tools?: string;
+}
+
+interface BackfillReport {
+  written: number;
+  skipped: number;
+}
+
+function asMessage(raw: any): JournalMessage | null {
+  if (!isJsonObject(raw)) return null;
+  // SAFETY: isJsonObject proved an object; JournalMessage only reads role/content/_neko_internal/tool_calls.
+  return raw as JournalMessage;
+}
+
+function partText(content: any): string {
   if (isText(content)) return content;
   if (!Array.isArray(content)) return "";
   return content
     .map((part) => {
       if (isText(part)) return part;
-      if (part && typeof part === "object" && (part as any).type === "text" && isText((part as any).text)) return (part as any).text;
+      if (!isJsonObject(part)) return "";
+      if (part.type === "text" && isText(part.text)) return part.text;
       return "";
     })
     .join(" ");
@@ -98,13 +131,13 @@ function partText(content: unknown): string {
 
 const GREETING = /^(xin\s?chao|xin\s?chào|chào|chao|hello|hi|yo|hey|alooo?|alo|hí|yo bro)\b/i;
 
-function visibleUserText(messages: unknown[]): { first: string; last: string; count: number } {
+function visibleUserText(messages: unknown[]): UserSpan {
   let first = "";
   let firstReal = "";
   let last = "";
   let count = 0;
   for (const raw of messages) {
-    const m = raw as any;
+    const m = asMessage(raw);
     if (!m || m.role !== "user" || m._neko_internal === true) continue;
     const text = partText(m.content).replace(/\s+/g, " ").trim();
     if (!text) continue;
@@ -115,12 +148,12 @@ function visibleUserText(messages: unknown[]): { first: string; last: string; co
     last = text;
   }
   // A greeting is a bad index. Prefer the first substantive ask so "Yo bro" does not become the memory.
-  return { first: firstReal || first, last, count };
+  return { first: firstReal || first, last, count } satisfies UserSpan;
 }
 
 function lastAssistantText(messages: unknown[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i] as any;
+    const m = asMessage(messages[i]);
     if (!m || m.role !== "assistant") continue;
     const text = partText(m.content).replace(/\s+/g, " ").trim();
     if (text) return text;
@@ -131,10 +164,12 @@ function lastAssistantText(messages: unknown[]): string {
 function toolNames(messages: unknown[]): string[] {
   const seen = new Set<string>();
   for (const raw of messages) {
-    const m = raw as any;
+    const m = asMessage(raw);
     if (!m || m.role !== "assistant" || !Array.isArray(m.tool_calls)) continue;
     for (const call of m.tool_calls) {
-      const name = call?.function?.name ?? call?.name;
+      if (!isJsonObject(call)) continue;
+      const fn = isJsonObject(call.function) ? call.function : null;
+      const name = fn?.name ?? call.name;
       if (isText(name) && name) seen.add(name);
     }
   }
@@ -211,15 +246,19 @@ function serialize(draft: Draft): string {
   return body.length > MAX_BODY_CHARS ? `${body.slice(0, MAX_BODY_CHARS - 1)}…\n` : body;
 }
 
-function parseFrontmatter(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
+function parseFrontmatter(text: string): Frontmatter {
+  const out: Frontmatter = {};
   if (!text.startsWith("---")) return out;
   const end = text.indexOf("\n---", 3);
   if (end < 0) return out;
+  const keys = new Set(["schema", "sessionId", "cwd", "startedAt", "endedAt", "model", "turns", "tools"]);
   for (const line of text.slice(4, end).split("\n")) {
     const i = line.indexOf(":");
     if (i <= 0) continue;
-    out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+    const key = line.slice(0, i).trim();
+    if (!keys.has(key)) continue;
+    // SAFETY: keys.has proved the key is a Frontmatter field.
+    out[key as keyof Frontmatter] = line.slice(i + 1).trim();
   }
   return out;
 }
@@ -394,7 +433,7 @@ export function readJournal(file: string, home: string = homeDir()): string {
 }
 
 /** One-shot backfill from already-saved sessions, newest first. Never rewrites a fresher journal. */
-export function backfillJournals(load: (id: string) => JournalableSession | null, ids: string[], home: string = homeDir(), limit = 80): { written: number; skipped: number } {
+export function backfillJournals(load: (id: string) => JournalableSession | null, ids: string[], home: string = homeDir(), limit = 80): BackfillReport {
   let written = 0;
   let skipped = 0;
   const dir = journalDir(home);
@@ -423,7 +462,7 @@ export function backfillJournals(load: (id: string) => JournalableSession | null
     else skipped += 1;
     if (before) lastWrite.set(key, before);
   }
-  return { written, skipped };
+  return { written, skipped } satisfies BackfillReport;
 }
 
 /** Surface for the `memory` tool so the model can recall without a new tool slot. */
