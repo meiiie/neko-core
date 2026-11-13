@@ -1517,6 +1517,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       ].join("\n"));
       }
     case "/ngu": {
+      if (ctx.registry.taskScope) return addLine("info", "Living journal is unavailable in task scope; no global fallback.");
       const rest = input.slice("/ngu".length).trim();
       if (rest === "on" || rest === "off") {
         return addLine("info", setLivingEnabled(rest === "on", cfg.resolvedHome));
@@ -1549,6 +1550,7 @@ export async function runSlashCommand(input: string, ctx: CommandCtx): Promise<v
       ].join("\n"));
     }
     case "/nho": {
+      if (ctx.registry.taskScope) return addLine("info", "Living journal is unavailable in task scope; no global fallback.");
       const q = input.slice("/nho".length).trim();
       return addLine("info", journalTool(q ? { action: "journal_search", query: q } : { action: "journal" }, cfg.resolvedHome));
     }
