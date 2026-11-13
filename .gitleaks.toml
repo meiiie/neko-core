@@ -8,3 +8,12 @@ condition = "AND"
 regexTarget = "line"
 paths = ['''^browser-extension/manifest\.json$''']
 regexes = ['''^\s*"key"\s*:\s*"[A-Za-z0-9+/=]+"\s*,?\s*$''']
+
+[[allowlists]]
+description = "Synthetic Dream secret-safety test values in historical fixture"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+commits = ["394beb6a2c567032ca9cf95ca1e6a85c9e2af199"]
+paths = ['''^test/dream\.test\.ts$''']
+regexes = ['''SYNTHETIC_(PASS|TOKEN|SECRET)_12345''']

@@ -3,7 +3,7 @@
 ## 2026-11-13 - living memory scoped slash-command hardening (v1.9.3 candidate)
 
 - Reproduced /nho reading the global journal and /ngu writing it from a task-scoped command context using synthetic data. Both slash handlers now fail closed for scoped tasks, including backfill and on/off.
-- Bun 1.4.0 targeted tests: 51 pass, 2 Windows skips. Initial full suite: 2,199 pass, 28 skip and 1 packaging failure from Git Bash missing on PATH; the packaging group passed 8/8 after correcting PATH. Final candidate full suite: 2,200 pass, 28 skip, 0 fail. Typecheck, lint, policy (with existing local configuration warnings), build, input/ACP/startup probes, and three ConPTY runs with a local synthetic provider passed. Cross-platform CI and secret scanning remain pending.
+- Bun 1.4.0 targeted tests: 51 pass, 2 Windows skips. Initial full suite: 2,199 pass, 28 skip and 1 packaging failure from Git Bash missing on PATH; the packaging group passed 8/8 after correcting PATH. Final candidate full suite: 2,200 pass, 28 skip, 0 fail. Typecheck, lint, policy (with existing local configuration warnings), build, input/ACP/startup probes, and three ConPTY runs with a local synthetic provider passed. The release-diff scan found no leaks; history scan identified three intentionally synthetic values in one existing Dream test commit. A narrowly scoped allowlist requires the exact historical commit, test path, generic-api-key rule, and synthetic marker; a new-input probe remains detected. Cross-platform CI remains pending.
 - The journal is a lossy, unverified index. Model-level recall, source access within task scope and real-world quality uplift remain unverified.
 
 
