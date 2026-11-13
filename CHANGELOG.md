@@ -6,6 +6,16 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.9.3] - 2026-11-13
+
+### Added
+
+- Add a lightweight living-memory journal to locate past sessions on demand. Excerpts are unverified, not current authorization; the original session remains the evidence source.
+
+### Fixed
+
+- Block journal search, capture, backfill and switches via /nho and /ngu when a task scope is active, preventing fallback to the global journal.
+
 ## [1.9.2] - 2026-11-12
 
 ### Fixed

@@ -16,6 +16,7 @@ import { isBool, isJsonNumber, isJsonObject, isText, type JsonObject } from "../
 import { dirname, join, resolve } from "node:path";
 import type { StoredHostProfile } from "./host-profile.ts";
 import { isCompletionContract, type CompletionContract } from "../core/completion-contract.ts";
+import { journalSession } from "../core/living-memory.ts";
 
 export type SessionTurnStatus = "idle" | "running" | "interrupted";
 
@@ -305,6 +306,7 @@ export function saveSession(session: Session): void {
   const previous = existsSync(path) ? readSessionPath(path, session.id) : null;
   if (previous) atomicWriteFileSync(`${path}.bak`, serializeSession(previous));
   atomicWriteFileSync(path, serialized);
+  try { if (process.env.NODE_ENV !== "test") journalSession(session); } catch { /* a torn journal never blocks the canonical session write */ }
 }
 
 const yieldToEventLoop = () => new Promise<void>((resolveYield) => setTimeout(resolveYield, 0));
@@ -382,6 +384,7 @@ async function saveSessionInDirectory(session: Session, directory: string): Prom
   const previous = await readSessionPathAsync(path, session.id);
   if (previous) await atomicWriteFile(`${path}.bak`, previous.text);
   await atomicWriteFile(path, serialized);
+  try { if (process.env.NODE_ENV !== "test") journalSession(session); } catch { /* a torn journal never blocks the canonical session write */ }
 }
 
 interface SessionSaveWaiter {

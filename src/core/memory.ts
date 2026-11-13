@@ -8,6 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { activatedDreamRecall } from "./dream.ts";
+import { journalTool } from "./living-memory.ts";
 import { homeDir } from "../shared/home.ts";
 import { join } from "node:path";
 import { assertTaskScope, type TaskScope } from "./task-scope.ts";
@@ -248,6 +249,9 @@ function searchMemories(query: string, home: string = homeDir(), scope?: TaskSco
 /** The model cannot choose scope via args; only the runtime's separate parameter controls admission. */
 function memoryToolUnlocked(args: any, home: string = homeDir(), scope?: TaskScope): string {
   const action = String(args.action ?? "").toLowerCase();
+  if (action === "journal" || action === "journal_search" || action === "journal_read") {
+    return journalTool(args, home, scope);
+  }
   if (scope && ["write", "append"].includes(action) && safeName(args.name) === "dream.md") return "Error: dream.md is host-managed; use the explicit dream prepare/review/apply workflow.";
   if (!memoryEnabled(home)) return "Memory is off. The user can re-enable it with /memory on.";
   const dir = memoryDirFor(home, scope);
@@ -289,7 +293,7 @@ function memoryToolUnlocked(args: any, home: string = homeDir(), scope?: TaskSco
       return hits.length ? hits.map((x) => `- ${x.name}: ${x.summary}`).join("\n") : `(no memory matches '${q}')`;
     }
     default:
-      return "Error: memory action must be one of list | read | write | append | delete | search";
+      return "Error: memory action must be one of list | read | write | append | delete | search | journal";
   }
 }
 

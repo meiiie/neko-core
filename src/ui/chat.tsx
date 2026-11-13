@@ -96,6 +96,7 @@ import { applySkillPolicyForTurn, matchesSkill } from "../adapters/skills.ts";
 import { ToolRegistry } from "../core/tool-runtime.ts";
 import { assertNoConfiguredCredentialInSourceEvents } from "../core/compaction-source.ts";
 import { memoryTool } from "../core/memory.ts";
+import { wakeRecap } from "../core/living-memory.ts";
 import { WEB_EXTRACT_PROMPT } from "../adapters/web.ts";
 import { configureToolRegistry, inheritToolRegistrySettings, restrictToolRegistryForSubagent } from "../adapters/tool-registry.ts";
 import { matchedTurnContext, productionTurnContext, subagentTurnContext } from "../adapters/turn-context.ts";
@@ -288,6 +289,8 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
   }
   const [lines, setLines] = useState<Line[]>(() => {
     const out: Line[] = [{ id: idRef.current++, kind: "welcome", text: "" }];
+    const wake = wakeRecap(cfg.resolvedHome, activeSessionCwdRef.current, { excludeSessionId: resumedRef.current?.id });
+    if (wake) out.push({ id: idRef.current++, kind: "info", text: wake });
     if (resumedRef.current && !startupNeedsChoiceRef.current) {
       // Project the prior conversation back onto the screen. Keep tool calls/results so interrupted
       // work remains visible, but leave the canonical full messages untouched for model continuation.
