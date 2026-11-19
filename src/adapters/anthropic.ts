@@ -111,7 +111,7 @@ export class AnthropicProvider implements Provider {
     }
 
     const offlineDeadline = Date.now() + this.cfg.offlineRetrySeconds * 1000;
-    let httpAttempt = 0, netAttempt = 0, effortHealTried = false, maxTokensHealTried = false;
+    let httpAttempt = 0, netAttempt = 0, rlAttempt = 0, rateLimitStart: number | undefined, effortHealTried = false, maxTokensHealTried = false;
     let wireAttempt = 0;
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted by user", "AbortError");
@@ -228,6 +228,18 @@ export class AnthropicProvider implements Provider {
           continue;
         }
       }
+      if (res.status === 429 && httpAttempt >= this.cfg.maxRetries && this.rateLimitWindowOpen(rateLimitStart)) {
+        rateLimitStart ??= Date.now();
+        rlAttempt++;
+        const ra = Number(res.headers.get("retry-after"));
+        // Jittered, capped backoff (60 s) so parallel sessions sharing one quota do not retry in lockstep.
+        const base = Number.isFinite(ra) && ra > 0 ? ra * 1000 : Math.min(60_000, this.retryDelayMs(Math.min(this.cfg.maxRetries + rlAttempt - 1, 10)) * 2);
+        const waitMs = Math.round(base * (0.75 + Math.random() * 0.5));
+        await opts?.onAttempt?.({ type: "retry_scheduled", attempt: wireAttempt, reason: "rate_limited", delayMs: waitMs, maxRetries: this.cfg.maxRetries });
+        onDelta?.(`(rate limited - quota window, retrying in ${Math.round(waitMs / 1000)}s)`, "reasoning");
+        await sleep(waitMs, signal);
+        continue;
+      }
       if (RETRYABLE_STATUS.has(res.status) && httpAttempt < this.cfg.maxRetries) {
         httpAttempt++;
         const ra = res.headers.get("retry-after");
@@ -239,6 +251,11 @@ export class AnthropicProvider implements Provider {
       }
       throw new Error(`HTTP ${res.status}: ${body.slice(0, 400)}`);
     }
+  }
+
+  private rateLimitWindowOpen(start: number | undefined): boolean {
+    const budget = this.cfg.rateLimitRetrySeconds;
+    return budget > 0 && (start === undefined || Date.now() - start < budget * 1000);
   }
 
   private retryDelayMs(attempt: number): number {
