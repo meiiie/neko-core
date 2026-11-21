@@ -9,7 +9,7 @@ import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, 
 import { lstat, mkdir, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { atomicWriteFile, atomicWriteFileSync } from "../shared/atomic.ts";
-import { hasTerminalControl, terminalSafeText } from "../shared/terminal-text.ts";
+import { hasTerminalControl, plainLabel, terminalSafeText } from "../shared/terminal-text.ts";
 import { trustedGitOutput, trustedGitOutputAsync } from "./trusted-git.ts";
 import { homeDir } from "../shared/home.ts";
 import { isBool, isJsonNumber, isJsonObject, isText, type JsonObject } from "../shared/wire.ts";
@@ -90,6 +90,7 @@ export interface SessionMeta {
   hostProfile?: StoredHostProfile;
   msgCount: number;
   titleText: string; // precomputed first-user-message title (so no messages needed to show a title)
+  clientTitleText?: string; // same title for structured clients; absent in index entries written before it existed
   mtime: number; // file mtimeMs at index time - freshness key (with fsize)
   fsize?: number; // file size at index time. mtimeMs ALONE misses same-millisecond rewrites (ext4 saw two
   // saves land on one tick in tests); size catches the append. rsync-style mtime+size composite check.
@@ -126,6 +127,7 @@ const MAX_SESSION_PROFILE_BYTES = 4 * 1024;
 const MAX_SESSION_EFFORT_BYTES = 4 * 1024;
 const MAX_SESSION_FINGERPRINT_BYTES = 4 * 1024;
 const MAX_SESSION_TITLE_DISPLAY_CHARS = 240;
+const SESSION_AUTO_TITLE_CHARS = 60;
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const WINDOWS_DEVICE = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
 
@@ -539,24 +541,34 @@ export function acquireSessionLease(id: string): SessionLease {
 const INDEX_FILE = () => join(sessionsDir(), ".index.json");
 
 /** Stable human-facing name: a compaction capsule is not a new user request. */
-export function sessionAutoTitle(messages: Session["messages"]): string {
+function firstRequestLine(messages: Session["messages"]): string {
   const capsule = messages.find((m) => (m.role === "user" || m._neko_context_capsule === true) && m._neko_internal === true
     && isText(m._neko_compaction_first_user));
   const original = capsule?._neko_compaction_first_user
     ?? messages.find((m) => m.role === "user" && m._neko_internal !== true)?.content;
   // File attachments can append many expanded lines; the original prompt's first line names the tab.
-  return isText(original) ? terminalSafeText(original.split(/\r?\n/, 1)[0].replace(/\s+/g, " ").trim(), {maxChars: 60}) : "";
+  return isText(original) ? original.split(/\r?\n/, 1)[0].replace(/\s+/g, " ").trim() : "";
+}
+
+export function sessionAutoTitle(messages: Session["messages"]): string {
+  return terminalSafeText(firstRequestLine(messages), {maxChars: SESSION_AUTO_TITLE_CHARS});
+}
+
+/** Automatic title for structured clients (ACP): no terminal escapes or "[truncated]" marker. */
+export function sessionClientAutoTitle(messages: Session["messages"]): string {
+  return plainLabel(firstRequestLine(messages), SESSION_AUTO_TITLE_CHARS);
 }
 
 function metaOf(session: Session, mtime: number, fsize: number): SessionMeta {
   const titleText = sessionAutoTitle(session.messages) || "(no messages)";
+  const clientTitleText = sessionClientAutoTitle(session.messages) || "(no messages)";
   return {
     id: session.id, createdAt: session.createdAt, updatedAt: session.updatedAt, cwd: session.cwd,
     model: session.model, branch: session.branch, bytes: session.bytes, title: session.title,
     provider: session.provider, profile: session.profile, mode: session.mode,
     reasoningEffort: session.reasoningEffort, revision: session.revision, turnState: session.turnState,
     hostProfile: session.hostProfile,
-    msgCount: session.messages?.length ?? 0, titleText, mtime, fsize,
+    msgCount: session.messages?.length ?? 0, titleText, clientTitleText, mtime, fsize,
   };
 }
 
@@ -571,6 +583,7 @@ function validMeta(value: any, expectedId: string): value is SessionMeta {
     && validMetadataText(meta.cwd, MAX_SESSION_CWD_BYTES)
     && validMetadataText(meta.model, MAX_SESSION_MODEL_BYTES)
     && validMetadataText(meta.titleText, MAX_SESSION_TITLE_BYTES)
+    && (meta.clientTitleText === undefined || validMetadataText(meta.clientTitleText, MAX_SESSION_TITLE_BYTES))
     && typeof meta.msgCount === "number" && Number.isFinite(meta.msgCount) && meta.msgCount >= 0
     && typeof meta.mtime === "number" && Number.isFinite(meta.mtime)
     && (meta.fsize === undefined || (typeof meta.fsize === "number" && Number.isFinite(meta.fsize)))
@@ -663,6 +676,15 @@ export function sessionTitle(session: Session | SessionMeta): string {
   if (session.title) return terminalSafeText(session.title, { maxChars: MAX_SESSION_TITLE_DISPLAY_CHARS });
   if ("titleText" in session) return terminalSafeText(session.titleText, { maxChars: MAX_SESSION_TITLE_DISPLAY_CHARS }); // SessionMeta (precomputed)
   return sessionAutoTitle(session.messages) || "(no messages)";
+}
+
+/** Session title for structured clients (ACP). The terminal keeps sessionTitle's escaped, marked form. */
+export function sessionClientTitle(session: Session | SessionMeta): string {
+  if (session.title) return plainLabel(session.title, MAX_SESSION_TITLE_DISPLAY_CHARS);
+  if ("titleText" in session) {
+    return session.clientTitleText ?? plainLabel(session.titleText.replace(/\.\.\. \[truncated\]$/, "…"), MAX_SESSION_TITLE_DISPLAY_CHARS);
+  }
+  return sessionClientAutoTitle(session.messages) || "(no messages)";
 }
 
 /** Rebuild the task tracker from the last durable todo_write call. The registry itself is ephemeral,

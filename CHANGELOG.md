@@ -6,6 +6,14 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Send plain ACP session titles: an overlong automatic title ends with `…`
+  instead of the terminal's `... [truncated]` marker. The terminal is unchanged.
+- Send post-turn automatic Dream notices over ACP as `session_info_update`
+  with structured `_meta["neko.dream"]` status instead of an
+  `agent_message_chunk` that clients appended to the finished reply.
+
 ## [1.9.3] - 2026-11-13
 
 ### Added

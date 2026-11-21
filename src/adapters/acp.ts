@@ -39,7 +39,7 @@ import {
   loadSession,
   newSessionId,
   recoverSessionTodos,
-  sessionTitle,
+  sessionClientTitle,
   type Session,
   type SessionLease,
   type SessionTurnState,
@@ -591,7 +591,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       ...taskOuterMeta(session),
       update: {
         sessionUpdate: "session_info_update",
-        title: sessionTitle(session.record),
+        title: sessionClientTitle(session.record),
         updatedAt: session.record.updatedAt,
         _meta: infoMeta(session),
       },
@@ -1104,7 +1104,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
       sessions: page.map((meta) => ({
         sessionId: meta.id,
         cwd: resolve(meta.cwd),
-        title: sessionTitle(meta),
+        title: sessionClientTitle(meta),
         updatedAt: meta.updatedAt,
         _meta: {
           model: meta.model,
@@ -1363,7 +1363,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
               ? session.taskMode ? "Use /task list to see tasks in this task session."
                 : listSessionMetas().filter((meta) => sameHostProfile(meta.hostProfile, hostProfile)
                 && sameRoot(comparableRoot(meta.cwd), session.root)).slice(0, 20)
-                .map((meta) => `${meta.id}  ${sessionTitle(meta)}`).join("\n") || "No durable sessions in this workspace."
+                .map((meta) => `${meta.id}  ${sessionClientTitle(meta)}`).join("\n") || "No durable sessions in this workspace."
               : runtime.registry.schemas().map((schema: any) => schema.function?.name ?? schema.name).filter(Boolean).sort().join("\n");
         await client.notify(acp.methods.client.session.update, {
           sessionId: session.sessionId,
@@ -1461,11 +1461,13 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
           sessionId: session.record.id, authority: "acp", restricted: Boolean(hostProfile) || Boolean(options.buildRuntime && !options.automaticDreamProvider),
           providerFactory: options.automaticDreamProvider,
           taskInput: taskSessions.has(session.record.id) ? () => taskSessions.get(session.record.id)!.dreamInput() : undefined,
-          notify: message => {
+          notify: (message, event) => {
             if (sessions.get(session.record.id) !== session || session.runtime !== runtime) return;
+            // The prompt already returned: a message chunk here would be glued onto the finished reply.
             void client.notify(acp.methods.client.session.update, {
-            sessionId: session.record.id, ...taskOuterMeta(session), update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: message } },
-          }).catch(() => {}); } });
+              sessionId: session.record.id, ...taskOuterMeta(session),
+              update: { sessionUpdate: "session_info_update", _meta: { "neko.dream": { ...event, message: message.trim() } } },
+            }).catch(() => {}); } });
         await persist(session, session.record.turnState);
       }
       await syncSessionState(session, client);

@@ -1083,6 +1083,40 @@ test("ACP session/list filters by canonical cwd and paginates with opaque cursor
   });
 });
 
+test("ACP session titles are plain text without the terminal truncation marker", async () => {
+  const root = tempRoot();
+  const long = `For this smoke test, reply with exactly: NEKO_OK ${"and keep going ".repeat(8)}`;
+  const now = new Date().toISOString();
+  const listedId = `${newSessionId()}-long-title`;
+  saveSession({ id: listedId, createdAt: now, updatedAt: now, cwd: root, model: "m",
+    messages: [{ role: "user", content: `${long}\u001b]52;c;x\u0007` }] });
+  const app = createNekoAcpAgent({
+    buildRuntime: async (runtimeConfig, options) => {
+      const registry = new ToolRegistry(options.root, options.mode, options.approval);
+      return {
+        agent: new Agent({ provider: { complete: async () => ({ content: "NEKO_OK", tool_calls: [] }) }, tools: registry,
+          onEvent: options.onEvent, verifyBeforeExit: false, verifyStateChangesBeforeExit: false }),
+        registry, config: runtimeConfig, close: async () => {},
+      };
+    },
+  });
+  const titles: string[] = [];
+  await acp.client({ name: "plain-titles" })
+    .onNotification(acp.methods.client.session.update, ({ params }) => {
+      if (params.update.sessionUpdate === "session_info_update" && params.update.title) titles.push(params.update.title);
+    })
+    .connectWith(app, async (ctx) => {
+      await ctx.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
+      const listed = (await ctx.request(acp.methods.agent.session.list, { cwd: root })).sessions.find((item) => item.sessionId === listedId);
+      expect(listed?.title).toBe(`${[...long].slice(0, 59).join("").trimEnd()}…`);
+      const { sessionId } = await ctx.request(acp.methods.agent.session.new, { cwd: root, mcpServers: [] });
+      const result = await ctx.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: long }] });
+      expect(result.stopReason).toBe("end_turn");
+    });
+  expect(titles.some((title) => title.includes("[truncated]"))).toBe(false);
+  expect(titles.at(-1)).toBe(`${[...long].slice(0, 59).join("").trimEnd()}…`);
+});
+
 test("ACP checkpoints redact the resolved provider credential without losing ordinary context", async () => {
   const root = tempRoot();
   const home = tempRoot();
