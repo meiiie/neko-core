@@ -2,6 +2,7 @@ import { cp, mkdir, readFile, rm, stat, readdir, utimes, writeFile } from "node:
 import { basename, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { verifyBrowserExtension } from "./verify-browser-extension.ts";
+import { windowsZipExtractCommand } from "./windows-zip.ts";
 
 const mode = process.argv.includes("--store-first-upload") ? "store-first-upload" : "developer";
 const root = resolve(import.meta.dir, "..");
@@ -49,7 +50,7 @@ try {
   try {
     const extract = process.platform === "win32"
       ? Bun.spawn(["powershell", "-NoProfile", "-Command",
-        `Expand-Archive -LiteralPath '${output.replaceAll("'", "''")}' -DestinationPath '${unpacked.replaceAll("'", "''")}'`],
+        windowsZipExtractCommand(output, unpacked)],
         { stdout: "inherit", stderr: "inherit" })
       : Bun.spawn(["unzip", "-q", output, "-d", unpacked], { stdout: "inherit", stderr: "inherit" });
     if (await extract.exited !== 0) throw new Error("could not verify extension ZIP");

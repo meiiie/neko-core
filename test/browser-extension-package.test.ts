@@ -3,6 +3,16 @@ import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { verifyBrowserExtension } from "../scripts/verify-browser-extension.ts";
+import { windowsZipExtractCommand } from "../scripts/windows-zip.ts";
+
+test("Windows ZIP extraction uses .NET with literal escaped paths", () => {
+  expect(windowsZipExtractCommand("C:\\archive.zip", "C:\\unpacked")).toBe(
+    "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('C:\\archive.zip', 'C:\\unpacked')",
+  );
+  expect(windowsZipExtractCommand("C:\\it's [a] $archive.zip", "C:\\it's $output; dir")).toBe(
+    "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('C:\\it''s [a] $archive.zip', 'C:\\it''s $output; dir')",
+  );
+});
 
 const root = resolve(import.meta.dir, "..");
 async function fixture() {
@@ -35,7 +45,7 @@ for (const mode of [[], ["--store-first-upload"]]) {
       const output = join(dir, "release.zip");
       const unpack = join(dir, "unpacked");
       const proc = process.platform === "win32"
-        ? Bun.spawn(["powershell", "-NoProfile", "-Command", `Expand-Archive -LiteralPath '${output.replaceAll("'", "''")}' -DestinationPath '${unpack.replaceAll("'", "''")}'`], { stdout: "pipe", stderr: "pipe" })
+        ? Bun.spawn(["powershell", "-NoProfile", "-Command", windowsZipExtractCommand(output, unpack)], { stdout: "pipe", stderr: "pipe" })
         : Bun.spawn(["unzip", "-q", output, "-d", unpack], { stdout: "pipe", stderr: "pipe" });
       expect(await proc.exited).toBe(0);
       await verifyBrowserExtension(unpack);
@@ -66,7 +76,7 @@ test("release workflow emits the complete browser ZIP", async () => {
     const zip = join(dir, "neko-browser-extension-v-package-test.zip");
     const unpack = join(dir, "release-unpacked");
     const p = process.platform === "win32"
-      ? Bun.spawn(["powershell", "-NoProfile", "-Command", `Expand-Archive -LiteralPath '${zip.replaceAll("'", "''")}' -DestinationPath '${unpack.replaceAll("'", "''")}'`], { stdout: "pipe", stderr: "pipe" })
+      ? Bun.spawn(["powershell", "-NoProfile", "-Command", windowsZipExtractCommand(zip, unpack)], { stdout: "pipe", stderr: "pipe" })
       : Bun.spawn(["unzip", "-q", zip, "-d", unpack], { stdout: "pipe", stderr: "pipe" });
     expect(await p.exited).toBe(0);
     expect(await readFile(join(unpack, "sidepanel.html"))).toEqual(await readFile(join(dir, "browser-extension/sidepanel.html")));
