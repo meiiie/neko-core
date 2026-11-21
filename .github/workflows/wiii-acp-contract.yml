@@ -1,0 +1,55 @@
+name: Wiii ACP contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  wiii-acp-contract:
+    name: Wiii ACP contract (PR binary)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Cache Bun downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-1.4.0-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-1.4.0-
+      - run: bun install --frozen-lockfile
+      - name: Compile this revision's standalone Neko
+        run: bun scripts/build.ts
+
+      - name: Check out Wiii contracts
+        uses: actions/checkout@v7
+        with:
+          repository: meiiie/wiii
+          ref: main
+          path: wiii
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: wiii/wiii-desktop/package-lock.json
+      - name: Install Wiii desktop test dependencies
+        working-directory: wiii/wiii-desktop
+        run: npm ci
+      - name: Run real Neko ACP contracts (no bundle fallback)
+        working-directory: wiii/wiii-desktop
+        env:
+          WIII_NEKO_CONTRACT_REQUIRED: "1"
+          WIII_NEKO_CONTRACT_BINARY: ${{ github.workspace }}/dist/neko
+        run: |
+          test -x "$WIII_NEKO_CONTRACT_BINARY"
+          npx vitest run src/__tests__/neko-chill/neko-core-acp-contract.real.test.ts --reporter=verbose
