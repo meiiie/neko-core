@@ -593,7 +593,7 @@ test.each(["resume", "discard", "side-panel resume"] as const)("queued instructi
     expect(lastFrame() ?? "").toContain("> TARGET SESSION FACT: use bun");
     stdin.write("\r"); // select the target even if startup also persisted the old session
     expect(await until(() => (lastFrame() ?? "").includes("queued input(s) held. Session picked-target"))).toBe(true);
-    expect(lastFrame() ?? "").toContain("tool root:");
+    expect(lastFrame() ?? "").toMatch(/tool\s+root:/);
     expect(lastFrame() ?? "").toContain("TARGET SESSION FACT: use bun");
     expect(provider.index).toBe(0); // selection alone does not grant queued instructions authority
     stdin.write("\r"); // blank Enter must not silently release work after a context switch
