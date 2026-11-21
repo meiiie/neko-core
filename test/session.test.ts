@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { acquireSessionLease, AsyncSessionWriter, isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, saveSessionAsync, setSessionsDir, sessionAutoTitle, sessionTitle } from "../src/adapters/session.ts";
+import { acquireSessionLease, AsyncSessionWriter, isValidSessionId, latestSession, listSessionMetas, listSessions, loadSession, newSessionId, renameSession, renderSessions, saveSession, saveSessionAsync, setSessionsDir, sessionAutoTitle, sessionClientTitle, sessionTitle } from "../src/adapters/session.ts";
 import { isJsonNumber } from "../src/shared/wire.ts";
 import { createCompletionContract } from "../src/core/completion-contract.ts";
 
@@ -455,6 +455,24 @@ test("AsyncSessionWriter binds its destination before a deferred snapshot can ch
   } finally { setSessionsDir(TEST_DIR); rmSync(other, {recursive: true, force: true}); }
 });
 
+
+test("client session titles are plain while the terminal keeps its marked form", () => {
+  const long = `For this smoke test, reply with exactly: NEKO_OK ${"x".repeat(80)}`;
+  const now = new Date().toISOString();
+  const session = {id: "clienttitle", createdAt: now, updatedAt: now, cwd: process.cwd(), model: "fixture",
+    messages: [{role: "user", content: long}]};
+  saveSession(session);
+  const expected = `${long.slice(0, 59)}…`;
+  expect(sessionTitle(session)).toEndWith("... [truncated]");
+  expect(sessionClientTitle(session)).toBe(expected);
+  const meta = listSessionMetas().find((m) => m.id === session.id)!;
+  expect(sessionTitle(meta)).toEndWith("... [truncated]");
+  expect(sessionClientTitle(meta)).toBe(expected);
+  // Index entries written before clientTitleText existed still lose the marker.
+  const {clientTitleText: _, ...legacy} = meta;
+  expect(sessionClientTitle(legacy)).toBe(`${meta.titleText.slice(0, -"... [truncated]".length)}…`);
+  expect(sessionClientTitle({...session, title: "renamed\u001b[31m"})).toBe("renamed [31m");
+});
 
 test("automatic session title uses original request metadata, not a compacted capsule", () => {
   const messages = [

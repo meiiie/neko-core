@@ -81,7 +81,7 @@ test("TUI accepts next input while Dream provider is blocked and aborts on unmou
 
 test("ACP returns end_turn and accepts next prompt while a slow Dream is outstanding", async () => {
   const home = mkdtempSync(join(tmpdir(), "auto-dream-acp-")), root = join(home, "root"); mkdirSync(root);
-  let calls = 0; let answers = 0; const updates: string[] = [];
+  let calls = 0; let answers = 0; const updates: string[] = []; const dreamUpdates: any[] = [];
   let release!: () => void; const blocked = new Promise<void>(resolve => { release = resolve; });
   const slow = dreamProvider(() => calls++);
   const cfg = loadConfig({ home, cwd: root });
@@ -97,7 +97,12 @@ test("ACP returns end_turn and accepts next prompt while a slow Dream is outstan
       return { config, registry, agent, close: async () => {} };
     } });
   try {
-    await acp.client({ name: "auto-dream-client" }).onNotification(acp.methods.client.session.update, ({ params }) => { updates.push(JSON.stringify(params)); }).connectWith(app, async ctx => {
+    await acp.client({ name: "auto-dream-client" }).onNotification(acp.methods.client.session.update, ({ params }) => {
+      updates.push(JSON.stringify(params));
+      // SAFETY: test reads the Neko extension namespace it asserts on.
+      const dream = (params.update as any)._meta?.["neko.dream"];
+      if (dream) dreamUpdates.push({ kind: params.update.sessionUpdate, ...dream });
+    }).connectWith(app, async ctx => {
       await ctx.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
       const created = await ctx.request(acp.methods.agent.session.new, { cwd: root, mcpServers: [] });
       let watchdog: ReturnType<typeof setTimeout> | undefined;
@@ -110,6 +115,14 @@ test("ACP returns end_turn and accepts next prompt while a slow Dream is outstan
       expect(next.stopReason).toBe("end_turn"); expect(answers).toBe(2);
       release();
       expect(await until(() => updates.some(text => text.includes("Dream: applied")))).toBe(true);
+      // Post-turn notices are structured status, never reply text glued onto the finished answer.
+      expect(updates.some(text => text.includes("agent_message_chunk") && text.includes("Dream:"))).toBe(false);
+      expect(dreamUpdates.every(update => update.kind === "session_info_update")).toBe(true);
+      expect(dreamUpdates.map(update => update.status)).toContain("applied");
+      const applied = dreamUpdates.find(update => update.status === "applied");
+      expect(applied.candidateId).toBeString();
+      expect(applied.message).toStartWith("Dream: applied; candidate ");
+      expect(applied.message).not.toEndWith("\n");
       await ctx.request(acp.methods.agent.session.close, { sessionId: created.sessionId });
     });
   } finally { release(); rmSync(home, { recursive: true, force: true }); }

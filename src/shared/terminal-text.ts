@@ -41,6 +41,19 @@ export function terminalSafeText(value: any, options: TerminalTextOptions = {}):
 }
 
 /**
+ * One-line label for structured (non-TTY) clients such as ACP: control characters become spaces and an
+ * overlong label ends with a plain "…" instead of the terminal diagnostic marker.
+ */
+export function plainLabel(value: any, maxChars = Number.POSITIVE_INFINITY): string {
+  const text = String(value ?? "").replace(new RegExp(CONTROL.source, "gu"), " ").replace(/\s+/g, " ").trim();
+  const limit = Math.max(0, Math.floor(maxChars));
+  const chars = [...text];
+  if (chars.length <= limit) return text;
+  if (limit === 0) return "";
+  return `${chars.slice(0, limit - 1).join("").trimEnd()}…`;
+}
+
+/**
  * Write an untrusted chunk without retaining parser state between chunks.
  *
  * Escaping each control code immediately is intentional: an OSC/CSI sequence split over multiple

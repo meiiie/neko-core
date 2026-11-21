@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { hasTerminalControl, honestTruncate, terminalSafeText, writeTerminalSafe } from "../src/shared/terminal-text.ts";
+import { hasTerminalControl, honestTruncate, plainLabel, terminalSafeText, writeTerminalSafe } from "../src/shared/terminal-text.ts";
 
 describe("terminal-safe text", () => {
   test("escapes terminal controls while preserving ordinary Unicode and optional newlines", () => {
@@ -22,6 +22,15 @@ describe("terminal-safe text", () => {
 
     expect(output).toBe("safe\\u001b]52;c;payload\\u0007then\\u001b[31mred");
     expect(hasTerminalControl(output)).toBe(false);
+  });
+
+  test("plain labels drop controls and end an overlong label with an ellipsis", () => {
+    expect(plainLabel("a\u001b]52;c;x\u0007b\n\tc")).toBe("a ]52;c;x b c");
+    expect(plainLabel("a".repeat(100), 24)).toBe(`${"a".repeat(23)}…`);
+    expect(plainLabel("word ".repeat(10), 8)).toBe("word wo…");
+    expect(plainLabel("😀".repeat(5), 3)).toBe("😀😀…");
+    expect(plainLabel("short", 24)).toBe("short");
+    expect(plainLabel("abc", 0)).toBe("");
   });
 
   test("the returned bound includes its truncation marker", () => {

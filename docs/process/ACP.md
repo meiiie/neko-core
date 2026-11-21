@@ -183,6 +183,13 @@ the canonical Agent messages and replays user/assistant/tool history with stable
 responds. `session/resume` restores the same model context without replay, for clients that already retain the
 transcript. `session/list` supports canonical-cwd filtering and bounded cursor pagination.
 
+Session titles in `session/list` and `session_info_update` are plain one-line text: control characters become
+spaces and an automatic title longer than 60 characters ends with `…`. The terminal keeps its escaped form with
+the `... [truncated]` marker. Automatic Dream runs after the prompt has returned, so its notices are not reply
+text: each arrives as a `session_info_update` whose `_meta["neko.dream"]` holds `status` (`running`, `busy`,
+`empty`, `failed`, or the apply status such as `applied`), optional `candidateId` or `reason`, and the
+human-readable `message`.
+
 The adapter checkpoints the existing atomic session store before provider waits, before a materialized tool
 call executes, after tool results, at Agent crash-journal checkpoints, and on completion/cancel/error/close.
 The store keeps the previous valid checkpoint as a fallback and uses a cross-process single-writer lease. If

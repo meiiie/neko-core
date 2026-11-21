@@ -29,6 +29,13 @@ export function legacyDreamScope(sessionId: string, root: string, authority = "l
   return createTaskScope(id, root);
 }
 
+export interface AutomaticDreamEvent {
+  /** busy, running, empty, failed, or the apply status (applied, ...). */
+  status: string;
+  candidateId?: string;
+  reason?: string;
+}
+
 export interface AutomaticDreamOptions {
   cfg: NekoConfig;
   registry: ToolRegistry;
@@ -38,7 +45,8 @@ export interface AutomaticDreamOptions {
   signal?: AbortSignal;
   /** Restricted embedding hosts must opt in through their own authority contract. */
   restricted?: boolean;
-  notify?: (message: string) => void;
+  /** `event` is the structured form of the same notice for non-terminal hosts. */
+  notify?: (message: string, event: AutomaticDreamEvent) => void;
   providerFactory?: (cfg: NekoConfig) => Provider;
   taskInput?: () => TaskRuntimeInput;
   /** Internal immutable admitted snapshot; live taskInput remains the activation guard. */
@@ -118,7 +126,7 @@ export function scheduleAutomaticDream(options: AutomaticDreamOptions): void {
     providerFactory: () => (options.providerFactory ?? getProvider)(providerConfig),
     isCurrent: () => current.generation === generation && identity === JSON.stringify([
       options.cfg.provider, options.cfg.model, options.cfg.baseUrl, options.cfg.resolvedHome]) && (options.isCurrent?.() ?? true),
-    notify: message => { if (current.generation === generation) options.notify?.(message); },
+    notify: (message, event) => { if (current.generation === generation) options.notify?.(message, event); },
   } };
   startWorker(current);
 }
@@ -169,7 +177,7 @@ export async function runAutomaticDream(options: AutomaticDreamOptions): Promise
   if (options.restricted || dreamMode(cfg) !== "auto" || registry.mode === "plan"
     || !registry.isToolAvailable("memory") || !memoryEnabled(cfg.resolvedHome)
     || options.signal?.aborted || !agent.completionStatus.ok) return "skipped";
-  const notify = (message: string) => { try { options.notify?.(message); } catch { /* UI delivery cannot change memory publication. */ } };
+  const notify = (message: string, event: AutomaticDreamEvent) => { try { options.notify?.(message, event); } catch { /* UI delivery cannot change memory publication. */ } };
   let provider: Provider | undefined;
   let phase = "input_rejected";
   let releaseLease: (() => void) | undefined;
@@ -197,11 +205,11 @@ export async function runAutomaticDream(options: AutomaticDreamOptions): Promise
     const automaticDigest = createHash("sha256").update(JSON.stringify(input.sources
       .slice(input.coverage.retained ?? 0).map(source => [source.kind, source.text]))).digest("hex");
     releaseLease = store.acquireAutomaticLease();
-    if (!releaseLease) { notify("Dream: skipped (another automatic request owns this session).\n"); return "busy"; }
+    if (!releaseLease) { notify("Dream: skipped (another automatic request owns this session).\n", { status: "busy" }); return "busy"; }
     if (!store.claimAutomatic(automaticDigest)) return "unchanged";
     record("running");
     phase = "provider_error";
-    notify("Dream: consolidating this session automatically (one additional model request; set dream_mode=manual or off to disable).\n");
+    notify("Dream: consolidating this session automatically (one additional model request; set dream_mode=manual or off to disable).\n", { status: "running" });
     const bounded = cfg.withModel(cfg.model);
     bounded.data.max_tokens = cfg.maxTokens > 0 ? Math.min(cfg.maxTokens, 4096) : 4096;
     bounded.data.max_retries = 0;
@@ -219,7 +227,7 @@ export async function runAutomaticDream(options: AutomaticDreamOptions): Promise
       maxInputTokens: bounded.contextWindow - bounded.maxTokens - 2000,
       onUsage: usage => agent.cost.add(usage) });
     phase = "stale_context";
-    if (!result.candidate) { record("empty"); notify("Dream: nothing to retain.\n"); return "empty"; }
+    if (!result.candidate) { record("empty"); notify("Dream: nothing to retain.\n", { status: "empty" }); return "empty"; }
     options.signal?.throwIfAborted();
     if (options.isCurrent?.() === false) throw new Error("Dream generation changed");
     if (dreamMode(cfg) !== "auto" || String(registry.mode) === "plan" || !registry.isToolAvailable("memory") || registry.dreamScope !== scope
@@ -231,14 +239,14 @@ export async function runAutomaticDream(options: AutomaticDreamOptions): Promise
     if (options.isCurrent?.() === false) throw new Error("Dream generation changed");
     const status = store.apply(result.candidate.id, current, automaticDigest, revision);
     record(status, undefined, result.candidate.id);
-    notify(`Dream: ${status}; candidate ${result.candidate.id}. Inspect/rollback with neko dream show|rollback ${registry.taskScope ? options.sessionId : `${options.authority === "acp" ? "acp-session" : "session"}:${options.sessionId}`} <candidate-id>.\n`);
+    notify(`Dream: ${status}; candidate ${result.candidate.id}. Inspect/rollback with neko dream show|rollback ${registry.taskScope ? options.sessionId : `${options.authority === "acp" ? "acp-session" : "session"}:${options.sessionId}`} <candidate-id>.\n`, { status, candidateId: result.candidate.id });
     return status;
   } catch (error) {
     const name = error instanceof Error ? error.name : "";
     const reason = options.signal?.aborted ? "cancelled" : name === "TimeoutError" ? "timeout" : error instanceof DreamPreparationError ? error.reason : phase;
     record("failed", reason);
     // Never echo arbitrary exception text, model output, paths, or credentials.
-    notify(`Dream: consolidation did not activate (${reason}); previous memory remains unchanged. Inspect the session before retrying.\n`);
+    notify(`Dream: consolidation did not activate (${reason}); previous memory remains unchanged. Inspect the session before retrying.\n`, { status: "failed", reason });
     return "failed";
   } finally {
     try { await provider?.dispose?.(); } catch { /* the foreground answer remains available */ }
