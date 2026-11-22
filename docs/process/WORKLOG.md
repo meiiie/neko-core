@@ -1,5 +1,40 @@
 # Neko Core work log
 
+## 2026-11-22 - v1.9.4 release preparation
+
+Prepared from main `d725b202009b2420dc9977378017de65badf7537`, including #106
+and #107. The candidate skips tool-free pre-finish verification, recovers stale
+cross-PID-namespace writer leases and fences displaced ACP checkpoint writers.
+Live legacy locks remain conservative; real Wiii/bwrap crash/reload acceptance
+is unverified. ACP title and post-turn Dream notice fixes from #104 are included.
+Version metadata, dated changelog, roadmap and site fallback are coordinated;
+final binary sizes and site deployment remain pending. See
+[candidate record](RELEASE-1.9.4.md).
+
+Linux candidate verification with Bun `1.4.0+34cbb9a40` and Node `22.23.5`:
+typecheck and lint exit 0; full suite 2,210 pass, 40 skip, 0 fail, 26,684
+assertions across 226 files. The known long-path chat UI failures did not occur.
+Doctor and policy exit 0 with explicit missing-model/key/browser, untrusted
+project, non-TTY and unconfined-auto warnings; policy verdict is WARN, not a
+clean policy configuration. Build, compiled render, real-PTY input, ACP v1,
+startup/exit lifecycle and startup-input probes pass. Gitleaks `8.30.1` redacted
+history scan (991 commits) and release-diff scan report no leaks found using the
+repository configuration. No runtime or test code changed during preparation.
+
+PR #108 CI passed on Ubuntu, macOS and Windows for candidate `0800687`, including
+the real-binary Wiii ACP contract. Owner-supplied Windows Server 2022 evidence
+with Bun 1.4.0: `e2e-conpty-ghost.ts dist/neko.exe` passed three times against a
+loopback SSE fixture, with footer-copies=1 at every checkpoint and typed-echo
+latencies of 127/127/179 ms. That VM's local `bun run build` failed only its
+startup-lifecycle step: "terminal restore did not finish before the resume
+handoff" (4/4), with no `ESC[?1049l` in the ConPTY stream. The same step passed
+in windows-latest CI (Server 2025); a Server 2022 ConPTY difference is unproven,
+not an established cause or a full local Windows build pass.
+
+Real Wiii/bwrap reload acceptance and publication remain unverified. No scroll
+benchmark is needed for this non-rendering patch. No tag, release or deployment
+was created by this preparation.
+
 ## 2026-11-13 - living memory scoped slash-command hardening (v1.9.3 candidate)
 
 - Reproduced /nho reading the global journal and /ngu writing it from a task-scoped command context using synthetic data. Both slash handlers now fail closed for scoped tasks, including backfill and on/off.
