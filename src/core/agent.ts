@@ -46,7 +46,6 @@ import {
   estimateRequestTokens,
   estimateTokens,
   isFreshFactWebTool,
-  requiresFreshFactVerification,
   SESSION_CONTEXT_MARK,
   splitSystemContext,
   type EventHook,
@@ -84,7 +83,6 @@ export {
   estimateRequestTokens,
   estimateTokens,
   isFreshFactWebTool,
-  requiresFreshFactVerification,
 };
 export { isValidationBashCommand } from "./validation-command.ts";
 export type { EventHook, AgentOptions };
@@ -1496,9 +1494,6 @@ export class Agent {
     let stateVerificationEvidence = false;
     let usedTools = false;
     let completionVerificationEvidence = false;
-    const freshFactVerificationRequired = !internal && requiresFreshFactVerification(instruction);
-    let freshFactVerificationRequested = false;
-    let freshFactVerificationEvidence = false;
     let offlineSovereigntyAnswerRequested = false;
     let nextReasoningEffort: string | undefined;
     let consecutiveReadSteps = 0; // adaptive effort: only lower reasoning on a SUSTAINED all-read pattern
@@ -1519,7 +1514,6 @@ export class Agent {
       this.noteFailedOrPassedCheck(call, observation);
       this.cost.efficiency.observeTool(JSON.stringify([call.name, call.arguments]), isText(observation) ? observation : null,
         changesState, failed, !this.isMechanicalReadCall(call) || this.isRepeatableWaitCall(call));
-      if (!failed && isFreshFactWebTool(call.name)) freshFactVerificationEvidence = true;
       const validationCommand = call.name.toLowerCase() === "bash"
         && (isValidationBashCommand(String(call.arguments?.command ?? ""))
           || this.tools.isValidationBashCommand?.(String(call.arguments?.command ?? ""), call.arguments) === true);
@@ -1820,21 +1814,6 @@ export class Agent {
               "question now from the built-in Vietnam sovereignty capsule, explicitly label it as the dated " +
               "offline snapshot, and include verified_at. If the capsule does not contain the requested fact, " +
               "say that specific limitation instead of deferring the whole answer.",
-          });
-          continue;
-        }
-        if (freshFactVerificationRequired && hasFreshFactWebTool && !freshFactVerificationEvidence
-          && !freshFactVerificationRequested && step < runStepLimit - 1) {
-          this.cost.efficiency.verificationNudge();
-          freshFactVerificationRequested = true;
-          verifiedExit = true; // this evidence gate subsumes the generic inspection-only gate
-          this.messages.push({
-            role: "user",
-            _neko_internal: true,
-            content: "CURRENT-FACT VERIFICATION REQUIRED: this question concerns public facts that can change. " +
-              "Do not answer from training memory. Read a current authoritative primary source with web_fetch, " +
-              "using web_search if needed to locate it. Cross-check ambiguous, conflicting, or consequential facts, and distinguish the legal effective date from an operational date " +
-              "when relevant. If current evidence is unavailable or conflicts, say so plainly instead of guessing.",
           });
           continue;
         }
