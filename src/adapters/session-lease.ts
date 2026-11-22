@@ -153,7 +153,14 @@ export function acquireFileLease(path: string, id: string, overrides: Partial<Le
     if (released) return;
     released = true;
     stop();
-    try { guarded(() => { if (snapshot(path).body.token === token) unlinkSync(path); }); }
+    const removeOwnedLock = () => { if (snapshot(path).body.token === token) unlinkSync(path); };
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try { guarded(removeOwnedLock); return; }
+      catch {
+        if (attempt < 3) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+    }
+    try { removeOwnedLock(); }
     catch { /* A replaced/missing lock is not ours to remove. */ }
   } };
 }

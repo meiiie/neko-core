@@ -123,6 +123,20 @@ test("an old recovery guard owned by a live same-namespace process is not broken
   expect(f.acquire).toThrow("active writer");
 });
 
+test("release removes only its token while another live owner holds the recovery guard", () => {
+  for (const replaced of [false, true]) {
+    const f = fixture(); const lease = f.acquire();
+    if (replaced) f.write({ token: "replacement" });
+    writeFileSync(`${f.path}.recovery`, JSON.stringify({ pid: 1, token: "other-guard", startTime: "200", pidNamespace: "pid:[ours]" }));
+    lease.release();
+    expect(f.stopped()).toBe(true);
+    expect(existsSync(f.path)).toBe(replaced);
+    if (replaced) expect(JSON.parse(readFileSync(f.path, "utf8")).token).toBe("replacement");
+    expect(JSON.parse(readFileSync(`${f.path}.recovery`, "utf8")).token).toBe("other-guard");
+    lease.release();
+  }
+});
+
 test("a stale-check replacement is not unlinked", () => {
   const f = fixture(); f.write();
   f.env.alive = () => { f.write({ token: "new-writer" }); return false; };
