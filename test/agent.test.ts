@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Agent, clampObservation, classifyToolObservation, estimateRequestTokens, estimateTokens, isValidationBashCommand, MAX_OBS_CHARS, unwrapToolArgs } from "../src/core/agent.ts";
-import { COMPACTION_PROMPT, DEFAULT_SYSTEM_PROMPT, isFreshFactWebTool, requiresFreshFactVerification } from "../src/core/agent-constants.ts";
+import { COMPACTION_PROMPT, DEFAULT_SYSTEM_PROMPT, isFreshFactWebTool } from "../src/core/agent-constants.ts";
 import type { CompletionSupervisor } from "../src/core/completion-contract.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import { ProviderAttemptError, type Provider, type ProviderResponse } from "../src/core/ports.ts";
@@ -103,25 +103,7 @@ test("system prompt requires observable acceptance criteria before implementatio
   expect(DEFAULT_SYSTEM_PROMPT).toContain("Reuse evidence while its relevant state and assumptions remain unchanged");
 });
 
-test("mutable public facts include administrative status even when 'current' is omitted", () => {
-  expect(requiresFreshFactVerification("Hoàng Sa thuộc đơn vị hành chính nào?")).toBe(true);
-  expect(requiresFreshFactVerification("Trường Sa hiện là huyện đảo hay đặc khu?")).toBe(true);
-  expect(requiresFreshFactVerification("Hoang Sa hien la huyen dao hay dac khu?")).toBe(true);
-  expect(requiresFreshFactVerification("HS/TS hiện nay là huyện đảo hay đặc khu?")).toBe(true);
-  expect(requiresFreshFactVerification("Which province is this district currently part of?")).toBe(true);
-  expect(requiresFreshFactVerification("Ai là chủ tịch nước hiện nay?")).toBe(true);
-  expect(requiresFreshFactVerification("What does the current law say?")).toBe(true);
-  expect(requiresFreshFactVerification("When does the new regulation take effect?")).toBe(true);
-  expect(requiresFreshFactVerification("What is the latest TypeScript version?")).toBe(true);
-  expect(requiresFreshFactVerification("Is there a new release of Neko?")).toBe(true);
-  expect(requiresFreshFactVerification("latest release")).toBe(true);
-  expect(requiresFreshFactVerification("release mới")).toBe(true);
-  expect(requiresFreshFactVerification("Phiên bản hiện tại của TypeScript là gì?")).toBe(true);
-  expect(requiresFreshFactVerification("kiểm tra máy tính: status -> observe -> acquire -> release")).toBe(false);
-  expect(requiresFreshFactVerification("Mở trình duyệt rồi status, observe và release")).toBe(false);
-  expect(requiresFreshFactVerification("fix the current value in src/config.ts")).toBe(false);
-  expect(requiresFreshFactVerification("rename current-price.ts")).toBe(false);
-  expect(requiresFreshFactVerification("What version does package.json declare?")).toBe(false);
+test("web readers and Accuracy guidance cover mutable public facts", () => {
   expect(isFreshFactWebTool("web_search")).toBe(true);
   expect(isFreshFactWebTool("mcp__browser__web_fetch")).toBe(true);
   expect(isFreshFactWebTool("read_file")).toBe(false);
@@ -129,11 +111,16 @@ test("mutable public facts include administrative status even when 'current' is 
   expect(DEFAULT_SYSTEM_PROMPT).toContain("effective/operational date");
 });
 
-test("mutable-fact gate rejects a memory-only administrative answer until web evidence exists", async () => {
+test.each([
+  "What is the current price of gold?",
+  "What is the latest TypeScript version?",
+  "Bạn đánh giá câu trả lời này thế nào?",
+  "Lịch sử Việt Nam có gì thú vị?",
+])("tool-free answer finishes in one turn without a current-fact continuation: %s", async (question) => {
+  const answer = "Direct answer.";
   const provider = new ScriptedProvider([
-    { content: "Hoàng Sa là huyện đảo.", tool_calls: [] },
-    { content: null, tool_calls: [{ id: "fresh", name: "web_search", arguments: { query: "Hoàng Sa đơn vị hành chính hiện nay" } }] },
-    { content: "Hoàng Sa hiện là đặc khu; nguồn chính thức đã được kiểm tra.", tool_calls: [] },
+    { content: answer, tool_calls: [] },
+    { content: "unnecessary second reply", tool_calls: [] },
   ]);
   const agent = new Agent({
     // SAFETY: test-built provider fixture; its scripted complete() shape is fully controlled here.
@@ -141,20 +128,64 @@ test("mutable-fact gate rejects a memory-only administrative answer until web ev
     // SAFETY: test-built tool registry fixture; schema and execution results are fully controlled here.
     tools: {
       schemas: () => [{ type: "function", function: { name: "web_search", parameters: { type: "object" } } }],
-      execute: async () => "Cổng Thông tin điện tử Chính phủ: Nghị quyết 1659/NQ-UBTVQH15, 16/06/2025",
+      execute: async () => { throw new Error("Tool-free answer must not execute tools"); },
     } as any,
     maxSteps: 5,
+    verifyBeforeExit: true,
   });
 
-  expect(await agent.run("Hoàng Sa thuộc đơn vị hành chính nào?")).toBe("Hoàng Sa hiện là đặc khu; nguồn chính thức đã được kiểm tra.");
-  expect(provider.index).toBe(3);
-  expect(agent.messages.filter((message: any) => String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toHaveLength(1);
+  expect(await agent.run(question)).toBe(answer);
+  expect(provider.index).toBe(1);
+  expect(agent.messages.filter((message) => message._neko_internal
+    && String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toHaveLength(0);
 });
 
-test("mutable-fact gate credits proactive web evidence and never loops when web is unavailable", async () => {
+test.each([false, true])("sovereignty freshness requests one web pass even if the model skips it: %s", async (useWeb) => {
+  const provider = new ScriptedProvider([
+    { content: "Hoàng Sa là huyện đảo.", tool_calls: [] },
+    ...(useWeb ? [{ content: null, tool_calls: [{ id: "fresh", name: "web_search", arguments: { query: "Hoàng Sa đơn vị hành chính" } }] }] : []),
+    { content: "Final answer.", tool_calls: [] },
+    { content: "unnecessary extra reply", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    // SAFETY: test-built provider fixture.
+    provider: provider as any,
+    // SAFETY: test-built web registry fixture.
+    tools: {
+      schemas: () => [{ type: "function", function: { name: "web_search", parameters: { type: "object" } } }],
+      execute: async () => "official current record",
+    } as any,
+    maxSteps: 6,
+    verifyBeforeExit: true,
+  });
+  expect(await agent.run("Hoàng Sa thuộc đơn vị hành chính nào?")).toBe("Final answer.");
+  expect(provider.index).toBe(useWeb ? 3 : 2);
+  expect(agent.messages.filter((message) => message._neko_internal
+    && String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toHaveLength(1);
+});
+
+test("sovereignty freshness skips internal turns", async () => {
+  const provider = new ScriptedProvider([{ content: "Internal answer.", tool_calls: [] }]);
+  const agent = new Agent({
+    // SAFETY: test-built provider fixture.
+    provider: provider as any,
+    // SAFETY: test-built web registry fixture.
+    tools: {
+      schemas: () => [{ type: "function", function: { name: "web_fetch", parameters: { type: "object" } } }],
+      execute: async () => "official current record",
+    } as any,
+    maxSteps: 4,
+  });
+  expect(await agent.run("Hoàng Sa thuộc đơn vị hành chính nào?", undefined, undefined, true)).toBe("Internal answer.");
+  expect(provider.index).toBe(1);
+  expect(agent.messages.some((message) => String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toBe(false);
+});
+
+test.each(["official current record", "Error: web unavailable"])("sovereignty freshness credits only successful proactive web evidence: %s", async (observation) => {
   const proactive = new ScriptedProvider([
     { content: null, tool_calls: [{ id: "fresh", name: "web_fetch", arguments: { url: "https://example.gov" } }] },
     { content: "Current answer with primary evidence.", tool_calls: [] },
+    { content: "Unable to verify current facts.", tool_calls: [] },
   ]);
   const withWeb = new Agent({
     // SAFETY: test-built provider fixture; its scripted complete() shape is fully controlled here.
@@ -162,22 +193,28 @@ test("mutable-fact gate credits proactive web evidence and never loops when web 
     // SAFETY: test-built tool registry fixture; schema and execution results are fully controlled here.
     tools: {
       schemas: () => [{ type: "function", function: { name: "web_fetch", parameters: { type: "object" } } }],
-      execute: async () => "official current record",
+      execute: async () => observation,
     } as any,
     maxSteps: 4,
   });
-  expect(await withWeb.run("Trường Sa hiện là huyện đảo hay đặc khu?")).toBe("Current answer with primary evidence.");
-  expect(proactive.index).toBe(2);
-  expect(withWeb.messages.some((message: any) => String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toBe(false);
+  const failed = observation.startsWith("Error:");
+  expect(await withWeb.run("Trường Sa hiện là huyện đảo hay đặc khu?"))
+    .toBe(failed ? "Unable to verify current facts." : "Current answer with primary evidence.");
+  expect(proactive.index).toBe(failed ? 3 : 2);
+  expect(withWeb.messages.filter((message) => String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toHaveLength(failed ? 1 : 0);
+});
 
+test("sovereignty answer finishes without a freshness turn when web is unavailable", async () => {
+  const offlineProvider = new ScriptedProvider([{ content: "I cannot verify this runtime.", tool_calls: [] }]);
   const withoutWeb = new Agent({
     // SAFETY: test-built provider fixture; its scripted complete() shape is fully controlled here.
-    provider: new ScriptedProvider([{ content: "I cannot verify this runtime.", tool_calls: [] }]) as any,
+    provider: offlineProvider as any,
     // SAFETY: test-built empty tool surface; both methods are fully controlled here.
     tools: { schemas: () => [], execute: async () => "" } as any,
     maxSteps: 4,
   });
   expect(await withoutWeb.run("Hoàng Sa thuộc đơn vị hành chính nào?")).toBe("I cannot verify this runtime.");
+  expect(offlineProvider.index).toBe(1);
   expect(withoutWeb.messages.some((message: any) => String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toBe(false);
 });
 

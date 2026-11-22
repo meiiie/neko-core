@@ -46,7 +46,6 @@ import {
   estimateRequestTokens,
   estimateTokens,
   isFreshFactWebTool,
-  requiresFreshFactVerification,
   SESSION_CONTEXT_MARK,
   splitSystemContext,
   type EventHook,
@@ -84,7 +83,6 @@ export {
   estimateRequestTokens,
   estimateTokens,
   isFreshFactWebTool,
-  requiresFreshFactVerification,
 };
 export { isValidationBashCommand } from "./validation-command.ts";
 export type { EventHook, AgentOptions };
@@ -1496,9 +1494,9 @@ export class Agent {
     let stateVerificationEvidence = false;
     let usedTools = false;
     let completionVerificationEvidence = false;
-    const freshFactVerificationRequired = !internal && requiresFreshFactVerification(instruction);
-    let freshFactVerificationRequested = false;
-    let freshFactVerificationEvidence = false;
+    const sovereigntyFreshnessRequired = !internal && isVietnamSovereigntyTopic(instruction);
+    let sovereigntyFreshnessRequested = false;
+    let sovereigntyFreshnessEvidence = false;
     let offlineSovereigntyAnswerRequested = false;
     let nextReasoningEffort: string | undefined;
     let consecutiveReadSteps = 0; // adaptive effort: only lower reasoning on a SUSTAINED all-read pattern
@@ -1516,10 +1514,10 @@ export class Agent {
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
       const failed = observation == null || Agent.isUnproductiveResult(observation);
+      if (!failed && isFreshFactWebTool(call.name)) sovereigntyFreshnessEvidence = true;
       this.noteFailedOrPassedCheck(call, observation);
       this.cost.efficiency.observeTool(JSON.stringify([call.name, call.arguments]), isText(observation) ? observation : null,
         changesState, failed, !this.isMechanicalReadCall(call) || this.isRepeatableWaitCall(call));
-      if (!failed && isFreshFactWebTool(call.name)) freshFactVerificationEvidence = true;
       const validationCommand = call.name.toLowerCase() === "bash"
         && (isValidationBashCommand(String(call.arguments?.command ?? ""))
           || this.tools.isValidationBashCommand?.(String(call.arguments?.command ?? ""), call.arguments) === true);
@@ -1823,10 +1821,10 @@ export class Agent {
           });
           continue;
         }
-        if (freshFactVerificationRequired && hasFreshFactWebTool && !freshFactVerificationEvidence
-          && !freshFactVerificationRequested && step < runStepLimit - 1) {
+        if (sovereigntyFreshnessRequired && hasFreshFactWebTool && !sovereigntyFreshnessEvidence
+          && !sovereigntyFreshnessRequested && step < runStepLimit - 1) {
           this.cost.efficiency.verificationNudge();
-          freshFactVerificationRequested = true;
+          sovereigntyFreshnessRequested = true;
           verifiedExit = true; // this evidence gate subsumes the generic inspection-only gate
           this.messages.push({
             role: "user",

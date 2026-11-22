@@ -6,6 +6,13 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Finish ordinary tool-free answers in one model turn without a hidden current-fact
+  verification continuation triggered by question wording. The Accuracy prompt still directs
+  the model to verify volatile public facts online; the narrow Hoàng Sa/Trường Sa web
+  freshness gate remains.
+
 ## [1.9.4] - 2026-11-22
 
 ### Fixed
@@ -587,7 +594,7 @@ All notable changes to Neko Core are documented here. The format follows
 - **Hoàng Sa and Trường Sa now have selectively injected, source-backed core knowledge.** Neko carries its
   Vietnamese sovereignty identity plus canonical geography even offline, while dated administrative snapshots
   remain subordinate to a later verified Vietnamese legal instrument. Unrelated coding turns receive no extra
-  context, and the existing fresh-fact gate still checks current legal or administrative questions online.
+  context, and the sovereignty web freshness gate checks these questions online when web tools are available.
   Routing accepts diacritic-free names, international names, contextual `HS`/`TS`, and the clear descriptive
   phrase for Vietnam's two archipelagos in the East Sea; ambiguous bare abbreviations remain inert. If an offline
   model only promises a lookup, one bounded recovery asks it to answer from the dated snapshot instead.
