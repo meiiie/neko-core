@@ -167,7 +167,7 @@ test("budgeted reports count harness admissions rather than provider-internal ca
     }),
   });
   expect(report.calls).toBe(admissions);
-  expect(report.calls).toBe(2);
+  expect(report.calls).toBe(1);
 });
 
 test("external artifact grading still runs after the controller exhausts its call budget", async () => {
