@@ -58,6 +58,37 @@ function fakeRuntimeFactory(home: string) {
 
 type FakeRuntime = ReturnType<ReturnType<typeof fakeRuntimeFactory>["runtimeFactory"]>;
 
+for (const failure of ["quiescence", "persist"] as const) {
+  test(`close retains its writer after ${failure} failure until explicit recovery`, async () => {
+    const f = fixture();
+    const { runtimeFactory } = fakeRuntimeFactory(f.home);
+    let runtimeClosed = false;
+    const session = await createTaskSession({ home: f.home, root: f.root, authorityId: "local",
+      configId: CONFIG_ID, label: "close failure", runtimeFactory: input => ({
+        ...runtimeFactory(input),
+        assertQuiescent() { if (failure === "quiescence") throw new Error("close fixture"); },
+        close() { runtimeClosed = true; },
+      }) });
+    const path = join(f.home, ".neko-core/task-sessions", `${session.id}.json`);
+    const lock = join(f.home, ".neko-core/task-sessions", `${session.id}.lock`);
+    const lockBytes = readFileSync(lock, "utf8");
+    try {
+      if (failure === "persist") {
+        const checkpoint = JSON.parse(readFileSync(path, "utf8"));
+        checkpoint.revision++;
+        writeFileSync(path, JSON.stringify(checkpoint));
+      }
+      const checkpointBytes = readFileSync(path, "utf8");
+      await expect(session.close()).rejects.toThrow();
+      expect(runtimeClosed).toBe(false);
+      expect(readFileSync(lock, "utf8")).toBe(lockBytes);
+      expect(readFileSync(path, "utf8")).toBe(checkpointBytes);
+      await expect(loadTaskSession({ home: f.home, root: f.root, authorityId: "local",
+        configId: CONFIG_ID, sessionId: session.id, runtimeFactory })).rejects.toBeInstanceOf(TaskSessionWriterUnavailableError);
+    } finally { f.cleanup(); }
+  });
+}
+
 test("explicit A to B to A switches fresh runtime, transcript and scoped memory in one root", async () => {
   const f = fixture();
   const { runtimeFactory, activations } = fakeRuntimeFactory(f.home);
