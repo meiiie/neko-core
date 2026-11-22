@@ -1544,6 +1544,10 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
     const key = connectionKey(connection.client);
     const cleanup = connection.closed.finally(async () => {
       computerCapabilities.delete(key);
+      for (const session of sessions.values()) {
+        cancelAutomaticDream(session.runtime.registry);
+        session.pending?.abort();
+      }
       await Promise.allSettled([...taskTransitions.values()]);
       const open = [...sessions.values()].filter((session) => !session.taskMode);
       const scoped = [...taskSessions.values()];
@@ -1573,6 +1577,16 @@ export async function runAcpServer(options: AcpRuntimeFactoryOptions = {}): Prom
   const previousWarn = console.warn;
   console.log = (...values: unknown[]) => stderrLog(...values);
   console.warn = (...values: unknown[]) => stderrLog(...values);
+  const signals = ["SIGTERM", "SIGINT", "SIGHUP"] as const;
+  let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
+  const boundShutdown = () => {
+    shutdownTimer ??= setTimeout(() => {
+      stderrLog("ACP cleanup timed out; explicit recovery may be required.");
+      process.exit(1);
+    }, 5000);
+    shutdownTimer.unref();
+  };
+  let shutdown: (() => void) | undefined;
   try {
     const output = Writable.toWeb(process.stdout);
     // SAFETY: Node's toWeb stream and the SDK's web ReadableStream are the same runtime object;
@@ -1586,9 +1600,19 @@ export async function runAcpServer(options: AcpRuntimeFactoryOptions = {}): Prom
         options.trackCleanup?.(task);
       },
     }).connect(acp.ndJsonStream(output, input));
-    await connection.closed;
-    await Promise.all(cleanupTasks);
+    shutdown = () => {
+      boundShutdown();
+      connection.close();
+    };
+    for (const signal of signals) process.on(signal, shutdown);
+    try { await connection.closed; }
+    finally {
+      boundShutdown();
+      await Promise.allSettled(cleanupTasks);
+    }
   } finally {
+    if (shutdown) for (const signal of signals) process.off(signal, shutdown);
+    if (shutdownTimer) clearTimeout(shutdownTimer);
     console.log = previousLog;
     console.warn = previousWarn;
   }
