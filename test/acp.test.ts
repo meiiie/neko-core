@@ -1046,6 +1046,39 @@ test("ACP durable session enforces canonical cwd and one active writer, then rel
   });
 });
 
+test("ACP refuses persistence after its writer lock is replaced", async () => {
+  const root = tempRoot();
+  const cfg = loadConfig({ cwd: root, home: tempRoot() });
+  const app = createNekoAcpAgent({
+    config: cfg,
+    buildRuntime: async (runtimeConfig, options) => {
+      const registry = new ToolRegistry(options.root, options.mode, options.approval);
+      return {
+        agent: new Agent({ provider: { complete: async () => ({ content: "ok", tool_calls: [] }) }, tools: registry, onEvent: options.onEvent }),
+        registry, config: runtimeConfig, close: async () => {},
+      };
+    },
+  });
+  await acp.client({ name: "lost-writer" }).connectWith(app, async (ctx) => {
+    await ctx.request(acp.methods.agent.initialize, { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
+    const { sessionId } = await ctx.request(acp.methods.agent.session.new, { cwd: root, mcpServers: [] });
+    const path = join(sessionStore, `${sessionId}.json`);
+    const lockPath = `${path}.lock`;
+    const replacement = JSON.stringify({ pid: process.pid, token: "replacement" });
+    writeFileSync(lockPath, replacement);
+    writeFileSync(`${path}.bak`, "other-writer-backup");
+    const primary = readFileSync(path, "utf8");
+    const backup = readFileSync(`${path}.bak`, "utf8");
+    await expect(ctx.request(acp.methods.agent.session.prompt, {
+      sessionId, prompt: [{ type: "text", text: "must not save" }],
+    })).rejects.toThrow("lost its writer lock");
+    await expect(ctx.request(acp.methods.agent.session.close, { sessionId })).rejects.toThrow("lost its writer lock");
+    expect(readFileSync(path, "utf8")).toBe(primary);
+    expect(readFileSync(`${path}.bak`, "utf8")).toBe(backup);
+    expect(readFileSync(lockPath, "utf8")).toBe(replacement);
+  });
+});
+
 test("ACP session/list filters by canonical cwd and paginates with opaque cursors", async () => {
   const root = tempRoot();
   const other = tempRoot();
