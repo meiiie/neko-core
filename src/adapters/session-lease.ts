@@ -143,7 +143,7 @@ export function acquireFileLease(path: string, id: string, overrides: Partial<Le
     try {
       guarded(() => {
         assertOwnership();
-        const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        const fd = openSync(path, constants.O_RDWR | (process.platform === "win32" ? 0 : (constants.O_NOFOLLOW ?? 0)));
         try { const time = new Date(env.now()); futimesSync(fd, time, time); }
         finally { closeSync(fd); }
       });

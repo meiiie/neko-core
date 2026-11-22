@@ -565,7 +565,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         })).digest("hex"),
       };
       return session.record;
-    }).catch((error: unknown) => {
+    }).catch((error) => {
       if (error instanceof SessionLeaseLostError) throw new acp.RequestError(-32000, error.message);
       throw error;
     });
