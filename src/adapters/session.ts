@@ -372,12 +372,13 @@ export async function saveSessionAsync(session: Session): Promise<void> {
   return saveSessionInDirectory(session, sessionsDir());
 }
 
-function capturedSessionSaver(): (session: Session) => Promise<void> {
+function capturedSessionSaver(lease?: SessionLease): (session: Session) => Promise<void> {
   const directory = sessionsDir();
-  return (session) => saveSessionInDirectory(session, directory);
+  return (session) => saveSessionInDirectory(session, directory, lease);
 }
 
-async function saveSessionInDirectory(session: Session, directory: string): Promise<void> {
+async function saveSessionInDirectory(session: Session, directory: string, lease?: SessionLease): Promise<void> {
+  lease?.assertOwnership();
   const path = sessionPath(session.id, directory);
   if (!path || !parseSession(session, session.id)) throw new Error(`Invalid session '${session.id}'`);
   await mkdir(directory, { recursive: true });
@@ -385,8 +386,9 @@ async function saveSessionInDirectory(session: Session, directory: string): Prom
   session.branch = await currentBranchAsync(session.cwd);
   const serialized = await serializeSessionAsync(session);
   const previous = await readSessionPathAsync(path, session.id);
-  if (previous) await atomicWriteFile(`${path}.bak`, previous.text);
-  await atomicWriteFile(path, serialized);
+  const beforePublish = lease ? () => lease.assertOwnership() : undefined;
+  if (previous) await atomicWriteFile(`${path}.bak`, previous.text, undefined, beforePublish);
+  await atomicWriteFile(path, serialized, undefined, beforePublish);
   try { if (process.env.NODE_ENV !== "test") journalSession(session); } catch { /* a torn journal never blocks the canonical session write */ }
 }
 
@@ -405,7 +407,11 @@ export class AsyncSessionWriter {
   private readonly waiters: SessionSaveWaiter[] = [];
   private latest: Promise<void> = Promise.resolve();
 
-  constructor(private readonly saver: (session: Session) => Promise<void> = capturedSessionSaver()) {}
+  private readonly saver: (session: Session) => Promise<void>;
+
+  constructor(saver?: (session: Session) => Promise<void>, lease?: SessionLease) {
+    this.saver = saver ?? capturedSessionSaver(lease);
+  }
 
   save(session: Session): Promise<void> {
     return this.saveLazy(() => ({ ...session, messages: [...session.messages] }));
@@ -476,6 +482,7 @@ export function loadSession(id: string): Session | null {
 }
 
 export interface SessionLease {
+  assertOwnership(): void;
   release(): void;
 }
 

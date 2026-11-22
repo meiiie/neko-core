@@ -44,6 +44,7 @@ import {
   type SessionLease,
   type SessionTurnState,
 } from "./session.ts";
+import { SessionLeaseLostError } from "./session-lease.ts";
 import { applySkillPolicyForTurn } from "./skills.ts";
 import { planTurnCapabilities } from "./turn-capabilities.ts";
 import { matchedTurnContext } from "./turn-context.ts";
@@ -564,6 +565,9 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         })).digest("hex"),
       };
       return session.record;
+    }).catch((error: unknown) => {
+      if (error instanceof SessionLeaseLostError) throw new acp.RequestError(-32000, error.message);
+      throw error;
     });
   };
 
@@ -691,7 +695,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
   ): Promise<AcpSession> => {
     if (!taskScope && sessions.has(record.id)) throw new acp.RequestError(-32000, "ACP session already has an active writer.");
     let lease: SessionLease;
-    try { lease = taskScope ? { release: () => {} } : acquireSessionLease(record.id); }
+    try { lease = taskScope ? { assertOwnership: () => {}, release: () => {} } : acquireSessionLease(record.id); }
     catch (error) { throw new acp.RequestError(-32000, error instanceof Error ? error.message : String(error)); }
 
     const toolCalls = new Map<string, acp.ToolCallUpdate>();
@@ -862,7 +866,7 @@ export function createNekoAcpAgent(options: AcpRuntimeFactoryOptions = {}): acp.
         streamedContentSinceTool: "",
         liveAgentMessageId: "",
         activeToolCallIds: new Set(),
-        writer: new AsyncSessionWriter(),
+        writer: new AsyncSessionWriter(undefined, lease),
         persistenceFailed: false,
         taskMode: Boolean(taskScope),
         flush: async () => {

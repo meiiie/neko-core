@@ -24,11 +24,16 @@ export function atomicWriteFileSync(path: string, data: string, mode?: number): 
 
 /** Async counterpart for event-loop-facing adapters. The durability contract is identical to the
  * synchronous helper, but slow disks and antivirus scans cannot freeze terminal input/rendering. */
-export async function atomicWriteFile(path: string, data: string, mode?: number): Promise<void> {
+export async function atomicWriteFile(path: string, data: string, mode?: number, beforePublish?: () => void): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${counter++}`;
   try {
     await writeFile(tmp, data, { encoding: "utf-8", ...(mode === undefined ? undefined : { mode }) });
-    await rename(tmp, path);
+    if (beforePublish) {
+      beforePublish();
+      renameSync(tmp, path);
+    } else {
+      await rename(tmp, path);
+    }
   } catch (err) {
     try { await rm(tmp, { force: true }); } catch { /* best effort cleanup */ }
     throw err;

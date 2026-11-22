@@ -6,6 +6,10 @@ import type { SessionLease } from "./session.ts";
 export const LEASE_STALE_MS = 60_000;
 export const LEASE_HEARTBEAT_MS = 10_000;
 
+export class SessionLeaseLostError extends Error {
+  constructor(id: string) { super(`Session '${id}' lost its writer lock`); }
+}
+
 interface LeaseEnvironment {
   now(): number;
   read(path: string): string;
@@ -126,18 +130,26 @@ export function acquireFileLease(path: string, id: string, overrides: Partial<Le
     finally { closeSync(fd); }
   });
   let released = false;
+  let lost = false;
+  const assertOwnership = () => {
+    try {
+      if (!released && !lost && snapshot(path).body.token === token) return;
+    } catch { /* Missing or unsafe locks cannot authorize writes. */ }
+    lost = true;
+    throw new SessionLeaseLostError(id);
+  };
   const stop = env.interval(() => {
     if (released) return;
     try {
       guarded(() => {
-        if (snapshot(path).body.token !== token) return;
+        assertOwnership();
         const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
         try { const time = new Date(env.now()); futimesSync(fd, time, time); }
         finally { closeSync(fd); }
       });
     } catch { /* Missing, replaced, or recovering locks are not ours to refresh. */ }
   }, LEASE_HEARTBEAT_MS);
-  return { release: () => {
+  return { assertOwnership, release: () => {
     if (released) return;
     released = true;
     stop();

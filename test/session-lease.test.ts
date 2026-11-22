@@ -60,11 +60,21 @@ test("heartbeat preserves a live writer and stops on release", () => {
 
 test("replacement tokens are neither refreshed nor removed", () => {
   const f = fixture(); const lease = f.acquire();
+  lease.assertOwnership();
   f.write({ token: "replacement" });
   const before = lstatSync(f.path).mtimeMs;
   f.advance(); f.beat(); lease.release();
+  expect(() => lease.assertOwnership()).toThrow("lost its writer lock");
   expect(lstatSync(f.path).mtimeMs).toBe(before);
   expect(JSON.parse(readFileSync(f.path, "utf8")).token).toBe("replacement");
+});
+
+test("ownership checks fence a lost lease even before its next heartbeat", () => {
+  const f = fixture(); const lease = f.acquire();
+  f.write({ token: "new-writer" });
+  expect(() => lease.assertOwnership()).toThrow("lost its writer lock");
+  lease.release();
+  expect(JSON.parse(readFileSync(f.path, "utf8")).token).toBe("new-writer");
 });
 
 test("start identity detects reused pids conservatively", () => {
