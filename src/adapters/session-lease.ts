@@ -95,8 +95,12 @@ export function acquireFileLease(path: string, id: string, overrides: Partial<Le
         if (!isJsonObject(error) || error.code !== "EEXIST") throw error;
         try {
           const old = lstatSync(guardPath);
-          if (!old.isFile() || old.size > 4096 || env.now() - old.mtimeMs <= LEASE_STALE_MS) throw busy();
-          if (old.size > 0 && !stale(snapshot(guardPath))) throw busy();
+          if (!old.isFile() || old.size > 4096) throw busy();
+          const owner = old.size > 0 ? snapshot(guardPath) : undefined;
+          const sameNamespace = env.linux && owner && isText(owner.body.pidNamespace)
+            && owner.body.pidNamespace === identity.pidNamespace;
+          if (!sameNamespace && env.now() - old.mtimeMs <= LEASE_STALE_MS) throw busy();
+          if (owner && !stale(owner)) throw busy();
           if (sameFile(old, lstatSync(guardPath))) unlinkSync(guardPath);
         } catch (guardError: unknown) {
           if (!isJsonObject(guardError) || guardError.code !== "ENOENT") throw guardError;
@@ -172,7 +176,7 @@ export function acquireFileLease(path: string, id: string, overrides: Partial<Le
     let attempts = 0;
     stopRetry = env.interval(() => {
       if (tryRelease()) { finish(); return; }
-      if (++attempts >= 20) stopRetry?.();
+      if (++attempts >= Math.ceil((LEASE_STALE_MS + 5000) / 250)) stopRetry?.();
     }, 250);
   } };
 }

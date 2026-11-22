@@ -155,12 +155,41 @@ test("release retries are bounded and process exit makes one final guarded attem
   const f = fixture(); const lease = f.acquire();
   writeFileSync(`${f.path}.recovery`, JSON.stringify({ pid: 1, token: "other-guard", startTime: "200", pidNamespace: "pid:[ours]" }));
   lease.release();
-  for (let attempt = 0; attempt < 20; attempt++) f.beat();
+  for (let attempt = 0; attempt < Math.ceil((LEASE_STALE_MS + 5000) / 250); attempt++) f.beat();
   expect(f.timerCount()).toBe(0);
   expect(existsSync(f.path)).toBe(true);
   rmSync(`${f.path}.recovery`);
   f.exit();
   expect(existsSync(f.path)).toBe(false);
+});
+
+test("fresh guards with dead or reused same-namespace owners do not block acquire or release", () => {
+  for (const releasing of [false, true]) {
+    for (const reused of [false, true]) {
+      const f = fixture();
+      f.env.alive = (pid?: number) => pid !== 2;
+      const lease = releasing ? f.acquire() : undefined;
+      writeFileSync(`${f.path}.recovery`, JSON.stringify({ pid: reused ? 1 : 2, token: "dead-guard",
+        startTime: reused ? "199" : "200", pidNamespace: "pid:[ours]" }));
+      (lease ?? f.acquire()).release();
+      expect(existsSync(f.path)).toBe(false);
+      expect(existsSync(`${f.path}.recovery`)).toBe(false);
+      expect(f.timerCount()).toBe(0);
+    }
+  }
+});
+
+test("release retries until a foreign-namespace recovery guard heartbeat expires", () => {
+  const f = fixture(); const lease = f.acquire();
+  writeFileSync(`${f.path}.recovery`, JSON.stringify({ pid: 1, token: "foreign-guard", pidNamespace: "pid:[foreign]" }));
+  lease.release();
+  f.beat();
+  expect(existsSync(f.path)).toBe(true);
+  expect(f.timerCount()).toBe(1);
+  f.advance(); f.beat();
+  expect(existsSync(f.path)).toBe(false);
+  expect(existsSync(`${f.path}.recovery`)).toBe(false);
+  expect(f.timerCount()).toBe(0);
 });
 
 test("a stale-check replacement is not unlinked", () => {
