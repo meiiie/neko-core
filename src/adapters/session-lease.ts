@@ -17,6 +17,7 @@ interface LeaseEnvironment {
   alive(pid: number): boolean;
   linux: boolean;
   interval(callback: () => void, ms: number): () => void;
+  onExit(callback: () => void): () => void;
 }
 
 const environment: LeaseEnvironment = {
@@ -33,6 +34,10 @@ const environment: LeaseEnvironment = {
     const timer = setInterval(callback, ms);
     timer.unref();
     return () => clearInterval(timer);
+  },
+  onExit: (callback) => {
+    process.once("exit", callback);
+    return () => { process.removeListener("exit", callback); };
   },
 };
 
@@ -153,14 +158,21 @@ export function acquireFileLease(path: string, id: string, overrides: Partial<Le
     if (released) return;
     released = true;
     stop();
-    const removeOwnedLock = () => { if (snapshot(path).body.token === token) unlinkSync(path); };
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try { guarded(removeOwnedLock); return; }
-      catch {
-        if (attempt < 3) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-      }
-    }
-    try { removeOwnedLock(); }
-    catch { /* A replaced/missing lock is not ours to remove. */ }
+    const tryRelease = () => {
+      try {
+        guarded(() => { if (snapshot(path).body.token === token) unlinkSync(path); });
+        return true;
+      } catch (error) { return isJsonObject(error) && error.code === "ENOENT"; }
+    };
+    if (tryRelease()) return;
+    let stopRetry: (() => void) | undefined;
+    let stopExit: (() => void) | undefined;
+    const finish = () => { stopRetry?.(); stopExit?.(); };
+    stopExit = env.onExit(() => { tryRelease(); finish(); });
+    let attempts = 0;
+    stopRetry = env.interval(() => {
+      if (tryRelease()) { finish(); return; }
+      if (++attempts >= 20) stopRetry?.();
+    }, 250);
   } };
 }

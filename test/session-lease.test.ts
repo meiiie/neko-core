@@ -12,18 +12,24 @@ function fixture() {
   dirs.push(dir);
   const path = join(dir, "session.lock");
   let now = Date.now();
-  let heartbeat = () => {};
+  const timers = new Set<() => void>();
+  let exit = () => {};
   let stopped = false;
   const stat = (start: string) => `1 (name with ) spaces) S ${Array(18).fill("0").join(" ")} ${start}`;
   const env = {
     linux: true, now: () => now, alive: () => true,
     readlink: () => "pid:[ours]",
     read: (path: string) => path.endsWith("boot_id") ? "boot" : path === "/proc/stat" ? "btime 1000\n" : stat("200"),
-    interval: (callback: () => void) => { heartbeat = callback; return () => { stopped = true; }; },
+    interval: (callback: () => void) => {
+      timers.add(callback);
+      return () => { stopped = true; timers.delete(callback); };
+    },
+    onExit: (callback: () => void) => { exit = callback; return () => { exit = () => {}; }; },
   };
   const write = (body: WireObject = {}) => writeFileSync(path, JSON.stringify({ pid: 1, token: "old", acquiredAt: new Date(now).toISOString(), ...body }));
   return { path, env, write, acquire: () => acquireFileLease(path, "test", env),
-    advance: () => { now += LEASE_STALE_MS + 1000; }, beat: () => heartbeat(), stopped: () => stopped };
+    advance: () => { now += LEASE_STALE_MS + 1000; }, beat: () => { for (const callback of [...timers]) callback(); },
+    exit: () => exit(), timerCount: () => timers.size, stopped: () => stopped };
 }
 
 test("dead owners and different boots are recovered", () => {
@@ -123,18 +129,38 @@ test("an old recovery guard owned by a live same-namespace process is not broken
   expect(f.acquire).toThrow("active writer");
 });
 
-test("release removes only its token while another live owner holds the recovery guard", () => {
-  for (const replaced of [false, true]) {
+test("release retries under the guard and preserves replacements made during contention", () => {
+  for (const replacement of ["none", "before-release", "during-contention"]) {
     const f = fixture(); const lease = f.acquire();
-    if (replaced) f.write({ token: "replacement" });
+    if (replacement === "before-release") f.write({ token: "replacement" });
     writeFileSync(`${f.path}.recovery`, JSON.stringify({ pid: 1, token: "other-guard", startTime: "200", pidNamespace: "pid:[ours]" }));
     lease.release();
     expect(f.stopped()).toBe(true);
-    expect(existsSync(f.path)).toBe(replaced);
-    if (replaced) expect(JSON.parse(readFileSync(f.path, "utf8")).token).toBe("replacement");
+    expect(existsSync(f.path)).toBe(true);
+    if (replacement === "during-contention") f.write({ token: "replacement" });
+    f.beat();
+    expect(existsSync(f.path)).toBe(true);
     expect(JSON.parse(readFileSync(`${f.path}.recovery`, "utf8")).token).toBe("other-guard");
+    rmSync(`${f.path}.recovery`);
+    f.beat();
+    expect(existsSync(f.path)).toBe(replacement !== "none");
+    if (replacement !== "none") expect(JSON.parse(readFileSync(f.path, "utf8")).token).toBe("replacement");
+    expect(f.timerCount()).toBe(0);
     lease.release();
+    f.exit();
   }
+});
+
+test("release retries are bounded and process exit makes one final guarded attempt", () => {
+  const f = fixture(); const lease = f.acquire();
+  writeFileSync(`${f.path}.recovery`, JSON.stringify({ pid: 1, token: "other-guard", startTime: "200", pidNamespace: "pid:[ours]" }));
+  lease.release();
+  for (let attempt = 0; attempt < 20; attempt++) f.beat();
+  expect(f.timerCount()).toBe(0);
+  expect(existsSync(f.path)).toBe(true);
+  rmSync(`${f.path}.recovery`);
+  f.exit();
+  expect(existsSync(f.path)).toBe(false);
 });
 
 test("a stale-check replacement is not unlinked", () => {
