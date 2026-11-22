@@ -1067,27 +1067,29 @@ export class TaskSessionCoordinator<R extends TaskSessionRuntime> {
   }
 
   async close(): Promise<void> {
-    if (this.closed) return;
-    if (this.busy) throw new Error("Task session cannot close during another transition");
-    this.busy = true;
-    let failure: unknown;
-    try {
+    if (this.recoveryRequired) {
+      if (this.busy || this.closed) throw new Error("Task session cannot close during another transition");
+      this.busy = true;
       try {
-        if (this.recoveryRequired) await this.runtime.assertQuiescent();
-        else {
-          if (this.runtime.settleForClose) await this.runtime.settleForClose();
-          else await this.runtime.assertQuiescent();
-          this.persist(this.capture());
-        }
-      } catch (error) { failure = error; }
+        await this.runtime.assertQuiescent();
+        revokeTaskScope(this.scope);
+        await this.runtime.close();
+        this.closed = true;
+        this.releaseWriter(); // release only our live lease; never rewrite an uncertain parent
+        return;
+      } finally { this.busy = false; }
+    }
+    this.assertReady();
+    this.busy = true;
+    try {
+      if (this.runtime.settleForClose) await this.runtime.settleForClose();
+      else await this.runtime.assertQuiescent();
+      this.persist(this.capture());
       revokeTaskScope(this.scope);
-      try { await this.runtime.close(); } catch (error) { failure ??= error; }
-      if (failure) throw failure;
-    } finally {
+      await this.runtime.close();
       this.closed = true;
       this.releaseWriter();
-      this.busy = false;
-    }
+    } finally { this.busy = false; }
   }
 }
 

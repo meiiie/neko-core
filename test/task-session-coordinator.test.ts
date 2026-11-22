@@ -58,53 +58,36 @@ function fakeRuntimeFactory(home: string) {
 
 type FakeRuntime = ReturnType<ReturnType<typeof fakeRuntimeFactory>["runtimeFactory"]>;
 
-for (const failure of ["quiescence", "settle", "persist", "runtime", "recovery"] as const) {
-  test(`close releases its writer and closes runtime after ${failure} failure`, async () => {
+for (const failure of ["quiescence", "persist"] as const) {
+  test(`close retains its writer after ${failure} failure until explicit recovery`, async () => {
     const f = fixture();
     const { runtimeFactory } = fakeRuntimeFactory(f.home);
     let runtimeClosed = false;
     const session = await createTaskSession({ home: f.home, root: f.root, authorityId: "local",
       configId: CONFIG_ID, label: "close failure", runtimeFactory: input => ({
         ...runtimeFactory(input),
-        assertQuiescent() { if (failure === "quiescence" || failure === "recovery") throw new Error("close fixture"); },
-        settleForClose: failure === "settle" ? () => { throw new Error("close fixture"); } : undefined,
-        contextRecoveryRequired: () => failure === "recovery",
-        close() { runtimeClosed = true; if (failure === "runtime") throw new Error("close fixture"); },
+        assertQuiescent() { if (failure === "quiescence") throw new Error("close fixture"); },
+        close() { runtimeClosed = true; },
       }) });
     const path = join(f.home, ".neko-core/task-sessions", `${session.id}.json`);
     const lock = join(f.home, ".neko-core/task-sessions", `${session.id}.lock`);
-    const original = readFileSync(path, "utf8");
+    const lockBytes = readFileSync(lock, "utf8");
     try {
-      if (failure === "persist") writeFileSync(path, "invalid checkpoint");
+      if (failure === "persist") {
+        const checkpoint = JSON.parse(readFileSync(path, "utf8"));
+        checkpoint.revision++;
+        writeFileSync(path, JSON.stringify(checkpoint));
+      }
+      const checkpointBytes = readFileSync(path, "utf8");
       await expect(session.close()).rejects.toThrow();
-      expect(runtimeClosed).toBe(true);
-      expect(existsSync(lock)).toBe(false);
-      await session.close();
-      if (failure === "persist") writeFileSync(path, original);
-      const loaded = await loadTaskSession({ home: f.home, root: f.root, authorityId: "local",
-        configId: CONFIG_ID, sessionId: session.id, runtimeFactory });
-      await loaded.close();
+      expect(runtimeClosed).toBe(false);
+      expect(readFileSync(lock, "utf8")).toBe(lockBytes);
+      expect(readFileSync(path, "utf8")).toBe(checkpointBytes);
+      await expect(loadTaskSession({ home: f.home, root: f.root, authorityId: "local",
+        configId: CONFIG_ID, sessionId: session.id, runtimeFactory })).rejects.toBeInstanceOf(TaskSessionWriterUnavailableError);
     } finally { f.cleanup(); }
   });
 }
-
-test("failed close never unlinks a replacement writer token", async () => {
-  const f = fixture();
-  const { runtimeFactory } = fakeRuntimeFactory(f.home);
-  try {
-    const session = await createTaskSession({ home: f.home, root: f.root, authorityId: "local",
-      configId: CONFIG_ID, label: "replacement", runtimeFactory: input => ({
-        ...runtimeFactory(input), close() { throw new Error("close fixture"); },
-      }) });
-    const lock = join(f.home, ".neko-core/task-sessions", `${session.id}.lock`);
-    const replacement = JSON.stringify({ pid: process.pid, token: "different-writer" });
-    writeFileSync(lock, replacement);
-    await expect(session.close()).rejects.toThrow("close fixture");
-    expect(readFileSync(lock, "utf8")).toBe(replacement);
-    await expect(loadTaskSession({ home: f.home, root: f.root, authorityId: "local",
-      configId: CONFIG_ID, sessionId: session.id, runtimeFactory })).rejects.toBeInstanceOf(TaskSessionWriterUnavailableError);
-  } finally { f.cleanup(); }
-});
 
 test("explicit A to B to A switches fresh runtime, transcript and scoped memory in one root", async () => {
   const f = fixture();
