@@ -246,9 +246,8 @@ export interface AgentOptions {
   /** Host-owned credential check for scoped historical source lookup. Omit to keep the lookup
    * unavailable; the key is never persisted, logged, or sent to the provider. */
   sourceArchiveCredential?: () => string | undefined;
-  /** Opt-in pre-completion gate: the first tool-less final without fresh inspection/test evidence is
-   * intercepted once and the model is told to re-inspect the ACTUAL state against the goal - catching
-   * the "declared done without re-running the check" failure mode. (Config: `verify_before_exit`.) */
+  /** After tool use, intercept the first final without fresh inspection/test evidence and ask the
+   * model to re-inspect the actual state. Tool-free turns skip this gate. (Config: `verify_before_exit`.) */
   verifyBeforeExit?: boolean;
   /** Production safety net for real state changes: reject completion until the model performs a
    * fresh, successful inspection after the latest state change. */

@@ -731,8 +731,12 @@ test("runEval matches the toolful headless verify-before-exit default", async ()
       calls++;
       sawNudge ||= messages.some((message) => isText(message.content)
         && message.content.includes("VERIFY BEFORE FINISHING"));
+      if (calls === 1) return {
+        content: null,
+        tool_calls: [{ id: "read", name: "read_file", arguments: { path: "missing.txt" } }],
+      };
       return {
-        content: calls === 1 ? "Looks finished." : "Verified final answer.",
+        content: calls === 2 ? "Looks finished." : "Verified final answer.",
         tool_calls: [],
         usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
       };
@@ -746,7 +750,7 @@ test("runEval matches the toolful headless verify-before-exit default", async ()
   };
 
   const report = await runEval(benchConfig(), { trials: 1, tasks: [task], providerFactory });
-  expect(calls).toBe(2);
+  expect(calls).toBe(3);
   expect(sawNudge).toBe(true);
   expect(report.dim.pass1).toBe(1);
 }, 30000);
@@ -1347,7 +1351,7 @@ test("runEval isolates every task x trial provider and disposes all, including a
 
   expect(created).toBe(4);
   expect([...disposed].sort((a, b) => a - b)).toEqual([0, 1, 2, 3]);
-  expect(histories.map((calls) => calls.length)).toEqual([2, 1, 2, 2]);
+  expect(histories.map((calls) => calls.length)).toEqual([1, 1, 1, 1]);
   expect(histories.map((calls) => calls[0].filter((message) => message.role === "user").map((message) => message.content)))
     .toEqual([[prompts[0]], [prompts[0]], [prompts[1]], [prompts[1]]]);
   for (const calls of histories) {
@@ -1389,7 +1393,7 @@ test("runEval fails closed when an injected provider could be shared", async () 
   expect(disposed).toBe(0);
 
   await expect(runEval(cfg, { ...options, providerFactory: () => shared })).rejects.toThrow("fresh Provider");
-  expect(completed).toBe(2);
+  expect(completed).toBe(1);
   expect(disposed).toBe(1);
 }, 30000);
 

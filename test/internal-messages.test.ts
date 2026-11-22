@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Agent } from "../src/core/agent.ts";
+import type { Provider } from "../src/core/ports.ts";
 import { ToolRegistry } from "../src/core/tool-runtime.ts";
 import { CONTINUE_PROMPT, runSlashCommand } from "../src/ui/commands.ts";
 
@@ -153,15 +154,19 @@ test("/contract renders durable criteria and /reset clears them", async () => {
 
 test("controller markers persist locally but are invisible to every provider call", async () => {
   const seen: any[][] = [];
-  let call = 0;
   const agent = makeAgent({
-    async complete(messages: any[]) {
+    async complete(messages, _tools, _onDelta, _signal, options) {
       seen.push(structuredClone(messages));
-      return call++ === 0
-        ? { content: "draft", tool_calls: [] }
-        : { content: "verified", tool_calls: [] };
+      if (seen.length === 1) {
+        await options!.executeTool!({ id: "write", name: "write_file", arguments: { path: "x.txt", content: "fixed" } });
+        return { content: "draft", tool_calls: [] };
+      }
+      return { content: "verified", tool_calls: [] };
     },
-  }, { verifyBeforeExit: true });
+  } satisfies Provider, {
+    tools: { schemas: () => [], execute: async () => "Wrote x.txt" },
+    verifyBeforeExit: true,
+  });
 
   expect(await agent.run("human request")).toBe("verified");
   expect(agent.messages.find((message) => message.content === "human request")?._neko_internal).toBe(false);
