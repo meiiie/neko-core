@@ -12,7 +12,14 @@
   #104; provider configuration, durable session format and 1.x CLI stay compatible.
 - Version and baked site fallback are prepared together; final artifact sizes
   require measurement. No Cloudflare deployment, public tag or release is implied.
-- Linux gate results are recorded in [WORKLOG](WORKLOG.md). Cross-platform CI,
-  three real Windows ConPTY ghost/typing runs, publication and all 17 release
-  assets must be verified before calling this published. No scroll benchmark is
-  required for this non-rendering patch.
+- PR #108 CI passed on Ubuntu, macOS and Windows for `0800687`, including the
+  real-binary Wiii ACP contract. Linux gate results are in [WORKLOG](WORKLOG.md).
+- Owner-supplied Windows Server 2022 / Bun 1.4.0 evidence at `0800687`:
+  `e2e-conpty-ghost.ts dist/neko.exe` passed three times on a loopback SSE fixture;
+  footer-copies=1 at every checkpoint, typed-echo 127/127/179 ms. Local build
+  failed only startup-lifecycle ("terminal restore did not finish before the
+  resume handoff", 4/4; no `ESC[?1049l` in that VM's ConPTY stream). The same
+  step passed on windows-latest (Server 2025). A Server 2022 ConPTY difference
+  remains unproven; this is not a full local Windows build pass.
+- Publication and all 17 release assets still require verification. No scroll
+  benchmark is required for this non-rendering patch.

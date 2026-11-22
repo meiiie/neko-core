@@ -21,9 +21,17 @@ startup/exit lifecycle and startup-input probes pass. Gitleaks `8.30.1` redacted
 history scan (991 commits) and release-diff scan report no leaks found using the
 repository configuration. No runtime or test code changed during preparation.
 
-Cross-platform CI, three Windows real-terminal ConPTY ghost/typing runs,
-real Wiii/bwrap reload acceptance and publication remain unverified. The Linux
-gate is not a claim that all platform release gates are complete. No scroll
+PR #108 CI passed on Ubuntu, macOS and Windows for candidate `0800687`, including
+the real-binary Wiii ACP contract. Owner-supplied Windows Server 2022 evidence
+with Bun 1.4.0: `e2e-conpty-ghost.ts dist/neko.exe` passed three times against a
+loopback SSE fixture, with footer-copies=1 at every checkpoint and typed-echo
+latencies of 127/127/179 ms. That VM's local `bun run build` failed only its
+startup-lifecycle step: "terminal restore did not finish before the resume
+handoff" (4/4), with no `ESC[?1049l` in the ConPTY stream. The same step passed
+in windows-latest CI (Server 2025); a Server 2022 ConPTY difference is unproven,
+not an established cause or a full local Windows build pass.
+
+Real Wiii/bwrap reload acceptance and publication remain unverified. No scroll
 benchmark is needed for this non-rendering patch. No tag, release or deployment
 was created by this preparation.
 
