@@ -112,7 +112,7 @@ test("web readers and Accuracy guidance cover mutable public facts", () => {
 });
 
 test.each([
-  "Hoàng Sa thuộc đơn vị hành chính nào?",
+  "What is the current price of gold?",
   "What is the latest TypeScript version?",
   "Bạn đánh giá câu trả lời này thế nào?",
   "Lịch sử Việt Nam có gì thú vị?",
@@ -140,10 +140,52 @@ test.each([
     && String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toHaveLength(0);
 });
 
-test("current-fact answers allow proactive web use and finish when web is unavailable", async () => {
+test.each([false, true])("sovereignty freshness requests one web pass even if the model skips it: %s", async (useWeb) => {
+  const provider = new ScriptedProvider([
+    { content: "Hoàng Sa là huyện đảo.", tool_calls: [] },
+    ...(useWeb ? [{ content: null, tool_calls: [{ id: "fresh", name: "web_search", arguments: { query: "Hoàng Sa đơn vị hành chính" } }] }] : []),
+    { content: "Final answer.", tool_calls: [] },
+    { content: "unnecessary extra reply", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    // SAFETY: test-built provider fixture.
+    provider: provider as any,
+    // SAFETY: test-built web registry fixture.
+    tools: {
+      schemas: () => [{ type: "function", function: { name: "web_search", parameters: { type: "object" } } }],
+      execute: async () => "official current record",
+    } as any,
+    maxSteps: 6,
+    verifyBeforeExit: true,
+  });
+  expect(await agent.run("Hoàng Sa thuộc đơn vị hành chính nào?")).toBe("Final answer.");
+  expect(provider.index).toBe(useWeb ? 3 : 2);
+  expect(agent.messages.filter((message) => message._neko_internal
+    && String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toHaveLength(1);
+});
+
+test("sovereignty freshness skips internal turns", async () => {
+  const provider = new ScriptedProvider([{ content: "Internal answer.", tool_calls: [] }]);
+  const agent = new Agent({
+    // SAFETY: test-built provider fixture.
+    provider: provider as any,
+    // SAFETY: test-built web registry fixture.
+    tools: {
+      schemas: () => [{ type: "function", function: { name: "web_fetch", parameters: { type: "object" } } }],
+      execute: async () => "official current record",
+    } as any,
+    maxSteps: 4,
+  });
+  expect(await agent.run("Hoàng Sa thuộc đơn vị hành chính nào?", undefined, undefined, true)).toBe("Internal answer.");
+  expect(provider.index).toBe(1);
+  expect(agent.messages.some((message) => String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toBe(false);
+});
+
+test.each(["official current record", "Error: web unavailable"])("sovereignty freshness credits only successful proactive web evidence: %s", async (observation) => {
   const proactive = new ScriptedProvider([
     { content: null, tool_calls: [{ id: "fresh", name: "web_fetch", arguments: { url: "https://example.gov" } }] },
     { content: "Current answer with primary evidence.", tool_calls: [] },
+    { content: "Unable to verify current facts.", tool_calls: [] },
   ]);
   const withWeb = new Agent({
     // SAFETY: test-built provider fixture; its scripted complete() shape is fully controlled here.
@@ -151,14 +193,18 @@ test("current-fact answers allow proactive web use and finish when web is unavai
     // SAFETY: test-built tool registry fixture; schema and execution results are fully controlled here.
     tools: {
       schemas: () => [{ type: "function", function: { name: "web_fetch", parameters: { type: "object" } } }],
-      execute: async () => "official current record",
+      execute: async () => observation,
     } as any,
     maxSteps: 4,
   });
-  expect(await withWeb.run("Trường Sa hiện là huyện đảo hay đặc khu?")).toBe("Current answer with primary evidence.");
-  expect(proactive.index).toBe(2);
-  expect(withWeb.messages.some((message: any) => String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toBe(false);
+  const failed = observation.startsWith("Error:");
+  expect(await withWeb.run("Trường Sa hiện là huyện đảo hay đặc khu?"))
+    .toBe(failed ? "Unable to verify current facts." : "Current answer with primary evidence.");
+  expect(proactive.index).toBe(failed ? 3 : 2);
+  expect(withWeb.messages.filter((message) => String(message.content).includes("CURRENT-FACT VERIFICATION REQUIRED"))).toHaveLength(failed ? 1 : 0);
+});
 
+test("sovereignty answer finishes without a freshness turn when web is unavailable", async () => {
   const offlineProvider = new ScriptedProvider([{ content: "I cannot verify this runtime.", tool_calls: [] }]);
   const withoutWeb = new Agent({
     // SAFETY: test-built provider fixture; its scripted complete() shape is fully controlled here.

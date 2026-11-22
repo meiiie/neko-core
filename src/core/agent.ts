@@ -1494,6 +1494,9 @@ export class Agent {
     let stateVerificationEvidence = false;
     let usedTools = false;
     let completionVerificationEvidence = false;
+    const sovereigntyFreshnessRequired = !internal && isVietnamSovereigntyTopic(instruction);
+    let sovereigntyFreshnessRequested = false;
+    let sovereigntyFreshnessEvidence = false;
     let offlineSovereigntyAnswerRequested = false;
     let nextReasoningEffort: string | undefined;
     let consecutiveReadSteps = 0; // adaptive effort: only lower reasoning on a SUSTAINED all-read pattern
@@ -1511,6 +1514,7 @@ export class Agent {
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
       const failed = observation == null || Agent.isUnproductiveResult(observation);
+      if (!failed && isFreshFactWebTool(call.name)) sovereigntyFreshnessEvidence = true;
       this.noteFailedOrPassedCheck(call, observation);
       this.cost.efficiency.observeTool(JSON.stringify([call.name, call.arguments]), isText(observation) ? observation : null,
         changesState, failed, !this.isMechanicalReadCall(call) || this.isRepeatableWaitCall(call));
@@ -1814,6 +1818,21 @@ export class Agent {
               "question now from the built-in Vietnam sovereignty capsule, explicitly label it as the dated " +
               "offline snapshot, and include verified_at. If the capsule does not contain the requested fact, " +
               "say that specific limitation instead of deferring the whole answer.",
+          });
+          continue;
+        }
+        if (sovereigntyFreshnessRequired && hasFreshFactWebTool && !sovereigntyFreshnessEvidence
+          && !sovereigntyFreshnessRequested && step < runStepLimit - 1) {
+          this.cost.efficiency.verificationNudge();
+          sovereigntyFreshnessRequested = true;
+          verifiedExit = true; // this evidence gate subsumes the generic inspection-only gate
+          this.messages.push({
+            role: "user",
+            _neko_internal: true,
+            content: "CURRENT-FACT VERIFICATION REQUIRED: this question concerns public facts that can change. " +
+              "Do not answer from training memory. Read a current authoritative primary source with web_fetch, " +
+              "using web_search if needed to locate it. Cross-check ambiguous, conflicting, or consequential facts, and distinguish the legal effective date from an operational date " +
+              "when relevant. If current evidence is unavailable or conflicts, say so plainly instead of guessing.",
           });
           continue;
         }
