@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, constants, fstatSync, futimesSync, lstatSync, openSync, readFileSync, readlinkSync, unlinkSync, writeSync, type Stats } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { isJsonObject, isText } from "../shared/wire.ts";
 import type { SessionLease } from "./session.ts";
 
@@ -12,12 +11,10 @@ interface LeaseEnvironment {
   read(path: string): string;
   readlink(path: string): string;
   alive(pid: number): boolean;
-  ticks(): number;
   linux: boolean;
   interval(callback: () => void, ms: number): () => void;
 }
 
-let clockTicks: number | undefined;
 const environment: LeaseEnvironment = {
   now: Date.now,
   read: (path) => readFileSync(path, "utf8"),
@@ -27,7 +24,6 @@ const environment: LeaseEnvironment = {
     try { process.kill(pid, 0); return true; }
     catch (error: unknown) { return isJsonObject(error) && error.code === "EPERM"; }
   },
-  ticks: () => clockTicks ??= Number(execFileSync("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 1000 })),
   linux: process.platform === "linux",
   interval: (callback, ms) => {
     const timer = setInterval(callback, ms);
@@ -75,16 +71,10 @@ export function acquireFileLease(path: string, id: string, overrides: Partial<Le
     }
     const pid = Number(body.pid);
     if (!env.alive(pid)) return true;
-    if (!env.linux) return false;
+    if (!env.linux || !isText(body.startTime)) return false;
     try {
       const started = startTime(env.read(`/proc/${pid}/stat`));
-      if (isText(body.startTime)) return started !== body.startTime;
-      const boot = /^btime\s+(\d+)$/m.exec(env.read("/proc/stat"));
-      const ticks = env.ticks();
-      if (!boot || !Number.isFinite(ticks) || ticks <= 0) return false;
-      const acquired = isText(body.acquiredAt) ? Date.parse(body.acquiredAt) : NaN;
-      const lockTime = Number.isFinite(acquired) ? Math.min(acquired, stat.mtimeMs) : stat.mtimeMs;
-      return (Number(boot[1]) + Number(started) / ticks) * 1000 > lockTime + 5000;
+      return started !== body.startTime;
     } catch { return false; }
   };
   const guardPath = `${path}.recovery`;
@@ -116,7 +106,12 @@ export function acquireFileLease(path: string, id: string, overrides: Partial<Le
   guarded(() => {
     try {
       const previous = snapshot(path);
-      if (!stale(previous)) throw busy();
+      if (!stale(previous)) {
+        if (!previous.body.startTime && !previous.body.pidNamespace) {
+          throw new Error(`${busy().message} (lock written by an older Neko: ${path}; remove it only if no other Neko is running)`);
+        }
+        throw busy();
+      }
       const current = snapshot(path);
       if (current.body.token !== previous.body.token || !sameFile(current.stat, previous.stat)) throw busy();
       unlinkSync(path);

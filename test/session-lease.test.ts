@@ -16,7 +16,7 @@ function fixture() {
   let stopped = false;
   const stat = (start: string) => `1 (name with ) spaces) S ${Array(18).fill("0").join(" ")} ${start}`;
   const env = {
-    linux: true, now: () => now, alive: () => true, ticks: () => 100,
+    linux: true, now: () => now, alive: () => true,
     readlink: () => "pid:[ours]",
     read: (path: string) => path.endsWith("boot_id") ? "boot" : path === "/proc/stat" ? "btime 1000\n" : stat("200"),
     interval: (callback: () => void) => { heartbeat = callback; return () => { stopped = true; }; },
@@ -67,17 +67,32 @@ test("replacement tokens are neither refreshed nor removed", () => {
   expect(JSON.parse(readFileSync(f.path, "utf8")).token).toBe("replacement");
 });
 
-test("start identity and legacy process birth detect reused pids conservatively", () => {
-  for (const body of [{ startTime: "199" }, { acquiredAt: new Date(0).toISOString() }]) {
-    const f = fixture(); f.write(body); f.acquire().release();
-    expect(existsSync(f.path)).toBe(false);
-  }
-  const f = fixture(); f.write();
+test("start identity detects reused pids conservatively", () => {
+  const f = fixture(); f.write({ startTime: "199" }); f.acquire().release();
+  expect(existsSync(f.path)).toBe(false);
+  f.write({ startTime: "200" });
   expect(f.acquire).toThrow("active writer");
   f.env.read = () => { throw new Error("proc unavailable"); };
   expect(f.acquire).toThrow("active writer");
   f.env.linux = false; f.write({ bootId: "other", startTime: "199" });
   expect(f.acquire).toThrow("active writer");
+});
+
+test("a live legacy pid is refused even when its process started after acquisition", () => {
+  const f = fixture(); f.write({ acquiredAt: new Date(0).toISOString() });
+  const before = readFileSync(f.path, "utf8");
+  expect(f.acquire).toThrow("already has an active writer");
+  expect(f.acquire).toThrow(`lock written by an older Neko: ${f.path}; remove it only if no other Neko is running`);
+  expect(readFileSync(f.path, "utf8")).toBe(before);
+});
+
+test("a legacy lock with a dead pid is taken over", () => {
+  const f = fixture(); f.write({ acquiredAt: new Date(0).toISOString() });
+  f.env.alive = () => false;
+  const lease = f.acquire();
+  expect(JSON.parse(readFileSync(f.path, "utf8")).token).not.toBe("old");
+  lease.release();
+  expect(existsSync(f.path)).toBe(false);
 });
 
 test("unsafe locks and fresh recovery guards are preserved", () => {
