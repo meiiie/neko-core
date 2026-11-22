@@ -10,7 +10,7 @@ import { parseDreamInput } from "../src/core/dream.ts";
 import type { Provider } from "../src/core/ports.ts";
 import { loadConfig } from "../src/adapters/config.ts";
 import { createNekoAcpAgent } from "../src/adapters/acp.ts";
-import { ChatApp } from "../src/ui/chat.tsx";
+import { ChatApp, type ChatTaskLifecycle } from "../src/ui/chat.tsx";
 
 function dreamProvider(called: () => void): Provider {
   return { complete: async (messages, tools) => {
@@ -22,6 +22,17 @@ function dreamProvider(called: () => void): Provider {
 }
 const tick = (ms = 25) => new Promise(resolve => setTimeout(resolve, ms));
 const until = async (check: () => boolean) => { for (let i = 0; i < 160 && !check(); i++) await tick(); return check(); };
+const removeFixture = async (path: string) => {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "EBUSY") || attempt === 19) throw error;
+      await tick(100);
+    }
+  }
+};
 
 test("TUI default auto Dream completes without /task or prepare/apply and is recalled next turn", async () => {
   const home = mkdtempSync(join(tmpdir(), "auto-dream-ui-")), root = join(home, "root");
@@ -31,7 +42,8 @@ test("TUI default auto Dream completes without /task or prepare/apply and is rec
   process.env.HOME = home; process.env.USERPROFILE = home; process.chdir(root);
   let dreams = 0; const contexts: string[] = [];
   const provider: Provider = { complete: async messages => { contexts.push(JSON.stringify(messages)); return { content: "Noted.", tool_calls: [] }; } };
-  const app = render(<ChatApp yolo={false} fullscreen={false} profile="local" provider={provider} automaticDreamProvider={() => dreamProvider(() => dreams++)} />);
+  const lifecycle: ChatTaskLifecycle = { activeSessionId: null, shutdown: async () => {} };
+  const app = render(<ChatApp yolo={false} fullscreen={false} profile="local" provider={provider} taskLifecycle={lifecycle} automaticDreamProvider={() => dreamProvider(() => dreams++)} />);
   try {
     await tick(50); app.stdin.write("Use bun to run tests."); await tick(); app.stdin.write("\r");
     expect(await until(() => (app.lastFrame() ?? "").includes("Dream: applied"))).toBe(true);
@@ -41,10 +53,11 @@ test("TUI default auto Dream completes without /task or prepare/apply and is rec
     await until(() => dreams === 2); await tick(50);
   } finally {
     app.unmount(); await tick(50);
+    await lifecycle.shutdown();
     process.chdir(old.root);
     if (old.home === undefined) delete process.env.HOME; else process.env.HOME = old.home;
     if (old.profile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = old.profile;
-    rmSync(home, { recursive: true, force: true });
+    await removeFixture(home);
   }
 });
 
@@ -59,7 +72,8 @@ test("TUI accepts next input while Dream provider is blocked and aborts on unmou
   let dreamStarted = false; const dreamSignals: AbortSignal[] = [];
   const slow = dreamProvider(() => dreams++);
   const provider: Provider = { complete: async messages => { contexts.push(JSON.stringify(messages)); return { content: "Noted.", tool_calls: [] }; } };
-  const app = render(<ChatApp yolo={false} fullscreen={false} profile="local" provider={provider} automaticDreamProvider={() => ({ complete: async (...args) => { dreamStarted = true; if (args[3]) dreamSignals.push(args[3]); await blocked; return slow.complete(...args); } })} />);
+  const lifecycle: ChatTaskLifecycle = { activeSessionId: null, shutdown: async () => {} };
+  const app = render(<ChatApp yolo={false} fullscreen={false} profile="local" provider={provider} taskLifecycle={lifecycle} automaticDreamProvider={() => ({ complete: async (...args) => { dreamStarted = true; if (args[3]) dreamSignals.push(args[3]); await blocked; return slow.complete(...args); } })} />);
   try {
     await tick(50); app.stdin.write("Use bun to run tests."); await tick(); app.stdin.write("\r");
     expect(await until(() => dreamStarted)).toBe(true);
@@ -72,10 +86,11 @@ test("TUI accepts next input while Dream provider is blocked and aborts on unmou
     app.unmount(); await tick();
     expect(dreamSignals.every(signal => signal.aborted)).toBe(true);
     release(); await tick(50);
+    await lifecycle.shutdown();
     process.chdir(old.root);
     if (old.home === undefined) delete process.env.HOME; else process.env.HOME = old.home;
     if (old.profile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = old.profile;
-    rmSync(home, { recursive: true, force: true });
+    await removeFixture(home);
   }
 });
 

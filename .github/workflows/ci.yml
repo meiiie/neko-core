@@ -12,6 +12,10 @@ on:
         default: full
         options: [full, codex-feedback, efficiency]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   feedback:
     if: inputs.suite != 'efficiency'
@@ -34,7 +38,7 @@ jobs:
 
   # The full verify loop on every OS we ship binaries for - a Linux-only CI can't guarantee the
   # macOS/Windows builds actually work (the owner develops on Windows; CI covers the other two).
-  test:
+  verify:
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +51,12 @@ jobs:
           # Exact stable runtime used by release.yml. Bun 1.4.0 carries the native Windows IOCP/TTY
           # engine that replaced the 1.3.14 raw-stdin failure path; real PTY probes below remain the gate.
           bun-version: 1.4.0
+      - name: Cache Bun downloads
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-1.4.0-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-1.4.0-
       - run: bun install --frozen-lockfile
       - name: prepare the Linux sandbox primitive
         if: runner.os == 'Linux' && (inputs.suite == '' || inputs.suite == 'full')
@@ -62,25 +72,6 @@ jobs:
       - run: bun run typecheck
       - name: anti-slop lint
         run: bun run lint
-      - name: full test suite
-        if: inputs.suite == '' || inputs.suite == 'full'
-        shell: pwsh
-        run: |
-          if ($env:RUNNER_OS -eq 'Windows') {
-            # One full Bun process accumulates SRT/UIA/subprocess state on hosted Windows:
-            # consecutive clean-main runs failed in unrelated 5s/15s fixtures while PR/local shards
-            # passed. Fresh processes keep the SAME 125-file suite and assertions without cross-file
-            # process pressure; every test remains assigned to one shard. Keep this sequential so the live
-            # sandbox primitives do not contend.
-            1..4 | ForEach-Object {
-              Write-Host "=== Windows shard $_/4 ==="
-              bun test --shard="$_/4"
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            }
-          } else {
-            bun test
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
       - name: focused Codex support and feedback regressions
         if: inputs.suite == 'codex-feedback'
         run: bun test test/codex-support-pack.test.ts test/codex-app-server.test.ts test/chatgpt-app-server-provider.test.ts test/chatgpt-provider.test.ts test/chatgpt-voice.test.ts test/feedback.test.ts test/feedback-ui.test.tsx test/feedback-delivery.test.ts test/chat-ui.test.tsx
@@ -133,3 +124,54 @@ jobs:
           $name = if ($env:RUNNER_OS -eq 'Windows') { 'neko.exe' } else { 'neko' }
           $env:NEKO_TEST_PREBUILT = Join-Path $env:GITHUB_WORKSPACE (Join-Path 'dist' $name)
           bun test test/bun-autoload-safety.test.ts
+
+  suite:
+    name: suite (${{ matrix.os }} ${{ matrix.shard }})
+    if: inputs.suite == '' || inputs.suite == 'full'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, shard: 1/2 }
+          - { os: ubuntu-latest, shard: 2/2 }
+          - { os: macos-latest, shard: 1/2 }
+          - { os: macos-latest, shard: 2/2 }
+          - { os: windows-latest, shard: 1/4 }
+          - { os: windows-latest, shard: 2/4 }
+          - { os: windows-latest, shard: 3/4 }
+          - { os: windows-latest, shard: 4/4 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Cache Bun downloads
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-1.4.0-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-1.4.0-
+      - run: bun install --frozen-lockfile
+      - name: prepare the Linux sandbox primitive
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            original_userns="$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)"
+            echo "NEKO_CI_APPARMOR_USERNS_ORIGINAL=$original_userns" >> "$GITHUB_ENV"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      # Each shard gets a fresh runner and Bun process, avoiding cross-file SRT/UIA/subprocess
+      # pressure on Windows without sharing live sandbox primitives or dropping any tests.
+      - name: full test suite shard
+        run: bun test --shard=${{ matrix.shard }}
+      - name: restore the Linux sandbox host policy
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          if [ -n "${NEKO_CI_APPARMOR_USERNS_ORIGINAL:-}" ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns="$NEKO_CI_APPARMOR_USERNS_ORIGINAL"
+          fi
