@@ -33,8 +33,13 @@ Run from the repository root with the stable Bun version pinned in CI:
 Doctor and policy may return explicit warnings for the developer's current profile, project trust, TTY, or
 bounded-auto posture; they must not crash, leak credentials, or misreport an unavailable boundary as healthy.
 
-GitHub CI repeats the full suite on Linux, macOS, and Windows. Windows shards the suite into fresh sequential
-processes to avoid cross-file SRT/UIA fixture pressure without dropping any test.
+GitHub CI runs independent `verify` jobs on Linux, macOS, and Windows for typecheck, lint, focused platform
+checks, policy, build, and lifecycle probes. For full runs, parallel `suite` jobs repeat the complete suite
+using Bun's file sharding: two shards each on Linux and macOS, four on Windows. Every shard runs on a fresh
+runner with its own Bun process, avoiding cross-file SRT/UIA fixture pressure without dropping any test.
+Owner-authorized focused dispatches keep their regressions in `verify` and skip `suite`. The separate
+`feedback` job is unchanged. Both `ci.yml` and `wiii-acp-contract.yml` cancel superseded runs only for the
+same pull request, not main pushes.
 
 ## Test classes
 
