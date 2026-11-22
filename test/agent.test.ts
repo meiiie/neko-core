@@ -2484,24 +2484,34 @@ test("compact() carries the current todo plan deterministically", async () => {
   expect(String(summary.content)).toContain("[~] fix the todo flow");
 });
 
-test("verify_before_exit gate fires once, then lets the model finish (off by default)", async () => {
-  // OFF: the first tool-less answer returns immediately.
-  const offScript = [{ content: "done-immediately", tool_calls: [] }];
+test("verify_before_exit skips tool-free chat even when tools are enabled", async () => {
+  const provider = new ScriptedProvider([
+    { content: "Xin chào!", tool_calls: [] },
+    { content: "unnecessary second reply", tool_calls: [] },
+  ]);
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
-  const off = new Agent({ provider: new ScriptedProvider(offScript) as any, tools: { schemas: () => [], execute: async () => "" } as any, maxSteps: 6 });
-  expect(await off.run("go")).toBe("done-immediately");
+  const agent = new Agent({ provider: provider as any, tools: new ToolRegistry(".", "auto"), maxSteps: 6, verifyBeforeExit: true });
+  expect(await agent.run("Xin chào")).toBe("Xin chào!");
+  expect(provider.index).toBe(1);
+});
 
-  // ON: the first tool-less answer is intercepted once; the model re-inspects, then finishes.
-  const onScript = [
-    { content: "looks done", tool_calls: [] }, // premature -> gate fires
-    { content: "verified and done", tool_calls: [] }, // after re-inspection
-  ];
+test.each([false, true])("verify_before_exit=%s only nudges unsatisfied tool-bearing turns", async (verifyBeforeExit) => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "write", name: "write_file", arguments: { path: "x.ts", content: "fixed" } }] },
+    { content: "looks done", tool_calls: [] },
+    ...(verifyBeforeExit ? [{ content: "verified and done", tool_calls: [] }] : []),
+    { content: "You're welcome!", tool_calls: [] },
+    { content: "unnecessary second reply", tool_calls: [] },
+  ]);
   // SAFETY: test-built fixture/bridge; fields are exactly what this test controls.
-  const on = new Agent({ provider: new ScriptedProvider(onScript) as any, tools: { schemas: () => [], execute: async () => "" } as any, maxSteps: 6, verifyBeforeExit: true });
-  expect(await on.run("go")).toBe("verified and done");
-  const gate = on.messages.find((m: any) => m.role === "user" && String(m.content).includes("VERIFY BEFORE FINISHING"));
-  expect(gate).toBeTruthy(); // the gate turn was injected exactly once
-  expect(on.messages.filter((m: any) => String(m.content).includes("VERIFY BEFORE FINISHING")).length).toBe(1);
+  const tools = { schemas: () => [], execute: async () => "Wrote x.ts" } as any;
+  // SAFETY: test-built fixture provider.
+  const agent = new Agent({ provider: provider as any, tools, maxSteps: 6, verifyBeforeExit });
+  expect(await agent.run("write x.ts")).toBe(verifyBeforeExit ? "verified and done" : "looks done");
+  expect(await agent.run("Thanks!")).toBe("You're welcome!");
+  expect(provider.index).toBe(verifyBeforeExit ? 4 : 3);
+  expect(agent.messages.filter((m) => m.role === "user" && String(m.content).startsWith("VERIFY BEFORE FINISHING")))
+    .toHaveLength(verifyBeforeExit ? 1 : 0);
 });
 
 test("verify_before_exit credits proactive fresh evidence instead of demanding a duplicate check", async () => {

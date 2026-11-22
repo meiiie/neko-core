@@ -1494,6 +1494,7 @@ export class Agent {
     let stateVerificationRequested = false;
     let stateVerificationReminderSent = false;
     let stateVerificationEvidence = false;
+    let usedTools = false;
     let completionVerificationEvidence = false;
     const freshFactVerificationRequired = !internal && requiresFreshFactVerification(instruction);
     let freshFactVerificationRequested = false;
@@ -1511,6 +1512,7 @@ export class Agent {
       && this.validationResult.authoritative
       && this.validationResult.ok;
     const noteTool = (call: { name: string; arguments?: any }, observation: any) => {
+      usedTools = true;
       const changesState = Agent.isStateChangingCall(call);
       const verifiesState = Agent.isVerificationEvidenceCall(call, observation);
       const failed = observation == null || Agent.isUnproductiveResult(observation);
@@ -1887,7 +1889,7 @@ export class Agent {
           }
         }
         // Intercept at most one unsupported final so the model can gather fresh verification evidence.
-        if (this.verifyBeforeExit && !verifiedExit && !completionVerificationEvidence && step < runStepLimit - 1) {
+        if (this.verifyBeforeExit && usedTools && !verifiedExit && !completionVerificationEvidence && step < runStepLimit - 1) {
           this.cost.efficiency.verificationNudge();
           verifiedExit = true;
           this.messages.push({
