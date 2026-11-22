@@ -22,6 +22,17 @@ function dreamProvider(called: () => void): Provider {
 }
 const tick = (ms = 25) => new Promise(resolve => setTimeout(resolve, ms));
 const until = async (check: () => boolean) => { for (let i = 0; i < 160 && !check(); i++) await tick(); return check(); };
+const removeFixture = async (path: string) => {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "EBUSY") || attempt === 19) throw error;
+      await tick(100);
+    }
+  }
+};
 
 test("TUI default auto Dream completes without /task or prepare/apply and is recalled next turn", async () => {
   const home = mkdtempSync(join(tmpdir(), "auto-dream-ui-")), root = join(home, "root");
@@ -46,7 +57,7 @@ test("TUI default auto Dream completes without /task or prepare/apply and is rec
     process.chdir(old.root);
     if (old.home === undefined) delete process.env.HOME; else process.env.HOME = old.home;
     if (old.profile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = old.profile;
-    rmSync(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    await removeFixture(home);
   }
 });
 
@@ -79,7 +90,7 @@ test("TUI accepts next input while Dream provider is blocked and aborts on unmou
     process.chdir(old.root);
     if (old.home === undefined) delete process.env.HOME; else process.env.HOME = old.home;
     if (old.profile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = old.profile;
-    rmSync(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    await removeFixture(home);
   }
 });
 
