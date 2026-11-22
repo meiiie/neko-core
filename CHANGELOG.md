@@ -6,8 +6,16 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.9.4] - 2026-11-22
+
 ### Fixed
 
+- Skip pre-finish verification on tool-free turns instead of asking for an
+  unnecessary verification pass when no tools ran.
+- Recover abandoned session writer locks across Linux PID namespaces using
+  process identity and a bounded heartbeat lease; fence checkpoints from a
+  writer that has lost its lease. Live legacy locks remain protected and may
+  need manual removal after confirming that no other Neko process is using them.
 - Send plain ACP session titles: an overlong automatic title ends with `…`
   instead of the terminal's `... [truncated]` marker. The terminal is unchanged.
 - Send post-turn automatic Dream notices over ACP as `session_info_update`
