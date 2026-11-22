@@ -5,7 +5,8 @@ import { validDisplayHistoryRef, validDisplayPending, type DisplayEntrySeed, typ
  * each turn; `neko chat --resume` reloads the latest session for the current directory.
  */
 import { randomBytes } from "node:crypto";
-import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, constants as fsConstants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync } from "node:fs";
+import { acquireFileLease } from "./session-lease.ts";
 import { lstat, mkdir, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { atomicWriteFile, atomicWriteFileSync } from "../shared/atomic.ts";
@@ -478,64 +479,11 @@ export interface SessionLease {
   release(): void;
 }
 
-function processIsAlive(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: any) {
-    return error?.code === "EPERM";
-  }
-}
-
-/** Cross-process single-writer lease. A crash leaves a tiny lock file; the next process recovers it
- * only after the recorded PID is no longer alive. The random token prevents an old owner from
- * unlinking a lock that has already been replaced by a newer process. */
 export function acquireSessionLease(id: string): SessionLease {
   const path = sessionPath(id);
   if (!path) throw new Error(`Invalid session '${id}'`);
   mkdirSync(sessionsDir(), { recursive: true });
-  const lockPath = `${path}.lock`;
-  const token = randomBytes(16).toString("hex");
-  const body = JSON.stringify({ pid: process.pid, token, acquiredAt: new Date().toISOString() });
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    let fd: number | undefined;
-    try {
-      fd = openSync(lockPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY, 0o600);
-      writeSync(fd, body, null, "utf8");
-      closeSync(fd);
-      fd = undefined;
-      let released = false;
-      return {
-        release: () => {
-          if (released) return;
-          released = true;
-          try {
-            const current = JSON.parse(readFileSync(lockPath, "utf8"));
-            if (current?.token === token) unlinkSync(lockPath);
-          } catch { /* a replaced/missing lock is not ours to remove */ }
-        },
-      };
-    } catch (error: any) {
-      if (fd !== undefined) try { closeSync(fd); } catch { /* already closed */ }
-      if (error?.code !== "EEXIST") throw error;
-      let stale = false;
-      try {
-        const stat = lstatSync(lockPath);
-        if (!stat.isFile() || stat.size > 4096) throw new Error("unsafe lock");
-        const lock = JSON.parse(readFileSync(lockPath, "utf8"));
-        stale = !processIsAlive(Number(lock?.pid));
-      } catch {
-        throw new Error(`Session '${id}' is already active or has an unsafe lock`);
-      }
-      if (!stale) throw new Error(`Session '${id}' already has an active writer`);
-      try { unlinkSync(lockPath); } catch (unlinkError: any) {
-        if (unlinkError?.code !== "ENOENT") throw new Error(`Session '${id}' lock could not be recovered`);
-      }
-    }
-  }
-  throw new Error(`Session '${id}' already has an active writer`);
+  return acquireFileLease(`${path}.lock`, id);
 }
 
 const INDEX_FILE = () => join(sessionsDir(), ".index.json");
