@@ -2838,12 +2838,12 @@ test("a failed validator stays as completion debt after a mutation and a read ca
   expect(agent.messages.some((message: any) => String(message.content).includes("VALIDATION FAILED"))).toBe(true);
 });
 
-test.each(["done", "Tests cannot run because the required runtime is unavailable."])("validation warning preserves the model explanation: %s", async (modelFinal) => {
+test("a final success claim cannot bypass failed post-edit validation after its nudge", async () => {
   const provider = new ScriptedProvider([
     { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "x.ts", old_string: "old", new_string: "fixed" } }] },
     { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: "bun test" } }] },
     { content: "looks done", tool_calls: [] },
-    { content: modelFinal, tool_calls: [] },
+    { content: "done", tool_calls: [] },
   ]);
   const agent = new Agent({
     provider,
@@ -2853,10 +2853,7 @@ test.each(["done", "Tests cannot run because the required runtime is unavailable
     verifyStateChangesBeforeExit: true,
     verifyBeforeExit: true,
   });
-  const result = await agent.run("fix x and run tests");
-  expect(result).toStartWith("Verification incomplete: required validation has not passed");
-  expect(result).toEndWith(`\n\n${modelFinal}`);
-  expect(agent.messages.at(-1)?.content).toBe(result);
+  expect(await agent.run("fix x and run tests")).toStartWith("Verification incomplete:");
   expect(provider.index).toBe(4);
   expect(agent.messages.filter((message) => String(message.content).startsWith("VALIDATION FAILED"))).toHaveLength(1);
   expect(agent.completionStatus).toMatchObject({ ok: false, reason: "validation_failed" });

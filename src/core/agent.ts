@@ -1865,7 +1865,7 @@ export class Agent {
           continue;
         }
         if (!validation.ok && (validation.reason === "validation_failed" || validation.reason === "validation_missing")) {
-          return this.stopUnverified(validation.reason, final);
+          return this.stopUnverified(validation.reason);
         }
         // A state-changing action requires fresh inspection evidence of its user-visible outcome.
         if (this.verifyStateChangesBeforeExit && changedRealState && step < runStepLimit - 1) {
@@ -2134,13 +2134,12 @@ export class Agent {
     return final;
   }
 
-  private async stopUnverified(reason: "outcome_unverified" | "validation_failed" | "validation_missing" = "outcome_unverified", modelFinal = ""): Promise<string> {
+  private async stopUnverified(reason: "outcome_unverified" | "validation_failed" | "validation_missing" = "outcome_unverified"): Promise<string> {
     const final = reason === "outcome_unverified"
       ? "Verification incomplete: the action ran, but its final outcome has not been independently observed. " +
         "Stopped without claiming success. Inspect the current state before continuing; do not repeat an action whose outcome is unknown."
       : "Verification incomplete: required validation has not passed for the current project state. " +
-        "Stopped without claiming success. Resolve the failed or stale validator before claiming completion." +
-        (modelFinal ? `\n\n${modelFinal}` : "");
+        "Stopped without claiming success. Resolve the failed or stale validator before claiming completion.";
     this.cost.efficiency.unverifiedStop();
     this.emit("verification_incomplete", { reason });
     return this.recordFinal(final);
