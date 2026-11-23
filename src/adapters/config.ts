@@ -834,17 +834,17 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   const home = opts.home ?? homeDir();
   const projectTrust = opts.path ? null : inspectProjectTrust(cwd, home);
   // Project config is trust-gated; credentials stay in the global file or environment.
-  const overlayEntries: { path: string; data: any }[] = opts.path
+  const overlayEntries: { path: string; data: any; project?: boolean }[] = opts.path
     ? [{ path: opts.path, data: readOverlay(opts.path) }]
     : [
         { path: join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), data: readOverlay(join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)) },
         { path: join(home, "neko.json"), data: readOverlay(join(home, "neko.json")) },
-        ...(projectTrust?.state === "trusted" ? projectTrust.configEntries : []),
+        ...(projectTrust?.state === "trusted" ? projectTrust.configEntries.map((entry) => ({ ...entry, project: true })) : []),
       ];
   const overlayPaths = overlayEntries.map((entry) => entry.path);
   const overlays = overlayEntries.map((entry) => entry.data);
   const pendingUserOverlay = opts.path ? undefined : opts.userOverlay;
-  // Keep external overlays scoped to the stored profile until the switch is committed.
+  // Keep trusted project overlays scoped as they were before the switch.
   const storedActiveProfile = pendingUserOverlay
     ? overlays.reduce((active, overlay) => Object.hasOwn(overlay, "active_profile") ? overlay.active_profile : active, DEFAULTS.active_profile)
     : undefined;
@@ -866,8 +866,8 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
 
   let merged: any = structuredClone(DEFAULTS);
   if (selected) merged = mergeDeep(merged, profiles[selected]);
-  const storedProfile = (pendingUserOverlay ? storedActiveProfile : filesMerged.active_profile) || DEFAULTS.active_profile;
-  for (const overlay of overlays) {
+  for (const [i, overlay] of overlays.entries()) {
+    const storedProfile = (pendingUserOverlay && overlayEntries[i].project ? storedActiveProfile : filesMerged.active_profile) || DEFAULTS.active_profile;
     const scoped = { ...overlay };
     if (selected && storedProfile && selected !== storedProfile) {
       for (const field of PROFILE_CONNECTION_FIELDS) delete scoped[field];

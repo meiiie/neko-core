@@ -259,6 +259,20 @@ test.each([
   expect(JSON.parse(readFileSync(path, "utf8")).profiles.legacy).toBeUndefined();
 });
 
+test("switch validation uses the gateway connection from the secondary home config", () => {
+  withTempHome(JSON.stringify({
+    active_profile: "local",
+    profiles: { gateway: { base_url: "https://preset.example/v1", key_env_fallbacks: [] } },
+  }));
+  const home = process.env.USERPROFILE!;
+  const gateway = { base_url: "https://gateway.example/v1", api_key: "fake-gateway-key" };
+  writeFileSync(join(home, "neko.json"), JSON.stringify(gateway));
+  const live = setActiveProfile("gateway", (next) => !next.isLocalEndpoint && Boolean(next.apiKey));
+  expect([live?.baseUrl, live?.apiKey]).toEqual([gateway.base_url, gateway.api_key]);
+  const saved = loadConfig({ home });
+  expect([saved.profile, saved.baseUrl, saved.apiKey]).toEqual(["gateway", gateway.base_url, gateway.api_key]);
+});
+
 test("selecting a scoped profile does not adopt a trusted project's top-level endpoint or save it globally", () => {
   const path = withTempHome(JSON.stringify({
     active_profile: "local",
