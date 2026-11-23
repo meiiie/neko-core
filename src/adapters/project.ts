@@ -120,9 +120,7 @@ export function setActiveProfile(name: string, validate?: (next: NekoConfig) => 
       const baseUrl = legacyBaseUrlRepair(previous, provider, String(legacyBaseUrl)) ?? legacyBaseUrl;
       const sameRoute = (provider ?? DEFAULTS.provider) === scopedProvider &&
         String(baseUrl ?? "").replace(/\/+$/, "") === String(scopedUrl ?? "").replace(/\/+$/, "");
-      const hasScopedConnection = scoped.base_url !== undefined || scoped.provider !== undefined ||
-        scoped.api_key || scoped.key_env || scoped.key_env_fallbacks?.length;
-      if (!sameRoute && hasScopedConnection) {
+      if (!sameRoute && (scoped.api_key || scoped.key_env || scoped.key_env_fallbacks?.length)) {
         separateConnection = {
           provider,
           base_url: baseUrl,

@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { clearApiKey, initUser, patchUserConfig, setActiveProfile, setApiKey, setModel } from "../src/adapters/project.ts";
 import { loadConfig } from "../src/adapters/config.ts";
+import { trustProject } from "../src/adapters/project-trust.ts";
 import { getProvider } from "../src/adapters/providers.ts";
 
 // project.ts resolves the user config under homedir(); point that at a temp dir per test.
@@ -192,7 +193,7 @@ test("a legacy key does not make a keyless scoped profile selectable", () => {
 
 test.each([
   ["openai", "https://api.openai.com/v1", {}],
-  ["custom", "https://scoped.example/v1", { custom: { base_url: "https://scoped.example/v1" } }],
+  ["custom", "https://scoped.example/v1", { custom: { base_url: "https://scoped.example/v1", api_key: "fake-scoped-key" } }],
 ] as const)("named API-key login writes the new key to the %s scoped route", (profile, baseUrl, profiles) => {
   const path = withTempHome(JSON.stringify({
     active_profile: profile,
@@ -206,6 +207,48 @@ test.each([
   const legacy = loadConfig({ path, profile: "legacy" });
   expect([active.profile, active.baseUrl, active.apiKey]).toEqual([profile, baseUrl, "fake-new-openai-key"]);
   expect([legacy.baseUrl, legacy.apiKey]).toEqual(["https://legacy.example/v1", "fake-legacy-key"]);
+});
+
+test.each([
+  ["ollama", "http://localhost:8246/v1", undefined, {}],
+  ["custom", "https://legacy.example/v1", "fake-working-key", { custom: { base_url: "https://preset.example/v1" } }],
+] as const)("keyless %s profile keeps its effective legacy connection on reselection", (profile, baseUrl, key, profiles) => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: profile,
+    base_url: baseUrl,
+    model: "legacy-model",
+    api_key: key,
+    max_tokens: 512,
+    profiles,
+  }));
+  const before = loadConfig({ path });
+  setActiveProfile(profile);
+  const after = loadConfig({ path });
+  expect([after.profile, after.provider, after.baseUrl, after.model, after.apiKey, after.maxTokens]).toEqual(
+    [before.profile, before.provider, before.baseUrl, before.model, before.apiKey, before.maxTokens],
+  );
+  expect(JSON.parse(readFileSync(path, "utf8")).profiles.legacy).toBeUndefined();
+});
+
+test("selecting a scoped profile does not adopt a trusted project's top-level endpoint or save it globally", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "local",
+    profiles: { openai: { api_key: "fake-scoped-key" } },
+  }));
+  const home = process.env.USERPROFILE!;
+  const root = join(home, "fixture-project");
+  mkdirSync(root);
+  writeFileSync(join(root, "neko.json"), JSON.stringify({ base_url: "https://trusted-project.invalid/v1" }));
+  expect(trustProject(root, home).state).toBe("trusted");
+  const cwd = process.cwd();
+  process.chdir(root);
+  try {
+    const live = setActiveProfile("openai", () => true);
+    expect([live?.baseUrl, live?.apiKey]).toEqual(["https://api.openai.com/v1", "fake-scoped-key"]);
+    expect(readFileSync(path, "utf8")).not.toContain("trusted-project.invalid");
+  } finally {
+    process.chdir(cwd);
+  }
 });
 
 test("a migrated legacy connection retains its provider's completion budget field", async () => {
