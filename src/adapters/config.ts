@@ -916,7 +916,9 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
     const homeOverrides = Object.fromEntries(PROFILE_CONNECTION_FIELDS
       .filter((field) => Object.hasOwn(homeConfig, field))
       .map((field) => [field, homeConfig[field]]));
-    let profile = mergeDeep(DEFAULTS.profiles[selected] ?? {}, homeConfig.profiles?.[selected] ?? {});
+    const defaultRoute = { provider: DEFAULTS.provider, base_url: DEFAULTS.base_url };
+    const preset = mergeDeep(defaultRoute, DEFAULTS.profiles[selected] ?? {});
+    let profile = mergeDeep(preset, homeConfig.profiles?.[selected] ?? {});
     for (const overlay of projectProfiles) profile = mergeProjectConnection(profile, overlay, homeOverrides);
     const connection = mergeDeep(profile, homeOverrides);
     for (const field of PROFILE_CREDENTIAL_FIELDS) {

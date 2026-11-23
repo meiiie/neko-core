@@ -231,6 +231,21 @@ test("nested project profiles preserve only keys compatible with the effective r
   expect([masked.baseUrl, masked.apiKey]).toEqual(["https://user.example/v1", "fake-home-key"]);
 });
 
+test("a nested project profile can explicitly name the inherited default route without losing its key", () => {
+  const { root, home } = fixture();
+  const project = join(root, "neko.json");
+  writeJson(join(home, ".neko-core", "config.json"), {
+    active_profile: "custom",
+    profiles: { custom: { api_key: "fake-profile-key" } },
+  });
+  const original = loadConfig({ cwd: root, home });
+  expect(original.baseUrl).not.toBe("");
+  writeJson(project, { profiles: { custom: { provider: original.provider, base_url: original.baseUrl } } });
+  trustProject(root, home);
+  const trusted = loadConfig({ cwd: root, home });
+  expect([trusted.provider, trusted.baseUrl, trusted.apiKey]).toEqual([original.provider, original.baseUrl, "fake-profile-key"]);
+});
+
 test("environment route overrides keep the key when they mask a trusted project route change", () => {
   const { root, home } = fixture();
   const original = "https://user.example/v1";
