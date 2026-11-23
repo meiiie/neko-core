@@ -1,6 +1,6 @@
 # Neko Core roadmap
 
-## Current status (2026-11-22) - v1.9.4 prepared; v1.9.3 published
+## Current status (2026-11-23) - v1.9.5 prepared; v1.9.4 published
 
 Neko Core is a production terminal agent with a stable public CLI, embeddable core, and ACP v1 server.
 The current 1.x platform includes:
@@ -25,13 +25,16 @@ The current 1.x platform includes:
 - resumable, disk-streamed release downloads plus compressed transfer artifacts, with final binary digest and
   embedded-version verification before atomic activation.
 
-**Branch:** `main`. **Current release:** [v1.9.3](https://github.com/meiiie/neko-core/releases/tag/v1.9.3); v1.9.4 is prepared, not published.
-Publication verified: latest points to v1.9.3, with all 17 release assets.
+**Branch:** `main`. **Current release:** [v1.9.4](https://github.com/meiiie/neko-core/releases/tag/v1.9.4); v1.9.5 is prepared, not published.
+Publication verified: latest points to v1.9.4, with all 17 release assets.
 
-The v1.9.4 candidate skips unnecessary pre-finish verification on tool-free
+The v1.9.5 candidate releases ACP task writer locks on clean signal shutdown and
+drops the hidden current-fact verification turn from tool-free answers.
+Publication remains pending. See [candidate record](RELEASE-1.9.5.md).
+
+The v1.9.4 release skips unnecessary pre-finish verification on tool-free
 turns, recovers abandoned cross-PID-namespace session leases and fixes ACP
-titles and post-turn Dream notices. Publication and cross-platform gates remain
-pending. See [candidate record](RELEASE-1.9.4.md).
+titles and post-turn Dream notices. See [candidate record](RELEASE-1.9.4.md).
 
 The v1.9.3 release adds a bounded living-memory episode index and task-scope protections.
 Model-level recall improvements are not yet established. See [research review](../research/living-memory-review-2026-11-12.md).
