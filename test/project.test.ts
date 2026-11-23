@@ -166,23 +166,33 @@ test("a migrated legacy endpoint does not inherit the previous profile's env key
   }
 });
 
-test("splitting a profile with its own fallback credentials does not park legacy env bindings", () => {
+test("splitting preserves the explicit legacy env binding but not fallback bindings", () => {
   const path = withTempHome(JSON.stringify({
     active_profile: "custom",
     base_url: "https://legacy.example/v1",
-    key_env: "OPENAI_API_KEY",
+    key_env: "NEKO_TEST_LEGACY_API_KEY",
     key_env_fallbacks: ["NVIDIA_API_KEY"],
     profiles: {
       custom: { base_url: "https://scoped.example/v1", key_env_fallbacks: ["CUSTOM_API_KEY"] },
     },
   }));
-  setActiveProfile("custom");
-  const saved = JSON.parse(readFileSync(path, "utf8"));
-  expect(saved.active_profile).toBe("custom");
-  expect(saved.profiles.custom.key_env_fallbacks).toEqual(["CUSTOM_API_KEY"]);
-  expect(saved.profiles.legacy.key_env).toBeUndefined();
-  expect(saved.profiles.legacy.key_env_fallbacks).toEqual([]);
-  expect(loadConfig({ path, profile: "legacy" }).apiKey).toBe("");
+  const previous = process.env.NEKO_TEST_LEGACY_API_KEY;
+  process.env.NEKO_TEST_LEGACY_API_KEY = "fake-legacy-env-key";
+  try {
+    const before = loadConfig({ path });
+    setActiveProfile("custom");
+    const saved = JSON.parse(readFileSync(path, "utf8"));
+    expect(saved.active_profile).toBe("custom");
+    expect(saved.profiles.custom.key_env_fallbacks).toEqual(["CUSTOM_API_KEY"]);
+    expect(saved.profiles.legacy.key_env_fallbacks).toEqual([]);
+    const legacy = loadConfig({ path, profile: "legacy" });
+    expect([legacy.baseUrl, legacy.apiKey]).toEqual([before.baseUrl, before.apiKey]);
+    expect(legacy.apiKey).toBe("fake-legacy-env-key");
+    expect(saved.profiles.legacy.key_env).toBe("NEKO_TEST_LEGACY_API_KEY");
+  } finally {
+    if (previous === undefined) delete process.env.NEKO_TEST_LEGACY_API_KEY;
+    else process.env.NEKO_TEST_LEGACY_API_KEY = previous;
+  }
 });
 
 test.each([["fake-legacy-key"], [undefined]])("reselecting validates the scoped route instead of the legacy route (%s)", (legacyKey) => {
