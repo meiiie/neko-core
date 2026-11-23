@@ -1,5 +1,22 @@
 # Neko Core work log
 
+## 2026-11-23 - v1.9.5 release preparation
+
+Prepared from main `8f5044123aa9a73823239be11c439bc42d6768e1`. Scope since
+v1.9.4 is #109 (CI/test only), #110 (ACP task writer locks released on clean
+signal shutdown; a failed close or SIGKILL still fails closed) and #111 (no hidden
+current-fact verification turn on tool-free answers; the sovereignty web
+freshness gate is kept). See [candidate record](RELEASE-1.9.5.md).
+
+Linux candidate verification with Bun `1.4.0` and Node `22.23.5`: typecheck and
+lint exit 0; full suite 2,232 pass, 40 skip, 0 fail, 26,791 assertions across
+227 files. Doctor and policy exit 0; policy verdict is WARN (missing model/key,
+untrusted project, non-TTY), not a clean policy configuration. Build, compiled
+render, real-PTY input, ACP v1 (`neko-core 1.9.5`), startup/exit lifecycle and
+startup-input probes pass. Gitleaks `8.30.1` redacted history scan (999 commits)
+and the v1.9.4..candidate diff scan report no leaks. No runtime or test code
+changed during preparation.
+
 ## 2026-11-22 - v1.9.4 release preparation
 
 Prepared from main `d725b202009b2420dc9977378017de65badf7537`, including #106

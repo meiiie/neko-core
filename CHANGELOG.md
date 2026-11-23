@@ -6,8 +6,14 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.9.5] - 2026-11-23
+
 ### Fixed
 
+- Release task writer locks when an ACP server shuts down cleanly on SIGTERM,
+  SIGINT or SIGHUP, so a host that quits and relaunches can continue the same
+  session without a stale lock. A failed close or SIGKILL still leaves the lock
+  in place (fail closed).
 - Finish ordinary tool-free answers in one model turn without a hidden current-fact
   verification continuation triggered by question wording. The Accuracy prompt still directs
   the model to verify volatile public facts online; the narrow Hoàng Sa/Trường Sa web
