@@ -1,10 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { clearApiKey, initUser, patchUserConfig, setActiveProfile, setApiKey, setModel } from "../src/adapters/project.ts";
 import { loadConfig } from "../src/adapters/config.ts";
+import { trustProject } from "../src/adapters/project-trust.ts";
+import { getProvider } from "../src/adapters/providers.ts";
 
 // project.ts resolves the user config under homedir(); point that at a temp dir per test.
 const ORIG = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
@@ -16,7 +18,7 @@ afterEach(() => {
 });
 
 function withTempHome(configText: string): string {
-  const tmp = mkdtempSync(join(tmpdir(), "nk-home-"));
+  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "nk-home-")));
   process.env.HOME = tmp;
   process.env.USERPROFILE = tmp;
   mkdirSync(join(tmp, ".neko-core"), { recursive: true });
@@ -121,6 +123,231 @@ test("switching profiles preserves a legacy top-level key under the previous pro
   expect(cfg.active_profile).toBe("zai");
   expect(cfg.profiles.nvidia.api_key).toBe("OLD-NKEY");
   expect(cfg.api_key).toBeUndefined();
+});
+
+test("switching profiles does not move a scoped key onto a different legacy endpoint", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "openai",
+    base_url: "https://legacy.example/v1",
+    api_key: "fake-legacy-key",
+    profiles: { openai: { base_url: "https://scoped.example/v1", api_key: "fake-scoped-key" } },
+  }));
+  setActiveProfile("zai");
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  expect(saved.active_profile).toBe("zai");
+  expect(saved.profiles.openai).toMatchObject({ base_url: "https://scoped.example/v1", api_key: "fake-scoped-key" });
+  expect(saved.profiles.legacy).toMatchObject({ base_url: "https://legacy.example/v1", api_key: "fake-legacy-key" });
+  expect(saved.api_key).toBeUndefined();
+  expect(saved.base_url).toBeUndefined();
+  const scoped = loadConfig({ path, profile: "openai" });
+  const legacy = loadConfig({ path, profile: "legacy" });
+  expect([scoped.baseUrl, scoped.apiKey]).toEqual(["https://scoped.example/v1", "fake-scoped-key"]);
+  expect([legacy.baseUrl, legacy.apiKey]).toEqual(["https://legacy.example/v1", "fake-legacy-key"]);
+});
+
+test("a migrated legacy endpoint does not inherit the previous profile's env key", () => {
+  const previous = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "fake-openai-env-key";
+  try {
+    const path = withTempHome(JSON.stringify({
+      active_profile: "openai",
+      base_url: "https://legacy.example/v1",
+      profiles: { legacy: { model: "keep-existing" } },
+    }));
+    setActiveProfile("zai");
+    const scoped = loadConfig({ path, profile: "openai" });
+    const legacy = loadConfig({ path, profile: "legacy-2" });
+    expect([scoped.baseUrl, scoped.apiKey]).toEqual(["https://api.openai.com/v1", "fake-openai-env-key"]);
+    expect([legacy.baseUrl, legacy.apiKey]).toEqual(["https://legacy.example/v1", ""]);
+    expect(loadConfig({ path, profile: "legacy" }).model).toBe("keep-existing");
+  } finally {
+    if (previous === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previous;
+  }
+});
+
+test("splitting preserves the explicit legacy env binding but not fallback bindings", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "custom",
+    base_url: "https://legacy.example/v1",
+    key_env: "NEKO_TEST_LEGACY_API_KEY",
+    key_env_fallbacks: ["NVIDIA_API_KEY"],
+    profiles: {
+      custom: { base_url: "https://scoped.example/v1", key_env_fallbacks: ["CUSTOM_API_KEY"] },
+    },
+  }));
+  const previous = process.env.NEKO_TEST_LEGACY_API_KEY;
+  process.env.NEKO_TEST_LEGACY_API_KEY = "fake-legacy-env-key";
+  try {
+    const before = loadConfig({ path });
+    setActiveProfile("custom");
+    const saved = JSON.parse(readFileSync(path, "utf8"));
+    expect(saved.active_profile).toBe("custom");
+    expect(saved.profiles.custom.key_env_fallbacks).toEqual(["CUSTOM_API_KEY"]);
+    expect(saved.profiles.legacy.key_env_fallbacks).toEqual([]);
+    const legacy = loadConfig({ path, profile: "legacy" });
+    expect([legacy.baseUrl, legacy.apiKey]).toEqual([before.baseUrl, before.apiKey]);
+    expect(legacy.apiKey).toBe("fake-legacy-env-key");
+    expect(saved.profiles.legacy.key_env).toBe("NEKO_TEST_LEGACY_API_KEY");
+  } finally {
+    if (previous === undefined) delete process.env.NEKO_TEST_LEGACY_API_KEY;
+    else process.env.NEKO_TEST_LEGACY_API_KEY = previous;
+  }
+});
+
+test.each([["fake-legacy-key"], [undefined]])("reselecting validates the scoped route instead of the legacy route (%s)", (legacyKey) => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "openai",
+    base_url: "https://legacy.example/v1",
+    api_key: legacyKey,
+    profiles: { openai: { base_url: "https://scoped.example/v1", api_key: "fake-scoped-key" } },
+  }));
+  const live = setActiveProfile("openai", (next) => next.apiKey === "fake-scoped-key");
+  const saved = loadConfig({ path });
+  expect([saved.profile, saved.baseUrl, saved.apiKey]).toEqual(["openai", "https://scoped.example/v1", "fake-scoped-key"]);
+  expect([live?.profile, live?.baseUrl, live?.apiKey]).toEqual([saved.profile, saved.baseUrl, saved.apiKey]);
+});
+
+test("a legacy key does not make a keyless scoped profile selectable", () => {
+  const original = JSON.stringify({
+    active_profile: "openai",
+    base_url: "https://legacy.example/v1",
+    api_key: "fake-legacy-key",
+    profiles: { openai: { key_env: "NEKO_TEST_MIGRATION_KEY_ABSENT", base_url: "https://scoped.example/v1" } },
+  });
+  const path = withTempHome(original);
+  expect(setActiveProfile("openai", (next) => Boolean(next.apiKey))).toBeUndefined();
+  expect(readFileSync(path, "utf8")).toBe(original);
+});
+
+test.each([
+  ["openai", "https://api.openai.com/v1", {}],
+  ["custom", "https://scoped.example/v1", { custom: { base_url: "https://scoped.example/v1", api_key: "fake-scoped-key" } }],
+] as const)("named API-key login writes the new key to the %s scoped route", (profile, baseUrl, profiles) => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: profile,
+    base_url: "https://legacy.example/v1",
+    api_key: "fake-legacy-key",
+    profiles,
+  }));
+  setActiveProfile(profile);
+  setApiKey("fake-new-openai-key");
+  const active = loadConfig({ path });
+  const legacy = loadConfig({ path, profile: "legacy" });
+  expect([active.profile, active.baseUrl, active.apiKey]).toEqual([profile, baseUrl, "fake-new-openai-key"]);
+  expect([legacy.baseUrl, legacy.apiKey]).toEqual(["https://legacy.example/v1", "fake-legacy-key"]);
+});
+
+test.each([
+  ["ollama", "http://localhost:8246/v1", undefined, {}],
+  ["custom", "https://legacy.example/v1", "fake-working-key", { custom: { base_url: "https://preset.example/v1" } }],
+] as const)("keyless %s profile keeps its effective legacy connection on reselection", (profile, baseUrl, key, profiles) => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: profile,
+    base_url: baseUrl,
+    model: "legacy-model",
+    api_key: key,
+    max_tokens: 512,
+    profiles,
+  }));
+  const before = loadConfig({ path });
+  setActiveProfile(profile);
+  const after = loadConfig({ path });
+  expect([after.profile, after.provider, after.baseUrl, after.model, after.apiKey, after.maxTokens]).toEqual(
+    [before.profile, before.provider, before.baseUrl, before.model, before.apiKey, before.maxTokens],
+  );
+  expect(JSON.parse(readFileSync(path, "utf8")).profiles.legacy).toBeUndefined();
+});
+
+test("switch validation uses the gateway connection from the secondary home config", () => {
+  withTempHome(JSON.stringify({
+    active_profile: "local",
+    profiles: { gateway: { base_url: "https://preset.example/v1", key_env_fallbacks: [] } },
+  }));
+  const home = process.env.USERPROFILE!;
+  const gateway = { base_url: "https://gateway.example/v1", api_key: "fake-gateway-key" };
+  writeFileSync(join(home, "neko.json"), JSON.stringify(gateway));
+  const live = setActiveProfile("gateway", (next) => !next.isLocalEndpoint && Boolean(next.apiKey));
+  expect([live?.baseUrl, live?.apiKey]).toEqual([gateway.base_url, gateway.api_key]);
+  const saved = loadConfig({ home });
+  expect([saved.profile, saved.baseUrl, saved.apiKey]).toEqual(["gateway", gateway.base_url, gateway.api_key]);
+});
+
+test("selecting a scoped profile does not adopt a trusted project's top-level endpoint or save it globally", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "local",
+    profiles: { openai: { api_key: "fake-scoped-key" } },
+  }));
+  const home = process.env.USERPROFILE!;
+  const root = join(home, "fixture-project");
+  mkdirSync(root);
+  writeFileSync(join(root, "neko.json"), JSON.stringify({ base_url: "https://trusted-project.invalid/v1" }));
+  expect(trustProject(root, home).state).toBe("trusted");
+  const cwd = process.cwd();
+  process.chdir(root);
+  try {
+    const live = setActiveProfile("openai", () => true);
+    expect([live?.baseUrl, live?.apiKey]).toEqual(["https://api.openai.com/v1", "fake-scoped-key"]);
+    const reloaded = loadConfig({ profile: "openai" });
+    expect(reloaded.baseUrl).toBe("https://trusted-project.invalid/v1");
+    expect(setActiveProfile("openai", () => true)?.baseUrl).toBe(reloaded.baseUrl);
+    expect(readFileSync(path, "utf8")).not.toContain("trusted-project.invalid");
+  } finally {
+    process.chdir(cwd);
+  }
+});
+
+test("a migrated legacy connection retains its provider's completion budget field", async () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "openai",
+    base_url: "https://legacy.example/v1",
+    api_key: "fake-legacy-key",
+    max_tokens: 512,
+    profiles: { openai: { completion_tokens_field: "max_completion_tokens" } },
+  }));
+  setActiveProfile("zai");
+  const migrated = loadConfig({ path, profile: "legacy" });
+  const originalFetch = globalThis.fetch;
+  let body: ReturnType<typeof JSON.parse>;
+  // SAFETY: this fixture implements the fetch arguments the provider uses.
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return Response.json({ choices: [{ message: { role: "assistant", content: "ok" } }] });
+  }) as typeof fetch;
+  try {
+    await getProvider(migrated).complete([{ role: "user", content: "hello" }]);
+    expect(body.max_completion_tokens).toBe(512);
+    expect(body.max_tokens).toBeUndefined();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("switching profiles keeps same-route credentials on the original profile", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "openai",
+    base_url: "https://api.openai.com/v1/",
+    model: "legacy-model",
+    api_key: "fake-legacy-key",
+    profiles: { openai: { api_key: "fake-scoped-key" } },
+  }));
+  setActiveProfile("zai");
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  expect(saved.profiles.openai).toMatchObject({ model: "legacy-model", api_key: "fake-scoped-key" });
+  expect(saved.profiles.legacy).toBeUndefined();
+});
+
+test("switching profiles keeps Z.AI legacy URL repair on the original profile", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "zai",
+    base_url: "https://api.z.ai/api/paas/v4",
+    api_key: "fake-coding-key",
+  }));
+  setActiveProfile("openai");
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  expect(saved.profiles.legacy).toBeUndefined();
+  const coding = loadConfig({ path, profile: "zai" });
+  expect([coding.baseUrl, coding.apiKey]).toEqual(["https://api.z.ai/api/anthropic", "fake-coding-key"]);
 });
 
 test("switching routes keeps a legacy endpoint and credential with their owning profile", () => {

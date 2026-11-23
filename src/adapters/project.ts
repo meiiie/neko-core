@@ -8,7 +8,7 @@ import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { dirname, join } from "node:path";
 
-import { DEFAULTS, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME, PROFILE_CONNECTION_FIELDS } from "./config.ts";
+import { DEFAULTS, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME, PROFILE_CONNECTION_FIELDS, legacyBaseUrlRepair, loadConfig, type NekoConfig, type Profile } from "./config.ts";
 import { ensureNekoHome } from "./context.ts";
 
 import { isBool, isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
@@ -31,10 +31,9 @@ function readUserConfig(): any {
 }
 
 /** Read-modify-write that aborts (never overwrites) if the existing config is malformed. */
-function updateUserConfig(mutate: (data: any) => void): void {
+function updateUserConfig(mutate: (data: any) => void | false): void {
   const data = readUserConfig();
-  mutate(data);
-  writeUserConfig(data);
+  if (mutate(data) !== false) writeUserConfig(data);
 }
 
 function writeUserConfig(data: any): void {
@@ -105,18 +104,52 @@ export function setAutoUpdate(on: boolean): void {
 }
 
 /** Persist the active provider profile so `neko` uses it by default — no --profile flag, no config editing.
- * Also drops any stray top-level model/api_key so the profile's own endpoint+key+model take effect cleanly. */
-export function setActiveProfile(name: string): void {
+ * Move legacy connection settings off the global config and, if requested, validate before saving. */
+export function setActiveProfile(name: string, validate?: (next: NekoConfig) => boolean): NekoConfig | undefined {
+  let next: NekoConfig | undefined;
   updateUserConfig((d: any) => {
     let previous = isText(d.active_profile) ? d.active_profile : DEFAULTS.active_profile;
+    let separateConnection: Profile | undefined;
+    if (previous) {
+      const scoped = { ...DEFAULTS.profiles[previous], ...d.profiles?.[previous] };
+      const scopedProvider = scoped.provider ?? DEFAULTS.provider;
+      const provider = d.provider === undefined ? scopedProvider : d.provider;
+      const scopedBaseUrl = scoped.base_url === undefined ? DEFAULTS.base_url : scoped.base_url;
+      const legacyBaseUrl = d.base_url === undefined ? scopedBaseUrl : d.base_url;
+      const scopedUrl = legacyBaseUrlRepair(previous, scopedProvider, String(scopedBaseUrl)) ?? scopedBaseUrl;
+      const baseUrl = legacyBaseUrlRepair(previous, provider, String(legacyBaseUrl)) ?? legacyBaseUrl;
+      const sameRoute = (provider ?? DEFAULTS.provider) === scopedProvider &&
+        String(baseUrl ?? "").replace(/\/+$/, "") === String(scopedUrl ?? "").replace(/\/+$/, "");
+      if (!sameRoute && (scoped.api_key || scoped.key_env || scoped.key_env_fallbacks?.length)) {
+        separateConnection = {
+          provider,
+          base_url: baseUrl,
+          model: scoped.model,
+          models: scoped.models,
+          model_context: scoped.model_context,
+          context_window: scoped.context_window,
+          max_tokens: scoped.max_tokens,
+          effort_ceiling: scoped.effort_ceiling,
+          adaptive_effort: scoped.adaptive_effort,
+          vision: scoped.vision,
+          image_long_edge: scoped.image_long_edge,
+          image_max_bytes: scoped.image_max_bytes,
+          thinking_wire: scoped.thinking_wire,
+          completion_tokens_field: scoped.completion_tokens_field,
+          key_env_fallbacks: [],
+        };
+        previous = null;
+      }
+    }
     if (!previous && PROFILE_CONNECTION_FIELDS.some((field) => d[field] !== undefined)) {
       previous = "legacy";
       for (let suffix = 2; d.profiles?.[previous]; suffix++) previous = `legacy-${suffix}`;
     }
     if (previous) {
       if (!isObjectValue(d.profiles)) d.profiles = {};
-      if (!isJsonObject(d.profiles[previous])) d.profiles[previous] = {};
+      if (!isJsonObject(d.profiles[previous])) d.profiles[previous] = separateConnection ?? {};
       for (const field of PROFILE_CONNECTION_FIELDS) {
+        if (separateConnection && (field === "base_url" || field === "key_env_fallbacks")) continue;
         if (d[field] !== undefined && (field !== "api_key" || !d.profiles[previous].api_key)) {
           d.profiles[previous][field] = d[field];
         }
@@ -124,7 +157,13 @@ export function setActiveProfile(name: string): void {
     }
     d.active_profile = name;
     for (const field of PROFILE_CONNECTION_FIELDS) delete d[field];
+    if (validate) {
+      const candidate = loadConfig({ profile: name, userOverlay: d });
+      if (!validate(candidate)) return false;
+      next = candidate;
+    }
   });
+  return next;
 }
 
 /** Persist the chosen reasoning effort across sessions ("" / off clears it). */

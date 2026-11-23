@@ -278,23 +278,7 @@ function openResumePicker(ctx: CommandCtx, scope: "smart" | "cwd" | "all", all =
   });
 }
 
-/** Switch the active provider profile LIVE: persist it as the default (no --profile flag, no config edit),
- * rebuild the provider (new endpoint + key + model), swap it into the running agent, and adopt the settings
- * into the in-session cfg. Returns true when the new provider HAS a key (so the caller may chain the model
- * picker); false when it errored or the provider still needs /login. */
-function switchProfile(ctx: CommandCtx, name: string): boolean {
-  const { cfg, agent, addLine } = ctx;
-  if (!cfg.profiles[name]) {
-    addLine("error", `no provider "${name}". Known: ${Object.keys(cfg.profiles).sort().join(", ")}`);
-    return false;
-  }
-  let next: NekoConfig;
-  try {
-    next = loadConfig({ profile: name });
-  } catch (error) {
-    addLine("error", `loading provider "${name}": ${error instanceof Error ? error.message : error}`);
-    return false;
-  }
+function canSwitchProfile(next: NekoConfig, name: string, addLine: CommandCtx["addLine"]): boolean {
   // Selection and onboarding are separate. Never replace a working provider with an unusable one;
   // /login owns credential setup and activates the profile only after that setup succeeds.
   if (next.usesChatGptAuth && !hasChatGptCredentials()) {
@@ -325,7 +309,24 @@ function switchProfile(ctx: CommandCtx, name: string): boolean {
     addLine("info", `note: provider "${name}" has no API key yet - type /login to add it (it saves to this provider).`);
     return false;
   }
-  setActiveProfile(name); // persist only a usable default for the next session
+  return true;
+}
+
+/** Switch the active provider live and persist the same connection for the next session. */
+function switchProfile(ctx: CommandCtx, name: string): boolean {
+  const { cfg, agent, addLine } = ctx;
+  if (!cfg.profiles[name]) {
+    addLine("error", `no provider "${name}". Known: ${Object.keys(cfg.profiles).sort().join(", ")}`);
+    return false;
+  }
+  let next: NekoConfig | undefined;
+  try {
+    next = setActiveProfile(name, (candidate) => canSwitchProfile(candidate, name, addLine));
+  } catch (error) {
+    addLine("error", `loading provider "${name}": ${error instanceof Error ? error.message : error}`);
+    return false;
+  }
+  if (!next) return false;
   cfg.adopt(next); // in-session cfg now = the new provider (endpoint+model+key)
   agent.setProvider(getProvider(cfg)); // the running agent calls the new endpoint from the next turn
   agent.setMaxContextTokens(cfg.contextWindow);

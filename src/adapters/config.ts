@@ -5,7 +5,7 @@ import { delimiter, isAbsolute, join, parse, relative, resolve, sep } from "node
 
 import { isMode, type PermissionMode } from "../core/permissions.ts";
 import { parseComputerInputPolicy, type ComputerInputPolicy } from "../core/computer-input-policy.ts";
-import { isJsonArray, isJsonObject, isObjectValue, isText, type JsonValue } from "../shared/wire.ts";
+import { isJsonArray, isJsonObject, isObjectValue, isText, type JsonObject, type JsonValue } from "../shared/wire.ts";
 import type { McpServerConfig } from "./mcp.ts";
 import { inspectProjectTrust, type ProjectTrustSummary } from "./project-trust.ts";
 
@@ -428,7 +428,7 @@ export class NekoConfig {
     /** printable, profile-merged, env-overridden settings (no secrets) */
     public readonly data: any,
     public profile: string | null,
-    public readonly profiles: Record<string, Profile>,
+    private profileCatalog: Record<string, Profile>,
     private apiKeyFromFile: string,
     /** Set when a top-level `model` (config file or NEKO_MODEL) overrides the selected profile's preset
      * model — the #1 config trap: `--profile x` silently keeps the file's model. Doctor names the source. */
@@ -440,6 +440,8 @@ export class NekoConfig {
     public resolvedHome: string = homeDir(),
   ) {}
 
+  get profiles(): Record<string, Profile> { return this.profileCatalog; }
+
   /** Adopt another config's provider profile IN PLACE — data, profile name, and resolved key — so the
    * existing cfg reference (held by the REPL + agent wiring) stays valid while `/provider` switches the
    * endpoint + model + key live, without a restart. */
@@ -447,6 +449,7 @@ export class NekoConfig {
     for (const k of Object.keys(this.data)) delete this.data[k];
     Object.assign(this.data, other.data);
     this.profile = other.profile;
+    this.profileCatalog = other.profileCatalog;
     this.apiKeyFromFile = other.apiKeyFromFile;
     this.modelShadow = other.modelShadow;
     this.childKeyEnvsFromConfig = [...other.childKeyEnvsFromConfig];
@@ -797,8 +800,9 @@ export class NekoConfig {
   get apiKey(): string {
     // NEKO_API_KEY is the explicit override; then this profile's key (its key_env or config api_key, resolved
     // in loadConfig). Broad OPENAI/NVIDIA fallbacks exist only for an unscoped legacy configuration: a
-    // profile declaring key_env must never send another provider's credential to its endpoint.
-    const hasScopedKeyEnv = Boolean(this.profile && this.profiles[this.profile]?.key_env);
+    // profile declaring its env bindings (even an empty fallback list) must not use those defaults.
+    const profile = this.profile ? this.profiles[this.profile] : undefined;
+    const hasScopedKeyEnv = Boolean(profile?.key_env || profile?.key_env_fallbacks);
     return (
       process.env.NEKO_API_KEY ||
       this.apiKeyFromFile ||
@@ -825,20 +829,26 @@ export class NekoConfig {
   }
 }
 
-export function loadConfig(opts: { path?: string; profile?: string; cwd?: string; home?: string } = {}): NekoConfig {
+export function loadConfig(opts: { path?: string; profile?: string; cwd?: string; home?: string; userOverlay?: JsonObject } = {}): NekoConfig {
   const cwd = opts.cwd ?? process.cwd();
   const home = opts.home ?? homeDir();
   const projectTrust = opts.path ? null : inspectProjectTrust(cwd, home);
   // Project config is trust-gated; credentials stay in the global file or environment.
-  const overlayEntries: { path: string; data: any }[] = opts.path
+  const overlayEntries: { path: string; data: any; project?: boolean }[] = opts.path
     ? [{ path: opts.path, data: readOverlay(opts.path) }]
     : [
         { path: join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), data: readOverlay(join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)) },
         { path: join(home, "neko.json"), data: readOverlay(join(home, "neko.json")) },
-        ...(projectTrust?.state === "trusted" ? projectTrust.configEntries : []),
+        ...(projectTrust?.state === "trusted" ? projectTrust.configEntries.map((entry) => ({ ...entry, project: true })) : []),
       ];
   const overlayPaths = overlayEntries.map((entry) => entry.path);
   const overlays = overlayEntries.map((entry) => entry.data);
+  const pendingUserOverlay = opts.path ? undefined : opts.userOverlay;
+  // Keep trusted project overlays scoped as they were before the switch.
+  const storedActiveProfile = pendingUserOverlay
+    ? overlays.reduce((active, overlay) => Object.hasOwn(overlay, "active_profile") ? overlay.active_profile : active, DEFAULTS.active_profile)
+    : undefined;
+  if (pendingUserOverlay) overlays[0] = pendingUserOverlay;
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const filesMerged = overlays.reduce((acc, o) => mergeDeep(acc, o), {} as any);
 
@@ -856,18 +866,15 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
 
   let merged: any = structuredClone(DEFAULTS);
   if (selected) merged = mergeDeep(merged, profiles[selected]);
-  const storedProfile = filesMerged.active_profile || DEFAULTS.active_profile;
-  for (const overlay of overlays) {
+  for (const [i, overlay] of overlays.entries()) {
+    const storedProfile = (pendingUserOverlay && overlayEntries[i].project ? storedActiveProfile : filesMerged.active_profile) || DEFAULTS.active_profile;
     const scoped = { ...overlay };
     if (selected && storedProfile && selected !== storedProfile) {
       for (const field of PROFILE_CONNECTION_FIELDS) delete scoped[field];
     }
     merged = mergeDeep(merged, scoped);
   }
-  if (selected === "zai" && merged.provider === "anthropic" &&
-      /^https:\/\/api\.z\.ai\/api\/(?:paas|coding)\/v4\/?$/.test(String(merged.base_url))) {
-    merged.base_url = DEFAULTS.profiles.zai.base_url;
-  }
+  merged.base_url = legacyBaseUrlRepair(selected, merged.provider, String(merged.base_url)) ?? merged.base_url;
 
   // `.mcp.json` (Claude-style project MCP file): merge its `mcpServers` map. ./.mcp.json (project)
   // wins over ~/.mcp.json, both layered onto config's `mcp_servers`.
@@ -922,6 +929,13 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
       }
     : { state: "none", files: [] };
   return new NekoConfig(merged, selected, profiles, apiKeyFromFile, modelShadow, [keyEnv, ...fallbackKeyEnvs].filter(Boolean), trustSummary, home);
+}
+
+export function legacyBaseUrlRepair(profile: string | null, provider: string, baseUrl: string): string | undefined {
+  if (profile === "zai" && provider === "anthropic" &&
+      /^https:\/\/api\.z\.ai\/api\/(?:paas|coding)\/v4\/?$/.test(baseUrl)) {
+    return DEFAULTS.profiles.zai.base_url;
+  }
 }
 
 function readOverlay(path: string): any {

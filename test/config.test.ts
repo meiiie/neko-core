@@ -572,6 +572,22 @@ test("NekoConfig.adopt swaps provider/model/endpoint/key IN PLACE (the /provider
   expect(a.profile).toBe("zai");
 });
 
+test("NekoConfig.adopt retains a new profile's empty credential fallback policy", () => {
+  process.env.OPENAI_API_KEY = "fake-ambient-key";
+  try {
+    const current = loadConfig({ path: tmpConfig({}), profile: "openai" });
+    const next = loadConfig({ path: tmpConfig({
+      profiles: { legacy: { base_url: "https://legacy.example/v1", key_env_fallbacks: [] } },
+    }), profile: "legacy" });
+    expect(next.apiKey).toBe("");
+    current.adopt(next);
+    expect(current.baseUrl).toBe("https://legacy.example/v1");
+    expect(current.apiKey).toBe("");
+  } finally {
+    delete process.env.OPENAI_API_KEY;
+  }
+});
+
 test("childSecretEnvNames retains printable-removed top-level and every profile key name", () => {
   const cfg = loadConfig({ path: tmpConfig({
     key_env: "CUSTOM_ACTIVE_KEY",
