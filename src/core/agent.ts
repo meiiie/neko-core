@@ -1494,6 +1494,7 @@ export class Agent {
     let stateVerificationEvidence = false;
     let usedTools = false;
     let completionVerificationEvidence = false;
+    let nativeEditOccurred = false;
     const sovereigntyFreshnessRequired = !internal && isVietnamSovereigntyTopic(instruction);
     let sovereigntyFreshnessRequested = false;
     let sovereigntyFreshnessEvidence = false;
@@ -1544,10 +1545,11 @@ export class Agent {
       if (changesState && !failed) {
         const isEdit = EDIT_TOOLS.has(call.name.toLowerCase());
         if (isEdit) {
+          nativeEditOccurred = true;
           if (!changedRealState || stateVerificationEvidence) completionVerificationEvidence = true;
         } else {
-          // A later bash can verify an earlier mutation; a validator can also verify native edits.
-          stateVerificationEvidence = (changedRealState || (validationCommand && this.mutationEpoch > 0))
+          // A later bash can verify an earlier mutation, including a native edit.
+          stateVerificationEvidence = (changedRealState || nativeEditOccurred)
             && call.name.toLowerCase() === "bash" && verifiesState;
           completionVerificationEvidence = stateVerificationEvidence;
           changedRealState = true;

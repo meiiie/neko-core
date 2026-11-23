@@ -2571,6 +2571,27 @@ test.each(["write_file", "edit", "multi_edit"])("successful %s finishes without 
   expect(agent.messages.some((message) => /OUTCOME VERIFICATION REQUIRED|VERIFY BEFORE FINISHING/.test(String(message.content)))).toBe(false);
 });
 
+test("post-edit bash inspection satisfies outcome verification even outside the read-only classifier", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "write", name: "write_file", arguments: { path: "file", content: "fixed" } }] },
+    { content: null, tool_calls: [{ id: "inspect", name: "bash", arguments: { command: "sed -n 1p file" } }] },
+    { content: "done", tool_calls: [] },
+    { content: "unnecessary extra turn", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider,
+    // SAFETY: test-built tool fixture.
+    tools: { schemas: () => [], execute: async (name: string) => name === "bash" ? "(exit 0)\nfixed" : "Wrote file" } as any,
+    maxSteps: 6,
+    verifyStateChangesBeforeExit: true,
+    verifyBeforeExit: true,
+  });
+  expect(await agent.run("write and inspect file")).toBe("done");
+  expect(provider.index).toBe(3);
+  expect(agent.completionStatus).toEqual({ ok: true });
+  expect(agent.messages.some((message) => /OUTCOME VERIFICATION REQUIRED|VERIFY BEFORE FINISHING/.test(String(message.content)))).toBe(false);
+});
+
 test.each([false, true])("an edit preserves non-edit outcome evidence or debt: inspected=%s", async (inspected) => {
   const provider = new ScriptedProvider([
     { content: null, tool_calls: [{ id: "bash", name: "bash", arguments: { command: "echo changed > state.txt" } }] },
