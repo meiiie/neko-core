@@ -12,7 +12,8 @@ import { inspectProjectTrust, type ProjectTrustSummary } from "./project-trust.t
 export const LOCAL_CONFIG_DIR = ".neko-core";
 export const LOCAL_CONFIG_NAME = "config.json";
 
-export const PROFILE_CONNECTION_FIELDS = ["provider", "base_url", "model", "api_key", "key_env", "key_env_fallbacks"] as const;
+const PROFILE_CREDENTIAL_FIELDS = ["api_key", "key_env", "key_env_fallbacks"] as const;
+export const PROFILE_CONNECTION_FIELDS = ["provider", "base_url", "model", ...PROFILE_CREDENTIAL_FIELDS] as const;
 
 export interface Profile {
   provider?: string;
@@ -429,7 +430,7 @@ export class NekoConfig {
     public readonly data: any,
     public profile: string | null,
     private profileCatalog: Record<string, Profile>,
-    private apiKeyFromFile: string,
+    private apiKeyFromFile: string | null,
     /** Set when a top-level `model` (config file or NEKO_MODEL) overrides the selected profile's preset
      * model — the #1 config trap: `--profile x` silently keeps the file's model. Doctor names the source. */
     public modelShadow: { source: string; profileModel: string } | null = null,
@@ -484,12 +485,12 @@ export class NekoConfig {
   }
   /** A clone of this config pointing at a different model (same endpoint + key) — e.g. the vision pre-pass. */
   withModel(model: string): NekoConfig {
-    return new NekoConfig({ ...this.data, model }, this.profile, this.profiles, this.apiKey, this.modelShadow, this.childKeyEnvsFromConfig, this.projectTrust, this.resolvedHome);
+    return new NekoConfig({ ...this.data, model }, this.profile, this.profiles, this.apiKey || this.apiKeyFromFile, this.modelShadow, this.childKeyEnvsFromConfig, this.projectTrust, this.resolvedHome);
   }
   /** A clone at a different reasoning tier (same endpoint, key and model) — the oracle spends more than
    * an ordinary turn does, and that is the only difference between them. */
   withEffort(effort: string): NekoConfig {
-    return new NekoConfig({ ...this.data, reasoning_effort: effort }, this.profile, this.profiles, this.apiKey, this.modelShadow, this.childKeyEnvsFromConfig, this.projectTrust, this.resolvedHome);
+    return new NekoConfig({ ...this.data, reasoning_effort: effort }, this.profile, this.profiles, this.apiKey || this.apiKeyFromFile, this.modelShadow, this.childKeyEnvsFromConfig, this.projectTrust, this.resolvedHome);
   }
   get baseUrl(): string { return String(this.data.base_url ?? "").replace(/\/+$/, ""); }
   /** A local model server (Ollama/llama.cpp/LM Studio/vLLM) — no API key required. */
@@ -806,7 +807,7 @@ export class NekoConfig {
     return (
       process.env.NEKO_API_KEY ||
       this.apiKeyFromFile ||
-      (!hasScopedKeyEnv ? (process.env.OPENAI_API_KEY || process.env.NVIDIA_API_KEY) : "") ||
+      (this.apiKeyFromFile !== null && !hasScopedKeyEnv ? (process.env.OPENAI_API_KEY || process.env.NVIDIA_API_KEY) : "") ||
       ""
     ).trim();
   }
@@ -864,16 +865,68 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
     throw new Error(`Unknown profile '${selected}'. Available: ${available}`);
   }
 
-  let merged: any = structuredClone(DEFAULTS);
-  if (selected) merged = mergeDeep(merged, profiles[selected]);
-  for (const [i, overlay] of overlays.entries()) {
+  const scopedOverlays = overlays.map((overlay, i) => {
     const storedProfile = (pendingUserOverlay && overlayEntries[i].project ? storedActiveProfile : filesMerged.active_profile) || DEFAULTS.active_profile;
     const scoped = { ...overlay };
     if (selected && storedProfile && selected !== storedProfile) {
       for (const field of PROFILE_CONNECTION_FIELDS) delete scoped[field];
     }
-    merged = mergeDeep(merged, scoped);
+    return scoped;
+  });
+  const homeOverlays = scopedOverlays.filter((_, i) => !overlayEntries[i].project);
+  const projectOverlays = scopedOverlays.filter((_, i) => overlayEntries[i].project);
+  const envConfig = Object.fromEntries(Object.entries(process.env).flatMap(([key, value]) => {
+    if (!key.startsWith("NEKO_")) return [];
+    const suffix = key.slice("NEKO_".length);
+    if (suffix === "API_KEY" || suffix === "PROFILE") return [];
+    const configKey = suffix.toLowerCase();
+    return [[configKey, BOOLEAN_ENV_KEYS.has(configKey) ? parseBooleanEnv(key, value ?? "") : value] as const];
+  }));
+  const withheldKeyEnvs: string[] = [];
+  const projectCredentials = new Map<(typeof PROFILE_CREDENTIAL_FIELDS)[number], JsonValue>();
+  let projectChangedRoute = false;
+  const mergeProjectConnection = (base: Profile, overlay: Profile, homeOverrides?: Profile & { api_key?: string }) => {
+    const next = mergeDeep(base, overlay);
+    for (const field of PROFILE_CREDENTIAL_FIELDS) {
+      if (Object.hasOwn(overlay, field)) projectCredentials.set(field, next[field]);
+    }
+    const before = homeOverrides ? mergeDeep(base, homeOverrides) : base;
+    const after = homeOverrides ? mergeDeep(next, homeOverrides) : next;
+    if (
+      (envConfig.provider === undefined && (after.provider ?? DEFAULTS.provider) !== (before.provider ?? DEFAULTS.provider))
+      || (envConfig.base_url === undefined && configBaseUrl(selected, after) !== configBaseUrl(selected, before))
+    ) {
+      projectChangedRoute = true;
+      withheldKeyEnvs.push(...credentialEnvNames(before));
+      for (const field of PROFILE_CREDENTIAL_FIELDS) {
+        if (homeOverrides) delete homeOverrides[field];
+        if (projectCredentials.has(field)) next[field] = projectCredentials.get(field);
+        else delete next[field];
+      }
+    }
+    return next;
+  };
+
+  let merged: any = structuredClone(DEFAULTS);
+  if (selected) merged = mergeDeep(merged, profiles[selected]);
+  for (const overlay of homeOverlays) merged = mergeDeep(merged, overlay);
+  const projectProfiles = selected ? projectOverlays.map((overlay) => overlay.profiles?.[selected]).filter(isJsonObject) : [];
+  if (selected && projectProfiles.length) {
+    const homeConfig = homeOverlays.reduce(mergeDeep, {});
+    const homeOverrides = Object.fromEntries(PROFILE_CONNECTION_FIELDS
+      .filter((field) => Object.hasOwn(homeConfig, field))
+      .map((field) => [field, homeConfig[field]]));
+    const defaultRoute = { provider: DEFAULTS.provider, base_url: DEFAULTS.base_url };
+    const preset = mergeDeep(defaultRoute, DEFAULTS.profiles[selected] ?? {});
+    let profile = mergeDeep(preset, homeConfig.profiles?.[selected] ?? {});
+    for (const overlay of projectProfiles) profile = mergeProjectConnection(profile, overlay, homeOverrides);
+    const connection = mergeDeep(profile, homeOverrides);
+    for (const field of PROFILE_CREDENTIAL_FIELDS) {
+      if (Object.hasOwn(connection, field)) merged[field] = connection[field];
+      else delete merged[field];
+    }
   }
+  for (const overlay of projectOverlays) merged = mergeProjectConnection(merged, overlay);
   merged.base_url = legacyBaseUrlRepair(selected, merged.provider, String(merged.base_url)) ?? merged.base_url;
 
   // `.mcp.json` (Claude-style project MCP file): merge its `mcpServers` map. ./.mcp.json (project)
@@ -887,26 +940,18 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   }
 
   // Remove credentials before constructing printable config data.
-  const keyEnv = merged.key_env ? String(merged.key_env) : "";
-  const fallbackKeyEnvs = Array.isArray(merged.key_env_fallbacks) ? merged.key_env_fallbacks.map(String) : [];
-  const envKey = [keyEnv, ...fallbackKeyEnvs]
-    .filter(Boolean)
+  const keyEnvs = credentialEnvNames(merged);
+  const envKey = keyEnvs
     .map((name) => (process.env[name] ?? "").trim())
     .find(Boolean) ?? "";
-  const apiKeyFromFile = String(merged.api_key ?? "") || envKey;
+  const apiKeyFromFile = String(merged.api_key ?? "") || envKey || (projectChangedRoute ? null : "");
   delete merged.api_key;
   delete merged.key_env;
   delete merged.key_env_fallbacks;
   delete merged.profiles;
   delete merged.active_profile;
 
-  for (const [key, value] of Object.entries(process.env)) {
-    if (!key.startsWith("NEKO_")) continue;
-    const suffix = key.slice("NEKO_".length);
-    if (suffix === "API_KEY" || suffix === "PROFILE") continue;
-    const configKey = suffix.toLowerCase();
-    merged[configKey] = BOOLEAN_ENV_KEYS.has(configKey) ? parseBooleanEnv(key, value ?? "") : value;
-  }
+  Object.assign(merged, envConfig);
 
   // Retain a model-shadow diagnostic when a top-level override masks a profile preset.
   const profileModel = selected ? String(profiles[selected].model ?? "").trim() : "";
@@ -928,7 +973,19 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
         fingerprint: projectTrust.fingerprint, files: [...projectTrust.files], reason: projectTrust.reason,
       }
     : { state: "none", files: [] };
-  return new NekoConfig(merged, selected, profiles, apiKeyFromFile, modelShadow, [keyEnv, ...fallbackKeyEnvs].filter(Boolean), trustSummary, home);
+  return new NekoConfig(merged, selected, profiles, apiKeyFromFile, modelShadow, [...withheldKeyEnvs, ...keyEnvs], trustSummary, home);
+}
+
+function credentialEnvNames({ key_env, key_env_fallbacks }: Pick<Profile, "key_env" | "key_env_fallbacks">): string[] {
+  return [key_env ? String(key_env) : "", ...(Array.isArray(key_env_fallbacks) ? key_env_fallbacks.map(String) : [])].filter(Boolean);
+}
+
+function configBaseUrl(profile: string | null, config: Pick<Profile, "provider" | "base_url">): string {
+  const baseUrl = legacyBaseUrlRepair(profile, config.provider ?? DEFAULTS.provider, String(config.base_url)) ?? String(config.base_url ?? "");
+  if (/^https?:\/\//i.test(baseUrl)) {
+    try { return new URL(baseUrl).href.replace(/\/+$/, ""); } catch { /* compare as configured */ }
+  }
+  return baseUrl.replace(/\/+$/, "");
 }
 
 export function legacyBaseUrlRepair(profile: string | null, provider: string, baseUrl: string): string | undefined {
