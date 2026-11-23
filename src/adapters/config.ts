@@ -875,6 +875,13 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   });
   const homeOverlays = scopedOverlays.filter((_, i) => !overlayEntries[i].project);
   const projectOverlays = scopedOverlays.filter((_, i) => overlayEntries[i].project);
+  const envConfig = Object.fromEntries(Object.entries(process.env).flatMap(([key, value]) => {
+    if (!key.startsWith("NEKO_")) return [];
+    const suffix = key.slice("NEKO_".length);
+    if (suffix === "API_KEY" || suffix === "PROFILE") return [];
+    const configKey = suffix.toLowerCase();
+    return [[configKey, BOOLEAN_ENV_KEYS.has(configKey) ? parseBooleanEnv(key, value ?? "") : value] as const];
+  }));
   const withheldKeyEnvs: string[] = [];
   let projectChangedRoute = false;
   const mergeProjectConnection = (base: Profile, overlay: Profile, homeOverrides?: Profile & { api_key?: string }) => {
@@ -882,8 +889,8 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
     const before = homeOverrides ? mergeDeep(base, homeOverrides) : base;
     const after = homeOverrides ? mergeDeep(next, homeOverrides) : next;
     if (
-      (after.provider ?? DEFAULTS.provider) !== (before.provider ?? DEFAULTS.provider)
-      || configBaseUrl(selected, after) !== configBaseUrl(selected, before)
+      (envConfig.provider === undefined && (after.provider ?? DEFAULTS.provider) !== (before.provider ?? DEFAULTS.provider))
+      || (envConfig.base_url === undefined && configBaseUrl(selected, after) !== configBaseUrl(selected, before))
     ) {
       projectChangedRoute = true;
       withheldKeyEnvs.push(...credentialEnvNames(before));
@@ -937,13 +944,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   delete merged.profiles;
   delete merged.active_profile;
 
-  for (const [key, value] of Object.entries(process.env)) {
-    if (!key.startsWith("NEKO_")) continue;
-    const suffix = key.slice("NEKO_".length);
-    if (suffix === "API_KEY" || suffix === "PROFILE") continue;
-    const configKey = suffix.toLowerCase();
-    merged[configKey] = BOOLEAN_ENV_KEYS.has(configKey) ? parseBooleanEnv(key, value ?? "") : value;
-  }
+  Object.assign(merged, envConfig);
 
   // Retain a model-shadow diagnostic when a top-level override masks a profile preset.
   const profileModel = selected ? String(profiles[selected].model ?? "").trim() : "";

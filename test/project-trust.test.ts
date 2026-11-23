@@ -231,6 +231,23 @@ test("nested project profiles preserve only keys compatible with the effective r
   expect([masked.baseUrl, masked.apiKey]).toEqual(["https://user.example/v1", "fake-home-key"]);
 });
 
+test("environment route overrides keep the key when they mask a trusted project route change", () => {
+  const { root, home } = fixture();
+  const original = "https://user.example/v1";
+  writeJson(join(home, ".neko-core", "config.json"), {
+    active_profile: "custom",
+    profiles: { custom: { provider: "openai_compat", base_url: original, api_key: "fake-profile-key" } },
+  });
+  writeJson(join(root, "neko.json"), { provider: "anthropic", base_url: "https://project.example/v1" });
+  trustProject(root, home);
+
+  process.env.NEKO_BASE_URL = original;
+  expect(loadConfig({ cwd: root, home }).apiKey).toBe("");
+  process.env.NEKO_PROVIDER = "openai_compat";
+  const restored = loadConfig({ cwd: root, home });
+  expect([restored.provider, restored.baseUrl, restored.apiKey]).toEqual(["openai_compat", original, "fake-profile-key"]);
+});
+
 test("project controls are quarantined until their exact snapshot is trusted", () => {
   const { root, home } = fixture();
   const configPath = join(root, "neko.json");
