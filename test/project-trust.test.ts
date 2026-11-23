@@ -9,6 +9,7 @@ import { loadConfig } from "../src/adapters/config.ts";
 import { loadProjectContext } from "../src/adapters/context.ts";
 import { collectChecks } from "../src/adapters/doctor.ts";
 import { inspectProjectTrust, listTrustedProjects, PROJECT_TRUST_RECORD_LIMIT, revokeProjectTrust, trustProject } from "../src/adapters/project-trust.ts";
+import { getProvider } from "../src/adapters/providers.ts";
 import { loadRecipe } from "../src/adapters/recipes.ts";
 import { evaluatePolicy } from "../src/adapters/registry.ts";
 import { loadSkill } from "../src/adapters/skills.ts";
@@ -101,6 +102,79 @@ test("project trust rejects multiply-linked control files", () => {
   expect(inspectProjectTrust(root, home)).toMatchObject({ state: "error" });
   expect(() => trustProject(root, home)).toThrow("Cannot safely snapshot project control surfaces");
   expect(loadProjectContext(root, home)).not.toContain("PROJECT_CONTROL_CREDENTIAL_SENTINEL");
+});
+
+test.each([
+  ["profile file key", { api_key: "fake-profile-key" }, {}, {}],
+  ["profile env key", { key_env: "OPENAI_API_KEY" }, {}, { OPENAI_API_KEY: "fake-profile-env-key" }],
+  ["home file key", {}, { api_key: "fake-home-key" }, {}],
+  ["ambient key", {}, {}, { NVIDIA_API_KEY: "fake-ambient-key" }],
+] as const)("a trusted project endpoint does not inherit credentials from %s", (_source, credentials, topLevel, env) => {
+  const { root, home } = fixture();
+  Object.assign(process.env, env);
+  writeJson(join(home, ".neko-core", "config.json"), {
+    ...topLevel, active_profile: "custom",
+    profiles: { custom: { base_url: "https://user.example/v1", ...credentials } },
+  });
+  writeJson(join(root, "neko.json"), { base_url: "http://127.0.0.1:8090/v1", model: "fixture-model" });
+  expect(loadConfig({ cwd: root, home }).apiKey.startsWith("fake-")).toBe(true);
+  trustProject(root, home);
+  const config = loadConfig({ cwd: root, home });
+  expect(config.baseUrl).toBe("http://127.0.0.1:8090/v1");
+  expect(config.isLocalEndpoint).toBe(true);
+  expect(config.apiKey).toBe("");
+  expect(config.withModel("other").apiKey).toBe("");
+  expect(config.withEffort("high").apiKey).toBe("");
+});
+
+test("a trusted project MoA endpoint does not recover ambient credentials in subrequests", async () => {
+  const { root, home } = fixture();
+  process.env.OPENAI_API_KEY = "fake-ambient-key";
+  writeJson(join(root, "neko.json"), {
+    provider: "moa", base_url: "http://127.0.0.1:8090/v1",
+    moa: { references: ["ref"], aggregator: "agg" },
+  });
+  trustProject(root, home);
+  const config = loadConfig({ cwd: root, home });
+  const originalFetch = globalThis.fetch;
+  const authorization: (string | null)[] = [];
+  globalThis.fetch = Object.assign(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    authorization.push(new Headers(init?.headers).get("Authorization"));
+    return Response.json({ choices: [{ message: { content: "fixture" } }] });
+  }, { preconnect: originalFetch.preconnect });
+  try {
+    await getProvider(config).complete([{ role: "user", content: "fixture" }]);
+    expect(authorization).toEqual([null, null]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("trusted project provider changes require their own credential, but same-route overrides keep the user key", () => {
+  const { root, home } = fixture();
+  const path = join(root, "neko.json");
+  writeJson(join(home, ".neko-core", "config.json"), {
+    active_profile: "custom",
+    profiles: { custom: { base_url: "https://user.example/v1", api_key: "fake-profile-key" } },
+  });
+  writeJson(path, { base_url: "https://user.example/v1/", model: "fixture-model" });
+  trustProject(root, home);
+  expect(loadConfig({ cwd: root, home }).apiKey).toBe("fake-profile-key");
+  writeJson(path, { provider: "anthropic" });
+  trustProject(root, home);
+  expect(loadConfig({ cwd: root, home }).apiKey).toBe("");
+  process.env.NEKO_TEST_PROJECT_KEY = "fake-project-env-key";
+  writeJson(path, { provider: "anthropic", key_env: "NEKO_TEST_PROJECT_KEY" });
+  trustProject(root, home);
+  expect(loadConfig({ cwd: root, home }).apiKey).toBe("fake-project-env-key");
+  process.env.NEKO_API_KEY = "fake-explicit-key";
+  expect(loadConfig({ cwd: root, home }).apiKey).toBe("fake-explicit-key");
+  process.env.NEKO_BASE_URL = "http://127.0.0.1:8090/v1";
+  process.env.NEKO_PROVIDER = "openai_compat";
+  const explicit = loadConfig({ cwd: root, home });
+  expect([explicit.provider, explicit.baseUrl, explicit.apiKey]).toEqual([
+    "openai_compat", "http://127.0.0.1:8090/v1", "fake-explicit-key",
+  ]);
 });
 
 test("project controls are quarantined until their exact snapshot is trusted", () => {

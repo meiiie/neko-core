@@ -1216,7 +1216,7 @@ function advisoryMessages(messages: any[]): any[] {
 function moaSubConfig(cfg: NekoConfig, ref: MoaRef, temperature: number): NekoConfig {
   const profileData = ref.profile && cfg.profiles[ref.profile] ? cfg.profiles[ref.profile] : {};
   const data = { ...cfg.data, ...profileData, model: ref.model, temperature, provider: "openai_compat" };
-  return new NekoConfig(data, null, cfg.profiles, cfg.apiKey);
+  return new NekoConfig(data, null, cfg.profiles, cfg.apiKey || null);
 }
 
 /** Append text to the conversation's system message (on a copy), or prepend one if there's none. */
