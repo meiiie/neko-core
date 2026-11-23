@@ -865,29 +865,54 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
     throw new Error(`Unknown profile '${selected}'. Available: ${available}`);
   }
 
-  let merged: any = structuredClone(DEFAULTS);
-  if (selected) merged = mergeDeep(merged, profiles[selected]);
-  const withheldKeyEnvs: string[] = [];
-  let projectChangedRoute = false;
-  for (const [i, overlay] of overlays.entries()) {
+  const scopedOverlays = overlays.map((overlay, i) => {
     const storedProfile = (pendingUserOverlay && overlayEntries[i].project ? storedActiveProfile : filesMerged.active_profile) || DEFAULTS.active_profile;
     const scoped = { ...overlay };
     if (selected && storedProfile && selected !== storedProfile) {
       for (const field of PROFILE_CONNECTION_FIELDS) delete scoped[field];
     }
-    const next = mergeDeep(merged, scoped);
-    if (overlayEntries[i].project && (
-      (next.provider ?? DEFAULTS.provider) !== (merged.provider ?? DEFAULTS.provider)
-      || configBaseUrl(selected, next) !== configBaseUrl(selected, merged)
-    )) {
+    return scoped;
+  });
+  const homeOverlays = scopedOverlays.filter((_, i) => !overlayEntries[i].project);
+  const projectOverlays = scopedOverlays.filter((_, i) => overlayEntries[i].project);
+  const withheldKeyEnvs: string[] = [];
+  let projectChangedRoute = false;
+  const mergeProjectConnection = (base: Profile, overlay: Profile, homeOverrides?: Profile & { api_key?: string }) => {
+    const next = mergeDeep(base, overlay);
+    const before = homeOverrides ? mergeDeep(base, homeOverrides) : base;
+    const after = homeOverrides ? mergeDeep(next, homeOverrides) : next;
+    if (
+      (after.provider ?? DEFAULTS.provider) !== (before.provider ?? DEFAULTS.provider)
+      || configBaseUrl(selected, after) !== configBaseUrl(selected, before)
+    ) {
       projectChangedRoute = true;
-      withheldKeyEnvs.push(...credentialEnvNames(merged));
+      withheldKeyEnvs.push(...credentialEnvNames(before));
       for (const field of PROFILE_CREDENTIAL_FIELDS) {
-        if (!Object.hasOwn(scoped, field)) delete next[field];
+        if (homeOverrides) delete homeOverrides[field];
+        if (!Object.hasOwn(overlay, field)) delete next[field];
       }
     }
-    merged = next;
+    return next;
+  };
+
+  let merged: any = structuredClone(DEFAULTS);
+  if (selected) merged = mergeDeep(merged, profiles[selected]);
+  for (const overlay of homeOverlays) merged = mergeDeep(merged, overlay);
+  const projectProfiles = selected ? projectOverlays.map((overlay) => overlay.profiles?.[selected]).filter(isJsonObject) : [];
+  if (selected && projectProfiles.length) {
+    const homeConfig = homeOverlays.reduce(mergeDeep, {});
+    const homeOverrides = Object.fromEntries(PROFILE_CONNECTION_FIELDS
+      .filter((field) => Object.hasOwn(homeConfig, field))
+      .map((field) => [field, homeConfig[field]]));
+    let profile = mergeDeep(DEFAULTS.profiles[selected] ?? {}, homeConfig.profiles?.[selected] ?? {});
+    for (const overlay of projectProfiles) profile = mergeProjectConnection(profile, overlay, homeOverrides);
+    const connection = mergeDeep(profile, homeOverrides);
+    for (const field of PROFILE_CREDENTIAL_FIELDS) {
+      if (Object.hasOwn(connection, field)) merged[field] = connection[field];
+      else delete merged[field];
+    }
   }
+  for (const overlay of projectOverlays) merged = mergeProjectConnection(merged, overlay);
   merged.base_url = legacyBaseUrlRepair(selected, merged.provider, String(merged.base_url)) ?? merged.base_url;
 
   // `.mcp.json` (Claude-style project MCP file): merge its `mcpServers` map. ./.mcp.json (project)

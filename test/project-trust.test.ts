@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { listAgents, loadAgent } from "../src/adapters/agents.ts";
-import { loadConfig } from "../src/adapters/config.ts";
+import { loadConfig, type Profile } from "../src/adapters/config.ts";
 import { loadProjectContext } from "../src/adapters/context.ts";
 import { collectChecks } from "../src/adapters/doctor.ts";
 import { inspectProjectTrust, listTrustedProjects, PROJECT_TRUST_RECORD_LIMIT, revokeProjectTrust, trustProject } from "../src/adapters/project-trust.ts";
@@ -175,6 +175,60 @@ test("trusted project provider changes require their own credential, but same-ro
   expect([explicit.provider, explicit.baseUrl, explicit.apiKey]).toEqual([
     "openai_compat", "http://127.0.0.1:8090/v1", "fake-explicit-key",
   ]);
+});
+
+test.each([
+  ["profile file key", { api_key: "fake-profile-key" }, {}, {}],
+  ["profile env key", { key_env: "OPENAI_API_KEY" }, {}, { OPENAI_API_KEY: "fake-profile-env-key" }],
+  ["home file key", {}, { api_key: "fake-home-key" }, {}],
+  ["ambient key", {}, {}, { NVIDIA_API_KEY: "fake-ambient-key" }],
+] as const)("a trusted project's nested route does not inherit credentials from %s", (_source, credentials, topLevel, env) => {
+  const { root, home } = fixture();
+  Object.assign(process.env, env);
+  writeJson(join(home, ".neko-core", "config.json"), {
+    ...topLevel, active_profile: "custom",
+    profiles: { custom: { base_url: "https://user.example/v1", ...credentials } },
+  });
+  writeJson(join(root, "neko.json"), {
+    profiles: { custom: { base_url: "http://127.0.0.1:8090/v1", model: "fixture-model" } },
+  });
+  expect(loadConfig({ cwd: root, home }).apiKey.startsWith("fake-")).toBe(true);
+  trustProject(root, home);
+  const config = loadConfig({ cwd: root, home });
+  expect(config.baseUrl).toBe("http://127.0.0.1:8090/v1");
+  expect(config.isLocalEndpoint).toBe(true);
+  expect(config.apiKey).toBe("");
+});
+
+test("nested project profiles preserve only keys compatible with the effective route", () => {
+  const { root, home } = fixture();
+  const project = join(root, "neko.json");
+  const user = join(home, ".neko-core", "config.json");
+  const userConfig = {
+    active_profile: "custom",
+    api_key: "fake-home-key",
+    profiles: { custom: { provider: "openai_compat", base_url: "https://user.example/v1" } },
+  };
+  writeJson(user, userConfig);
+  const loadWithProjectProfile = (custom: Profile) => {
+    writeJson(project, { profiles: { custom } });
+    trustProject(root, home);
+    return loadConfig({ cwd: root, home });
+  };
+  expect(loadWithProjectProfile({ model: "fixture-model" }).apiKey).toBe("fake-home-key");
+  expect(loadWithProjectProfile({ base_url: "https://user.example/v1/" }).apiKey).toBe("fake-home-key");
+  const changedProvider = loadWithProjectProfile({ provider: "anthropic" });
+  expect([changedProvider.provider, changedProvider.apiKey]).toEqual(["anthropic", ""]);
+  process.env.NEKO_TEST_PROJECT_KEY = "fake-nested-project-key";
+  const bound = loadWithProjectProfile({ provider: "anthropic", key_env: "NEKO_TEST_PROJECT_KEY" });
+  expect(bound.apiKey).toBe("fake-nested-project-key");
+  process.env.NEKO_API_KEY = "fake-explicit-key";
+  expect(bound.apiKey).toBe("fake-explicit-key");
+  delete process.env.NEKO_API_KEY;
+
+  writeJson(user, { ...userConfig, base_url: "https://user.example/v1" });
+  const masked = loadWithProjectProfile({ base_url: "https://project.example/v1" });
+  expect([masked.baseUrl, masked.apiKey]).toEqual(["https://user.example/v1", "fake-home-key"]);
 });
 
 test("project controls are quarantined until their exact snapshot is trusted", () => {
