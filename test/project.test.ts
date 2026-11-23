@@ -165,19 +165,47 @@ test("a migrated legacy endpoint does not inherit the previous profile's env key
   }
 });
 
-test("reselecting the active profile keeps its current connection active after migration", () => {
+test.each([["fake-legacy-key"], [undefined]])("reselecting validates the scoped route instead of the legacy route (%s)", (legacyKey) => {
   const path = withTempHome(JSON.stringify({
     active_profile: "openai",
     base_url: "https://legacy.example/v1",
-    api_key: "fake-legacy-key",
+    api_key: legacyKey,
     profiles: { openai: { base_url: "https://scoped.example/v1", api_key: "fake-scoped-key" } },
   }));
-  const preview = loadConfig({ path, profile: "openai" });
-  const activeProfile = setActiveProfile("openai");
+  const live = setActiveProfile("openai", (next) => next.apiKey === "fake-scoped-key");
   const saved = loadConfig({ path });
-  expect([saved.baseUrl, saved.apiKey]).toEqual([preview.baseUrl, preview.apiKey]);
-  expect(saved.profile).toBe(activeProfile);
-  expect(loadConfig({ path, profile: "openai" }).baseUrl).toBe("https://scoped.example/v1");
+  expect([saved.profile, saved.baseUrl, saved.apiKey]).toEqual(["openai", "https://scoped.example/v1", "fake-scoped-key"]);
+  expect([live?.profile, live?.baseUrl, live?.apiKey]).toEqual([saved.profile, saved.baseUrl, saved.apiKey]);
+});
+
+test("a legacy key does not make a keyless scoped profile selectable", () => {
+  const original = JSON.stringify({
+    active_profile: "openai",
+    base_url: "https://legacy.example/v1",
+    api_key: "fake-legacy-key",
+    profiles: { openai: { key_env: "NEKO_TEST_MIGRATION_KEY_ABSENT", base_url: "https://scoped.example/v1" } },
+  });
+  const path = withTempHome(original);
+  expect(setActiveProfile("openai", (next) => Boolean(next.apiKey))).toBeUndefined();
+  expect(readFileSync(path, "utf8")).toBe(original);
+});
+
+test.each([
+  ["openai", "https://api.openai.com/v1", {}],
+  ["custom", "https://scoped.example/v1", { custom: { base_url: "https://scoped.example/v1" } }],
+] as const)("named API-key login writes the new key to the %s scoped route", (profile, baseUrl, profiles) => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: profile,
+    base_url: "https://legacy.example/v1",
+    api_key: "fake-legacy-key",
+    profiles,
+  }));
+  setActiveProfile(profile);
+  setApiKey("fake-new-openai-key");
+  const active = loadConfig({ path });
+  const legacy = loadConfig({ path, profile: "legacy" });
+  expect([active.profile, active.baseUrl, active.apiKey]).toEqual([profile, baseUrl, "fake-new-openai-key"]);
+  expect([legacy.baseUrl, legacy.apiKey]).toEqual(["https://legacy.example/v1", "fake-legacy-key"]);
 });
 
 test("a migrated legacy connection retains its provider's completion budget field", async () => {

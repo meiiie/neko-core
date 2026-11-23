@@ -5,7 +5,7 @@ import { delimiter, isAbsolute, join, parse, relative, resolve, sep } from "node
 
 import { isMode, type PermissionMode } from "../core/permissions.ts";
 import { parseComputerInputPolicy, type ComputerInputPolicy } from "../core/computer-input-policy.ts";
-import { isJsonArray, isJsonObject, isObjectValue, isText, type JsonValue } from "../shared/wire.ts";
+import { isJsonArray, isJsonObject, isObjectValue, isText, type JsonObject, type JsonValue } from "../shared/wire.ts";
 import type { McpServerConfig } from "./mcp.ts";
 import { inspectProjectTrust, type ProjectTrustSummary } from "./project-trust.ts";
 
@@ -428,7 +428,7 @@ export class NekoConfig {
     /** printable, profile-merged, env-overridden settings (no secrets) */
     public readonly data: any,
     public profile: string | null,
-    public readonly profiles: Record<string, Profile>,
+    private profileCatalog: Record<string, Profile>,
     private apiKeyFromFile: string,
     /** Set when a top-level `model` (config file or NEKO_MODEL) overrides the selected profile's preset
      * model — the #1 config trap: `--profile x` silently keeps the file's model. Doctor names the source. */
@@ -440,6 +440,8 @@ export class NekoConfig {
     public resolvedHome: string = homeDir(),
   ) {}
 
+  get profiles(): Record<string, Profile> { return this.profileCatalog; }
+
   /** Adopt another config's provider profile IN PLACE — data, profile name, and resolved key — so the
    * existing cfg reference (held by the REPL + agent wiring) stays valid while `/provider` switches the
    * endpoint + model + key live, without a restart. */
@@ -447,6 +449,7 @@ export class NekoConfig {
     for (const k of Object.keys(this.data)) delete this.data[k];
     Object.assign(this.data, other.data);
     this.profile = other.profile;
+    this.profileCatalog = other.profileCatalog;
     this.apiKeyFromFile = other.apiKeyFromFile;
     this.modelShadow = other.modelShadow;
     this.childKeyEnvsFromConfig = [...other.childKeyEnvsFromConfig];
@@ -826,7 +829,7 @@ export class NekoConfig {
   }
 }
 
-export function loadConfig(opts: { path?: string; profile?: string; cwd?: string; home?: string } = {}): NekoConfig {
+export function loadConfig(opts: { path?: string; profile?: string; cwd?: string; home?: string; userOverlay?: JsonObject } = {}): NekoConfig {
   const cwd = opts.cwd ?? process.cwd();
   const home = opts.home ?? homeDir();
   const projectTrust = opts.path ? null : inspectProjectTrust(cwd, home);
@@ -834,7 +837,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   const overlayEntries: { path: string; data: any }[] = opts.path
     ? [{ path: opts.path, data: readOverlay(opts.path) }]
     : [
-        { path: join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), data: readOverlay(join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)) },
+        { path: join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), data: opts.userOverlay ?? readOverlay(join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)) },
         { path: join(home, "neko.json"), data: readOverlay(join(home, "neko.json")) },
         ...(projectTrust?.state === "trusted" ? projectTrust.configEntries : []),
       ];

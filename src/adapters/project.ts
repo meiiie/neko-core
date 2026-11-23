@@ -8,7 +8,7 @@ import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { dirname, join } from "node:path";
 
-import { DEFAULTS, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME, PROFILE_CONNECTION_FIELDS, legacyBaseUrlRepair, type Profile } from "./config.ts";
+import { DEFAULTS, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME, PROFILE_CONNECTION_FIELDS, legacyBaseUrlRepair, loadConfig, type NekoConfig, type Profile } from "./config.ts";
 import { ensureNekoHome } from "./context.ts";
 
 import { isBool, isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
@@ -31,10 +31,9 @@ function readUserConfig(): any {
 }
 
 /** Read-modify-write that aborts (never overwrites) if the existing config is malformed. */
-function updateUserConfig(mutate: (data: any) => void): void {
+function updateUserConfig(mutate: (data: any) => void | false): void {
   const data = readUserConfig();
-  mutate(data);
-  writeUserConfig(data);
+  if (mutate(data) !== false) writeUserConfig(data);
 }
 
 function writeUserConfig(data: any): void {
@@ -105,12 +104,11 @@ export function setAutoUpdate(on: boolean): void {
 }
 
 /** Persist the active provider profile so `neko` uses it by default — no --profile flag, no config editing.
- * Move legacy top-level connection settings off the global config without reassigning credentials. */
-export function setActiveProfile(name: string): string {
-  let active = name;
+ * Move legacy connection settings off the global config and, if requested, validate before saving. */
+export function setActiveProfile(name: string, validate?: (next: NekoConfig) => boolean): NekoConfig | undefined {
+  let next: NekoConfig | undefined;
   updateUserConfig((d: any) => {
     let previous = isText(d.active_profile) ? d.active_profile : DEFAULTS.active_profile;
-    const reselecting = name === previous;
     let separateConnection: Profile | undefined;
     if (previous) {
       const scoped = { ...DEFAULTS.profiles[previous], ...d.profiles?.[previous] };
@@ -122,7 +120,9 @@ export function setActiveProfile(name: string): string {
       const baseUrl = legacyBaseUrlRepair(previous, provider, String(legacyBaseUrl)) ?? legacyBaseUrl;
       const sameRoute = (provider ?? DEFAULTS.provider) === scopedProvider &&
         String(baseUrl ?? "").replace(/\/+$/, "") === String(scopedUrl ?? "").replace(/\/+$/, "");
-      if (!sameRoute && (scoped.api_key || scoped.key_env || scoped.key_env_fallbacks?.length)) {
+      const hasScopedConnection = scoped.base_url !== undefined || scoped.provider !== undefined ||
+        scoped.api_key || scoped.key_env || scoped.key_env_fallbacks?.length;
+      if (!sameRoute && hasScopedConnection) {
         separateConnection = {
           provider,
           base_url: baseUrl,
@@ -146,7 +146,6 @@ export function setActiveProfile(name: string): string {
     if (!previous && PROFILE_CONNECTION_FIELDS.some((field) => d[field] !== undefined)) {
       previous = "legacy";
       for (let suffix = 2; d.profiles?.[previous]; suffix++) previous = `legacy-${suffix}`;
-      if (reselecting) active = previous;
     }
     if (previous) {
       if (!isObjectValue(d.profiles)) d.profiles = {};
@@ -158,10 +157,15 @@ export function setActiveProfile(name: string): string {
         }
       }
     }
-    d.active_profile = active;
+    d.active_profile = name;
     for (const field of PROFILE_CONNECTION_FIELDS) delete d[field];
+    if (validate) {
+      const candidate = loadConfig({ profile: name, userOverlay: d });
+      if (!validate(candidate)) return false;
+      next = candidate;
+    }
   });
-  return active;
+  return next;
 }
 
 /** Persist the chosen reasoning effort across sessions ("" / off clears it). */

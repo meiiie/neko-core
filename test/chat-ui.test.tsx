@@ -1347,6 +1347,38 @@ test("selecting an unconfigured provider keeps the working profile active", asyn
   }
 }, 15000);
 
+test("reselecting a provider does not activate its keyless legacy endpoint", async () => {
+  const oldHome = process.env.HOME, oldProfile = process.env.USERPROFILE;
+  const home = mkdtempSync(join(tmpdir(), "neko-provider-reselect-"));
+  const configDir = join(home, ".neko-core");
+  const configPath = join(configDir, "config.json");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(configPath, JSON.stringify({
+    active_profile: "custom",
+    base_url: "https://legacy.example/v1",
+    profiles: { custom: { base_url: "https://scoped.example/v1", model: "scoped-model", api_key: "fake-scoped-key" } },
+  }));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  try {
+    const provider = new MockProvider([{ content: "", tool_calls: [] }]);
+    const { stdin, unmount } = render(<ChatApp fullscreen={false} yolo profile="custom" provider={provider} />);
+    try {
+      stdin.write("/provider custom"); await tick(30); stdin.write("\r");
+      expect(await until(() => Boolean(JSON.parse(readFileSync(configPath, "utf8")).profiles.legacy))).toBe(true);
+      const saved = JSON.parse(readFileSync(configPath, "utf8"));
+      expect(saved.active_profile).toBe("custom");
+      expect(saved.profiles.legacy).toMatchObject({ base_url: "https://legacy.example/v1", key_env_fallbacks: [] });
+      expect(saved.profiles.legacy.api_key).toBeUndefined();
+    } finally {
+      unmount();
+    }
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = oldProfile;
+    rmSync(home, { recursive: true, force: true });
+  }
+}, 15000);
+
 test("/logout on Gemini removes only Gemini OAuth state immediately", async () => {
   const oldGeminiHome = process.env.NEKO_GEMINI_HOME;
   const home = mkdtempSync(join(tmpdir(), "neko-gemini-logout-"));
