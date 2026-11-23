@@ -834,15 +834,21 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
   const home = opts.home ?? homeDir();
   const projectTrust = opts.path ? null : inspectProjectTrust(cwd, home);
   // Project config is trust-gated; credentials stay in the global file or environment.
-  const overlayEntries: { path: string; data: any; project?: boolean }[] = opts.path
+  const overlayEntries: { path: string; data: any }[] = opts.path
     ? [{ path: opts.path, data: readOverlay(opts.path) }]
     : [
-        { path: join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), data: opts.userOverlay ?? readOverlay(join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)) },
+        { path: join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME), data: readOverlay(join(home, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME)) },
         { path: join(home, "neko.json"), data: readOverlay(join(home, "neko.json")) },
-        ...(projectTrust?.state === "trusted" ? projectTrust.configEntries.map((entry) => ({ ...entry, project: true })) : []),
+        ...(projectTrust?.state === "trusted" ? projectTrust.configEntries : []),
       ];
   const overlayPaths = overlayEntries.map((entry) => entry.path);
   const overlays = overlayEntries.map((entry) => entry.data);
+  const pendingUserOverlay = opts.path ? undefined : opts.userOverlay;
+  // Keep external overlays scoped to the stored profile until the switch is committed.
+  const storedActiveProfile = pendingUserOverlay
+    ? overlays.reduce((active, overlay) => Object.hasOwn(overlay, "active_profile") ? overlay.active_profile : active, DEFAULTS.active_profile)
+    : undefined;
+  if (pendingUserOverlay) overlays[0] = pendingUserOverlay;
   // SAFETY: wire/config payload shape; keys are produced by the boundary that owns this data.
   const filesMerged = overlays.reduce((acc, o) => mergeDeep(acc, o), {} as any);
 
@@ -860,11 +866,10 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
 
   let merged: any = structuredClone(DEFAULTS);
   if (selected) merged = mergeDeep(merged, profiles[selected]);
-  const storedProfile = filesMerged.active_profile || DEFAULTS.active_profile;
-  for (const entry of overlayEntries) {
-    const scoped = { ...entry.data };
-    // A live user-profile selection must not bind its global credential to a project endpoint.
-    if ((selected && storedProfile && selected !== storedProfile) || (opts.userOverlay && entry.project)) {
+  const storedProfile = (pendingUserOverlay ? storedActiveProfile : filesMerged.active_profile) || DEFAULTS.active_profile;
+  for (const overlay of overlays) {
+    const scoped = { ...overlay };
+    if (selected && storedProfile && selected !== storedProfile) {
       for (const field of PROFILE_CONNECTION_FIELDS) delete scoped[field];
     }
     merged = mergeDeep(merged, scoped);

@@ -166,6 +166,25 @@ test("a migrated legacy endpoint does not inherit the previous profile's env key
   }
 });
 
+test("splitting a profile with its own fallback credentials does not park legacy env bindings", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "custom",
+    base_url: "https://legacy.example/v1",
+    key_env: "OPENAI_API_KEY",
+    key_env_fallbacks: ["NVIDIA_API_KEY"],
+    profiles: {
+      custom: { base_url: "https://scoped.example/v1", key_env_fallbacks: ["CUSTOM_API_KEY"] },
+    },
+  }));
+  setActiveProfile("custom");
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  expect(saved.active_profile).toBe("custom");
+  expect(saved.profiles.custom.key_env_fallbacks).toEqual(["CUSTOM_API_KEY"]);
+  expect(saved.profiles.legacy.key_env).toBeUndefined();
+  expect(saved.profiles.legacy.key_env_fallbacks).toEqual([]);
+  expect(loadConfig({ path, profile: "legacy" }).apiKey).toBe("");
+});
+
 test.each([["fake-legacy-key"], [undefined]])("reselecting validates the scoped route instead of the legacy route (%s)", (legacyKey) => {
   const path = withTempHome(JSON.stringify({
     active_profile: "openai",
@@ -245,6 +264,9 @@ test("selecting a scoped profile does not adopt a trusted project's top-level en
   try {
     const live = setActiveProfile("openai", () => true);
     expect([live?.baseUrl, live?.apiKey]).toEqual(["https://api.openai.com/v1", "fake-scoped-key"]);
+    const reloaded = loadConfig({ profile: "openai" });
+    expect(reloaded.baseUrl).toBe("https://trusted-project.invalid/v1");
+    expect(setActiveProfile("openai", () => true)?.baseUrl).toBe(reloaded.baseUrl);
     expect(readFileSync(path, "utf8")).not.toContain("trusted-project.invalid");
   } finally {
     process.chdir(cwd);

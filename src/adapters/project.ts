@@ -149,7 +149,7 @@ export function setActiveProfile(name: string, validate?: (next: NekoConfig) => 
       if (!isObjectValue(d.profiles)) d.profiles = {};
       if (!isJsonObject(d.profiles[previous])) d.profiles[previous] = separateConnection ?? {};
       for (const field of PROFILE_CONNECTION_FIELDS) {
-        if (separateConnection && field === "base_url") continue;
+        if (separateConnection && (field === "base_url" || field === "key_env" || field === "key_env_fallbacks")) continue;
         if (d[field] !== undefined && (field !== "api_key" || !d.profiles[previous].api_key)) {
           d.profiles[previous][field] = d[field];
         }
