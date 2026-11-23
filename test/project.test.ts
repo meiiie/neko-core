@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { clearApiKey, initUser, patchUserConfig, setActiveProfile, setApiKey, setModel } from "../src/adapters/project.ts";
 import { loadConfig } from "../src/adapters/config.ts";
+import { getProvider } from "../src/adapters/providers.ts";
 
 // project.ts resolves the user config under homedir(); point that at a temp dir per test.
 const ORIG = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
@@ -177,6 +178,32 @@ test("reselecting the active profile keeps its current connection active after m
   expect([saved.baseUrl, saved.apiKey]).toEqual([preview.baseUrl, preview.apiKey]);
   expect(saved.profile).toBe(activeProfile);
   expect(loadConfig({ path, profile: "openai" }).baseUrl).toBe("https://scoped.example/v1");
+});
+
+test("a migrated legacy connection retains its provider's completion budget field", async () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "openai",
+    base_url: "https://legacy.example/v1",
+    api_key: "fake-legacy-key",
+    max_tokens: 512,
+    profiles: { openai: { completion_tokens_field: "max_completion_tokens" } },
+  }));
+  setActiveProfile("zai");
+  const migrated = loadConfig({ path, profile: "legacy" });
+  const originalFetch = globalThis.fetch;
+  let body: ReturnType<typeof JSON.parse>;
+  // SAFETY: this fixture implements the fetch arguments the provider uses.
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return Response.json({ choices: [{ message: { role: "assistant", content: "ok" } }] });
+  }) as typeof fetch;
+  try {
+    await getProvider(migrated).complete([{ role: "user", content: "hello" }]);
+    expect(body.max_completion_tokens).toBe(512);
+    expect(body.max_tokens).toBeUndefined();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("switching profiles keeps same-route credentials on the original profile", () => {

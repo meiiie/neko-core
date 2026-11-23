@@ -123,7 +123,23 @@ export function setActiveProfile(name: string): string {
       const sameRoute = (provider ?? DEFAULTS.provider) === scopedProvider &&
         String(baseUrl ?? "").replace(/\/+$/, "") === String(scopedUrl ?? "").replace(/\/+$/, "");
       if (!sameRoute && (scoped.api_key || scoped.key_env || scoped.key_env_fallbacks?.length)) {
-        separateConnection = { provider, base_url: baseUrl, model: scoped.model, key_env_fallbacks: [] };
+        separateConnection = {
+          provider,
+          base_url: baseUrl,
+          model: scoped.model,
+          models: scoped.models,
+          model_context: scoped.model_context,
+          context_window: scoped.context_window,
+          max_tokens: scoped.max_tokens,
+          effort_ceiling: scoped.effort_ceiling,
+          adaptive_effort: scoped.adaptive_effort,
+          vision: scoped.vision,
+          image_long_edge: scoped.image_long_edge,
+          image_max_bytes: scoped.image_max_bytes,
+          thinking_wire: scoped.thinking_wire,
+          completion_tokens_field: scoped.completion_tokens_field,
+          key_env_fallbacks: [],
+        };
         previous = null;
       }
     }
