@@ -123,6 +123,74 @@ test("switching profiles preserves a legacy top-level key under the previous pro
   expect(cfg.api_key).toBeUndefined();
 });
 
+test("switching profiles does not move a scoped key onto a different legacy endpoint", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "openai",
+    base_url: "https://legacy.example/v1",
+    api_key: "fake-legacy-key",
+    profiles: { openai: { base_url: "https://scoped.example/v1", api_key: "fake-scoped-key" } },
+  }));
+  setActiveProfile("zai");
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  expect(saved.active_profile).toBe("zai");
+  expect(saved.profiles.openai).toMatchObject({ base_url: "https://scoped.example/v1", api_key: "fake-scoped-key" });
+  expect(saved.profiles.legacy).toMatchObject({ base_url: "https://legacy.example/v1", api_key: "fake-legacy-key" });
+  expect(saved.api_key).toBeUndefined();
+  expect(saved.base_url).toBeUndefined();
+  const scoped = loadConfig({ path, profile: "openai" });
+  const legacy = loadConfig({ path, profile: "legacy" });
+  expect([scoped.baseUrl, scoped.apiKey]).toEqual(["https://scoped.example/v1", "fake-scoped-key"]);
+  expect([legacy.baseUrl, legacy.apiKey]).toEqual(["https://legacy.example/v1", "fake-legacy-key"]);
+});
+
+test("a migrated legacy endpoint does not inherit the previous profile's env key", () => {
+  const previous = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "fake-openai-env-key";
+  try {
+    const path = withTempHome(JSON.stringify({
+      active_profile: "openai",
+      base_url: "https://legacy.example/v1",
+      profiles: { legacy: { model: "keep-existing" } },
+    }));
+    setActiveProfile("zai");
+    const scoped = loadConfig({ path, profile: "openai" });
+    const legacy = loadConfig({ path, profile: "legacy-2" });
+    expect([scoped.baseUrl, scoped.apiKey]).toEqual(["https://api.openai.com/v1", "fake-openai-env-key"]);
+    expect([legacy.baseUrl, legacy.apiKey]).toEqual(["https://legacy.example/v1", ""]);
+    expect(loadConfig({ path, profile: "legacy" }).model).toBe("keep-existing");
+  } finally {
+    if (previous === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previous;
+  }
+});
+
+test("switching profiles keeps same-route credentials on the original profile", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "openai",
+    base_url: "https://api.openai.com/v1/",
+    model: "legacy-model",
+    api_key: "fake-legacy-key",
+    profiles: { openai: { api_key: "fake-scoped-key" } },
+  }));
+  setActiveProfile("zai");
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  expect(saved.profiles.openai).toMatchObject({ model: "legacy-model", api_key: "fake-scoped-key" });
+  expect(saved.profiles.legacy).toBeUndefined();
+});
+
+test("switching profiles keeps Z.AI legacy URL repair on the original profile", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "zai",
+    base_url: "https://api.z.ai/api/paas/v4",
+    api_key: "fake-coding-key",
+  }));
+  setActiveProfile("openai");
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  expect(saved.profiles.legacy).toBeUndefined();
+  const coding = loadConfig({ path, profile: "zai" });
+  expect([coding.baseUrl, coding.apiKey]).toEqual(["https://api.z.ai/api/anthropic", "fake-coding-key"]);
+});
+
 test("switching routes keeps a legacy endpoint and credential with their owning profile", () => {
   const path = withTempHome(JSON.stringify({
     active_profile: "zai-openai", base_url: "https://api.z.ai/api/paas/v4",

@@ -8,7 +8,7 @@ import { atomicWriteFileSync } from "../shared/atomic.ts";
 import { homeDir } from "../shared/home.ts";
 import { dirname, join } from "node:path";
 
-import { DEFAULTS, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME, PROFILE_CONNECTION_FIELDS } from "./config.ts";
+import { DEFAULTS, LOCAL_CONFIG_DIR, LOCAL_CONFIG_NAME, PROFILE_CONNECTION_FIELDS, legacyBaseUrlRepair, type Profile } from "./config.ts";
 import { ensureNekoHome } from "./context.ts";
 
 import { isBool, isJsonObject, isObjectValue, isText } from "../shared/wire.ts";
@@ -105,18 +105,35 @@ export function setAutoUpdate(on: boolean): void {
 }
 
 /** Persist the active provider profile so `neko` uses it by default — no --profile flag, no config editing.
- * Also drops any stray top-level model/api_key so the profile's own endpoint+key+model take effect cleanly. */
+ * Move legacy top-level connection settings off the global config without reassigning credentials. */
 export function setActiveProfile(name: string): void {
   updateUserConfig((d: any) => {
     let previous = isText(d.active_profile) ? d.active_profile : DEFAULTS.active_profile;
+    let separateConnection: Profile | undefined;
+    if (previous) {
+      const scoped = { ...DEFAULTS.profiles[previous], ...d.profiles?.[previous] };
+      const scopedProvider = scoped.provider ?? DEFAULTS.provider;
+      const provider = d.provider === undefined ? scopedProvider : d.provider;
+      const scopedBaseUrl = scoped.base_url === undefined ? DEFAULTS.base_url : scoped.base_url;
+      const legacyBaseUrl = d.base_url === undefined ? scopedBaseUrl : d.base_url;
+      const scopedUrl = legacyBaseUrlRepair(previous, scopedProvider, String(scopedBaseUrl)) ?? scopedBaseUrl;
+      const baseUrl = legacyBaseUrlRepair(previous, provider, String(legacyBaseUrl)) ?? legacyBaseUrl;
+      const sameRoute = (provider ?? DEFAULTS.provider) === scopedProvider &&
+        String(baseUrl ?? "").replace(/\/+$/, "") === String(scopedUrl ?? "").replace(/\/+$/, "");
+      if (!sameRoute && (scoped.api_key || scoped.key_env || scoped.key_env_fallbacks?.length)) {
+        separateConnection = { provider, base_url: baseUrl, model: scoped.model, key_env_fallbacks: [] };
+        previous = null;
+      }
+    }
     if (!previous && PROFILE_CONNECTION_FIELDS.some((field) => d[field] !== undefined)) {
       previous = "legacy";
       for (let suffix = 2; d.profiles?.[previous]; suffix++) previous = `legacy-${suffix}`;
     }
     if (previous) {
       if (!isObjectValue(d.profiles)) d.profiles = {};
-      if (!isJsonObject(d.profiles[previous])) d.profiles[previous] = {};
+      if (!isJsonObject(d.profiles[previous])) d.profiles[previous] = separateConnection ?? {};
       for (const field of PROFILE_CONNECTION_FIELDS) {
+        if (separateConnection && field === "base_url") continue;
         if (d[field] !== undefined && (field !== "api_key" || !d.profiles[previous].api_key)) {
           d.profiles[previous][field] = d[field];
         }

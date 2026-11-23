@@ -797,8 +797,9 @@ export class NekoConfig {
   get apiKey(): string {
     // NEKO_API_KEY is the explicit override; then this profile's key (its key_env or config api_key, resolved
     // in loadConfig). Broad OPENAI/NVIDIA fallbacks exist only for an unscoped legacy configuration: a
-    // profile declaring key_env must never send another provider's credential to its endpoint.
-    const hasScopedKeyEnv = Boolean(this.profile && this.profiles[this.profile]?.key_env);
+    // profile declaring its env bindings (even an empty fallback list) must not use those defaults.
+    const profile = this.profile ? this.profiles[this.profile] : undefined;
+    const hasScopedKeyEnv = Boolean(profile?.key_env || profile?.key_env_fallbacks);
     return (
       process.env.NEKO_API_KEY ||
       this.apiKeyFromFile ||
@@ -864,10 +865,7 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
     }
     merged = mergeDeep(merged, scoped);
   }
-  if (selected === "zai" && merged.provider === "anthropic" &&
-      /^https:\/\/api\.z\.ai\/api\/(?:paas|coding)\/v4\/?$/.test(String(merged.base_url))) {
-    merged.base_url = DEFAULTS.profiles.zai.base_url;
-  }
+  merged.base_url = legacyBaseUrlRepair(selected, merged.provider, String(merged.base_url)) ?? merged.base_url;
 
   // `.mcp.json` (Claude-style project MCP file): merge its `mcpServers` map. ./.mcp.json (project)
   // wins over ~/.mcp.json, both layered onto config's `mcp_servers`.
@@ -922,6 +920,13 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
       }
     : { state: "none", files: [] };
   return new NekoConfig(merged, selected, profiles, apiKeyFromFile, modelShadow, [keyEnv, ...fallbackKeyEnvs].filter(Boolean), trustSummary, home);
+}
+
+export function legacyBaseUrlRepair(profile: string | null, provider: string, baseUrl: string): string | undefined {
+  if (profile === "zai" && provider === "anthropic" &&
+      /^https:\/\/api\.z\.ai\/api\/(?:paas|coding)\/v4\/?$/.test(baseUrl)) {
+    return DEFAULTS.profiles.zai.base_url;
+  }
 }
 
 function readOverlay(path: string): any {
