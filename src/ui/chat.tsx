@@ -2659,8 +2659,7 @@ export function ChatApp({ contextMemory, profile, yolo, resume, resumedSession, 
       // Provider first, auth route second. OpenAI deliberately appears ONCE here; only after choosing
       // it do we distinguish ChatGPT subscription OAuth from pay-as-you-go API-key auth.
       const activate = (profile: string) => {
-        setActiveProfile(profile);
-        cfg.adopt(loadConfig({ profile }));
+        cfg.adopt(loadConfig({ profile: setActiveProfile(profile) }));
         agentRef.current?.setProvider(getProvider(cfg));
         agentRef.current?.setMaxContextTokens(cfg.contextWindow);
       };

@@ -106,9 +106,11 @@ export function setAutoUpdate(on: boolean): void {
 
 /** Persist the active provider profile so `neko` uses it by default — no --profile flag, no config editing.
  * Move legacy top-level connection settings off the global config without reassigning credentials. */
-export function setActiveProfile(name: string): void {
+export function setActiveProfile(name: string): string {
+  let active = name;
   updateUserConfig((d: any) => {
     let previous = isText(d.active_profile) ? d.active_profile : DEFAULTS.active_profile;
+    const reselecting = name === previous;
     let separateConnection: Profile | undefined;
     if (previous) {
       const scoped = { ...DEFAULTS.profiles[previous], ...d.profiles?.[previous] };
@@ -128,6 +130,7 @@ export function setActiveProfile(name: string): void {
     if (!previous && PROFILE_CONNECTION_FIELDS.some((field) => d[field] !== undefined)) {
       previous = "legacy";
       for (let suffix = 2; d.profiles?.[previous]; suffix++) previous = `legacy-${suffix}`;
+      if (reselecting) active = previous;
     }
     if (previous) {
       if (!isObjectValue(d.profiles)) d.profiles = {};
@@ -139,9 +142,10 @@ export function setActiveProfile(name: string): void {
         }
       }
     }
-    d.active_profile = name;
+    d.active_profile = active;
     for (const field of PROFILE_CONNECTION_FIELDS) delete d[field];
   });
+  return active;
 }
 
 /** Persist the chosen reasoning effort across sessions ("" / off clears it). */

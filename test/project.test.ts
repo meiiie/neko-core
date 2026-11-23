@@ -164,6 +164,21 @@ test("a migrated legacy endpoint does not inherit the previous profile's env key
   }
 });
 
+test("reselecting the active profile keeps its current connection active after migration", () => {
+  const path = withTempHome(JSON.stringify({
+    active_profile: "openai",
+    base_url: "https://legacy.example/v1",
+    api_key: "fake-legacy-key",
+    profiles: { openai: { base_url: "https://scoped.example/v1", api_key: "fake-scoped-key" } },
+  }));
+  const preview = loadConfig({ path, profile: "openai" });
+  const activeProfile = setActiveProfile("openai");
+  const saved = loadConfig({ path });
+  expect([saved.baseUrl, saved.apiKey]).toEqual([preview.baseUrl, preview.apiKey]);
+  expect(saved.profile).toBe(activeProfile);
+  expect(loadConfig({ path, profile: "openai" }).baseUrl).toBe("https://scoped.example/v1");
+});
+
 test("switching profiles keeps same-route credentials on the original profile", () => {
   const path = withTempHome(JSON.stringify({
     active_profile: "openai",

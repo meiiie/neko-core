@@ -325,11 +325,16 @@ function switchProfile(ctx: CommandCtx, name: string): boolean {
     addLine("info", `note: provider "${name}" has no API key yet - type /login to add it (it saves to this provider).`);
     return false;
   }
-  setActiveProfile(name); // persist only a usable default for the next session
+  const active = setActiveProfile(name);
+  if (active !== name || next.profile === cfg.profile) next = loadConfig({ profile: active });
   cfg.adopt(next); // in-session cfg now = the new provider (endpoint+model+key)
   agent.setProvider(getProvider(cfg)); // the running agent calls the new endpoint from the next turn
   agent.setMaxContextTokens(cfg.contextWindow);
-  addLine("info", `provider -> ${name}  (${cfg.provider} · ${cfg.model})`);
+  if (active !== name && !next.apiKey && !next.isLocalEndpoint) {
+    addLine("info", `note: migrated provider "${active}" needs its own API key - type /login to add it.`);
+    return false;
+  }
+  addLine("info", `provider -> ${active}  (${cfg.provider} · ${cfg.model})`);
   return true;
 }
 
