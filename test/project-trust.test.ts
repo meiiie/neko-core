@@ -264,6 +264,20 @@ test.each([
   expect([config.baseUrl, config.apiKey]).toEqual(["https://project.example/v1", "fake-project-key"]);
 });
 
+test.each([["https", 443], ["http", 80]] as const)("equivalent %s project URLs keep the user key", (scheme, port) => {
+  const { root, home } = fixture();
+  const project = join(root, "neko.json");
+  writeJson(join(home, ".neko-core", "config.json"), {
+    base_url: `${scheme}://user.example/v1`, api_key: "fake-home-key",
+  });
+  writeJson(project, { base_url: `${scheme}://USER.EXAMPLE:${port}/v1/` });
+  trustProject(root, home);
+  expect(loadConfig({ cwd: root, home }).apiKey).toBe("fake-home-key");
+  writeJson(project, { base_url: `${scheme}://USER.EXAMPLE:${port + 1}/v1/` });
+  trustProject(root, home);
+  expect(loadConfig({ cwd: root, home }).apiKey).toBe("");
+});
+
 test("project controls are quarantined until their exact snapshot is trusted", () => {
   const { root, home } = fixture();
   const configPath = join(root, "neko.json");

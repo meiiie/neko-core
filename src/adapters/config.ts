@@ -979,7 +979,11 @@ function credentialEnvNames({ key_env, key_env_fallbacks }: Pick<Profile, "key_e
 }
 
 function configBaseUrl(profile: string | null, config: Pick<Profile, "provider" | "base_url">): string {
-  return (legacyBaseUrlRepair(profile, config.provider ?? DEFAULTS.provider, String(config.base_url)) ?? String(config.base_url ?? "")).replace(/\/+$/, "");
+  const baseUrl = legacyBaseUrlRepair(profile, config.provider ?? DEFAULTS.provider, String(config.base_url)) ?? String(config.base_url ?? "");
+  if (/^https?:\/\//i.test(baseUrl)) {
+    try { return new URL(baseUrl).href.replace(/\/+$/, ""); } catch { /* compare as configured */ }
+  }
+  return baseUrl.replace(/\/+$/, "");
 }
 
 export function legacyBaseUrlRepair(profile: string | null, provider: string, baseUrl: string): string | undefined {
