@@ -900,6 +900,7 @@ test("final metrics reduce secret-bearing completion evidence to one fixed statu
       command: `bun test ${argumentSecret}`,
     });
     expect(session.completionStatus.detail).toContain(observationSecret);
+    expect(session.output).toEndWith(`\n\n${outputSecret}`);
     expect(session.metrics).toMatchObject({
       completionStatus: "validation_failed",
       usageComplete: true,
