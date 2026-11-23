@@ -893,7 +893,7 @@ test("final metrics reduce secret-bearing completion evidence to one fixed statu
       adaptiveEffort: false,
       loop: false,
     });
-    expect(session.output).toBe(outputSecret);
+    expect(session.output).toStartWith("Verification incomplete:");
     expect(session.completionStatus).toMatchObject({
       ok: false,
       reason: "validation_failed",

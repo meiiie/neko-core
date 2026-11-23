@@ -2808,13 +2808,34 @@ test("a failed validator stays as completion debt after a mutation and a read ca
     verifyStateChangesBeforeExit: true,
   });
 
-  expect(await agent.run("fix x and run its test")).toBe("verified from the file");
+  expect(await agent.run("fix x and run its test")).toStartWith("Verification incomplete:");
   expect(agent.completionStatus).toMatchObject({
     ok: false,
     reason: "validation_failed",
     command: "rtk bun test test/x.test.ts",
   });
   expect(agent.messages.some((message: any) => String(message.content).includes("VALIDATION FAILED"))).toBe(true);
+});
+
+test("a final success claim cannot bypass failed post-edit validation after its nudge", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "x.ts", old_string: "old", new_string: "fixed" } }] },
+    { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: "bun test" } }] },
+    { content: "looks done", tool_calls: [] },
+    { content: "done", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider,
+    // SAFETY: test-built tool fixture.
+    tools: { schemas: () => [], execute: async (name: string) => name === "bash" ? "(exit 1 -- command FAILED)\n1 fail" : "Edited x.ts" } as any,
+    maxSteps: 8,
+    verifyStateChangesBeforeExit: true,
+    verifyBeforeExit: true,
+  });
+  expect(await agent.run("fix x and run tests")).toStartWith("Verification incomplete:");
+  expect(provider.index).toBe(4);
+  expect(agent.messages.filter((message) => String(message.content).startsWith("VALIDATION FAILED"))).toHaveLength(1);
+  expect(agent.completionStatus).toMatchObject({ ok: false, reason: "validation_failed" });
 });
 
 test("baseline validator debt crosses a successful edit and a later validator success clears it", async () => {
@@ -2938,7 +2959,7 @@ test("denied, background, and exit-masked validators cannot satisfy post-mutatio
       maxSteps: 5,
     });
 
-    expect(await agent.run("edit and validate")).toBe("blocked");
+    expect(await agent.run("edit and validate")).toStartWith("Verification incomplete:");
     expect(agent.completionStatus).toMatchObject({ ok: false, reason: item.reason, command: item.command });
   }
 });
@@ -2990,7 +3011,7 @@ test("runUntilDone keeps validation debt across controller reviews and does not 
     maxSteps: 8,
   });
 
-  expect(await agent.runUntilDone("fix x", { maxIters: 3 })).toBe("blocked for real");
+  expect(await agent.runUntilDone("fix x", { maxIters: 3 })).toStartWith("Verification incomplete:");
   expect(agent.completionStatus).toMatchObject({ ok: false, reason: "validation_failed", command: "bun test" });
 });
 
@@ -3075,7 +3096,7 @@ test("runUntilDone bounds an optional-toolchain validation loop after an authori
     },
   });
 
-  expect(await agent.runUntilDone("ship artifact", { maxIters: 6 })).toBe("same unresolved optional validator");
+  expect(await agent.runUntilDone("ship artifact", { maxIters: 6 })).toStartWith("Verification incomplete:");
   expect(provider.index).toBe(7);
   expect(reviews).toBe(2);
   expect(events.filter((kind) => kind === "completion_no_progress")).toEqual(["completion_no_progress"]);
