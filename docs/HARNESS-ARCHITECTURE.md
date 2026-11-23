@@ -99,9 +99,13 @@ The loop includes:
 A provider error is not success, an interrupted mutation is not automatically replayable, and a confident
 final sentence cannot clear missing verification evidence.
 
-Repeated unsupported finals after a mutation receive at most two state-verification nudges before an explicit
+Successful native `write_file`, `edit`, and `multi_edit` results are authoritative for file contents and do not
+require a separate outcome re-read. They still advance the mutation epoch and invalidate prior validators,
+and cannot clear unverified non-edit mutations.
+
+Repeated unsupported finals after a non-edit mutation receive at most two state-verification nudges before an explicit
 `outcome_unverified` stop. This preserves the action/result checkpoint, never replays the action, and does not
-count as success. New mutations invalidate evidence; a valid observation or independent passing contract review
+count as success. New non-edit mutations invalidate outcome evidence; a valid observation or independent passing contract review
 can resolve the missing-state gate. This bound does not replace required validators or limit useful reasoning.
 
 ## Tool and authority contract

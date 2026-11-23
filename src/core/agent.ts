@@ -1542,19 +1542,26 @@ export class Agent {
       // Only a SUCCESSFUL state-changing call advances the epoch. A rejected edit or a sandbox
       // dependency error changed no known state and must not manufacture verification work.
       if (changesState && !failed) {
-        // A later bash can be the verifier for an earlier write/bash (tests, exact-byte checks), but the
-        // first state-changing call cannot verify itself. Other mutations invalidate older evidence.
-        stateVerificationEvidence = changedRealState && call.name.toLowerCase() === "bash" && verifiesState;
-        completionVerificationEvidence = stateVerificationEvidence;
-        changedRealState = true;
+        const isEdit = EDIT_TOOLS.has(call.name.toLowerCase());
+        if (isEdit) {
+          if (!changedRealState || stateVerificationEvidence) completionVerificationEvidence = true;
+        } else {
+          // A later bash can verify an earlier mutation; a validator can also verify native edits.
+          stateVerificationEvidence = (changedRealState || (validationCommand && this.mutationEpoch > 0))
+            && call.name.toLowerCase() === "bash" && verifiesState;
+          completionVerificationEvidence = stateVerificationEvidence;
+          changedRealState = true;
+        }
         // Validators may create caches/build output, but they observe the current source epoch rather
         // than defining a new source state that would immediately invalidate their own result.
         if (!validationCommand) {
           this.mutationEpoch++;
-          stateVerificationRequested = false;
-          stateVerificationReminderSent = false;
+          if (!isEdit) {
+            stateVerificationRequested = false;
+            stateVerificationReminderSent = false;
+          }
         }
-        if (EDIT_TOOLS.has(call.name.toLowerCase())) {
+        if (isEdit) {
           successfulEditThisStep = true;
           deliveryEditRequired = false;
           nonEditStepsSinceDelivery = 0;

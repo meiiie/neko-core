@@ -963,7 +963,7 @@ test("an unverified streamed completion remains visible and does not ring succes
   const dir = mkdtempSync(join(process.cwd(), ".neko-ui-verification-"));
   const path = join(dir, "note.txt");
   const provider = new MockProvider([
-    { content: null, tool_calls: [{ id: "write-once", name: "write_file", arguments: { path, content: "note" } }] },
+    { content: null, tool_calls: [{ id: "write-once", name: "bash", arguments: { command: `echo note > "${path}"` } }] },
     { content: "Everything is verified.", tool_calls: [] },
   ]);
   let alerts = 0;
@@ -974,7 +974,7 @@ test("an unverified streamed completion remains visible and does not ring succes
     stdin.write("write a note"); await tick(20); stdin.write("\r");
     expect(await until(() => frames.join("\n").includes("Verification incomplete:"))).toBe(true);
     await tick(80);
-    expect(readFileSync(path, "utf8")).toBe("note");
+    expect(readFileSync(path, "utf8").trimEnd()).toBe("note");
     expect(provider.index).toBe(4);
     expect(frames.at(-1)).toContain("Stopped without claiming success.");
     expect(alerts).toBe(0);

@@ -816,7 +816,7 @@ test("unverified outcome maps to legacy validation_missing without a protocol fa
   let calls = 0;
   let mutations = 0;
   const provider: Provider = { complete: async () => ++calls === 1
-    ? { content: null, tool_calls: [{ id: "write-once", name: "write_file", arguments: { path: "note.txt", content: "note" } }] }
+    ? { content: null, tool_calls: [{ id: "write-once", name: "bash", arguments: { command: "echo note > note.txt" } }] }
     : { content: "Everything is verified.", tool_calls: [] } };
   const f = await fixture(hello("public"), (frame, input) => {
     if (frame.type !== "request") return;
@@ -893,7 +893,7 @@ test("final metrics reduce secret-bearing completion evidence to one fixed statu
       adaptiveEffort: false,
       loop: false,
     });
-    expect(session.output).toStartWith("Verification incomplete:");
+    expect(session.output).toBe(outputSecret);
     expect(session.completionStatus).toMatchObject({
       ok: false,
       reason: "validation_failed",
