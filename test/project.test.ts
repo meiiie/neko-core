@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 function withTempHome(configText: string): string {
-  const tmp = mkdtempSync(join(tmpdir(), "nk-home-"));
+  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "nk-home-")));
   process.env.HOME = tmp;
   process.env.USERPROFILE = tmp;
   mkdirSync(join(tmp, ".neko-core"), { recursive: true });
