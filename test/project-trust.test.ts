@@ -248,6 +248,22 @@ test("environment route overrides keep the key when they mask a trusted project 
   expect([restored.provider, restored.baseUrl, restored.apiKey]).toEqual(["openai_compat", original, "fake-profile-key"]);
 });
 
+test.each([
+  ["file key", { api_key: "fake-project-key" }, {}],
+  ["env binding", { key_env: "OPENAI_API_KEY" }, { OPENAI_API_KEY: "fake-project-key" }],
+] as const)("a trusted project can configure its endpoint and %s in separate files", (_source, credentials, env) => {
+  const { root, home } = fixture();
+  Object.assign(process.env, env);
+  writeJson(join(home, ".neko-core", "config.json"), {
+    base_url: "https://user.example/v1", api_key: "fake-home-key",
+  });
+  writeJson(join(root, ".neko-core", "config.json"), credentials);
+  writeJson(join(root, "neko.json"), { base_url: "https://project.example/v1" });
+  trustProject(root, home);
+  const config = loadConfig({ cwd: root, home });
+  expect([config.baseUrl, config.apiKey]).toEqual(["https://project.example/v1", "fake-project-key"]);
+});
+
 test("project controls are quarantined until their exact snapshot is trusted", () => {
   const { root, home } = fixture();
   const configPath = join(root, "neko.json");

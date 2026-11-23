@@ -883,9 +883,13 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
     return [[configKey, BOOLEAN_ENV_KEYS.has(configKey) ? parseBooleanEnv(key, value ?? "") : value] as const];
   }));
   const withheldKeyEnvs: string[] = [];
+  const projectCredentials = new Map<(typeof PROFILE_CREDENTIAL_FIELDS)[number], JsonValue>();
   let projectChangedRoute = false;
   const mergeProjectConnection = (base: Profile, overlay: Profile, homeOverrides?: Profile & { api_key?: string }) => {
     const next = mergeDeep(base, overlay);
+    for (const field of PROFILE_CREDENTIAL_FIELDS) {
+      if (Object.hasOwn(overlay, field)) projectCredentials.set(field, next[field]);
+    }
     const before = homeOverrides ? mergeDeep(base, homeOverrides) : base;
     const after = homeOverrides ? mergeDeep(next, homeOverrides) : next;
     if (
@@ -896,7 +900,8 @@ export function loadConfig(opts: { path?: string; profile?: string; cwd?: string
       withheldKeyEnvs.push(...credentialEnvNames(before));
       for (const field of PROFILE_CREDENTIAL_FIELDS) {
         if (homeOverrides) delete homeOverrides[field];
-        if (!Object.hasOwn(overlay, field)) delete next[field];
+        if (projectCredentials.has(field)) next[field] = projectCredentials.get(field);
+        else delete next[field];
       }
     }
     return next;
