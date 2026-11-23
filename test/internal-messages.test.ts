@@ -158,7 +158,7 @@ test("controller markers persist locally but are invisible to every provider cal
     async complete(messages, _tools, _onDelta, _signal, options) {
       seen.push(structuredClone(messages));
       if (seen.length === 1) {
-        await options!.executeTool!({ id: "write", name: "write_file", arguments: { path: "x.txt", content: "fixed" } });
+        await options!.executeTool!({ id: "write", name: "bash", arguments: { command: "echo fixed > x.txt" } });
         return { content: "draft", tool_calls: [] };
       }
       return { content: "verified", tool_calls: [] };

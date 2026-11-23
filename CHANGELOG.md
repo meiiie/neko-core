@@ -6,6 +6,12 @@ All notable changes to Neko Core are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Accept successful native file edits as authoritative file-content evidence instead of
+  adding a hidden model turn to re-read the same file. Independent outcome checks for
+  other mutations and stale-validator checks still apply.
+
 ## [1.9.5] - 2026-11-23
 
 ### Fixed

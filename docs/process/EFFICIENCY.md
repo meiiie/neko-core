@@ -37,13 +37,15 @@ Verification follows the task and repository, not a preferred validator or extra
 Already valid evidence is reusable until a relevant change, contradiction, unresolved risk
 or explicit repeatability requirement justifies another check.
 
-For a mutation without valid outcome evidence, the loop sends at most two state-verification
+Successful native file edits supply authoritative file-content evidence without an extra re-read,
+but still invalidate prior validators and preserve outstanding non-edit outcome debt.
+For a non-edit mutation without valid outcome evidence, the loop sends at most two state-verification
 nudges per unchanged mutation state. Another unsupported final produces `outcome_unverified`
 rather than repeated prompts or a success claim. A step limit with an unknown outcome also
 stops without spending another request on a tool-less wrap-up. This is a bound on unsupported
 final answers, not a deadline on reasoning or a cap on productive tool work.
 
-New mutations invalidate evidence. Valid observations clear the missing-state gate; an
+New non-edit mutations invalidate outcome evidence. Valid observations clear the missing-state gate; an
 independent completion review can resolve it only when the current contract passes. Failed
 required validators still retain their own debt. Tools and unknown mutation outcomes are
 never replayed by this mechanism. The final status is checkpointed, headless runs exit with

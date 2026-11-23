@@ -2532,9 +2532,9 @@ test("verify_before_exit skips tool-free chat even when tools are enabled", asyn
   expect(provider.index).toBe(1);
 });
 
-test.each([false, true])("verify_before_exit=%s only nudges unsatisfied tool-bearing turns", async (verifyBeforeExit) => {
+test.each([false, true])("verify_before_exit=%s only nudges unsatisfied non-edit tool-bearing turns", async (verifyBeforeExit) => {
   const provider = new ScriptedProvider([
-    { content: null, tool_calls: [{ id: "write", name: "write_file", arguments: { path: "x.ts", content: "fixed" } }] },
+    { content: null, tool_calls: [{ id: "write", name: "bash", arguments: { command: "echo fixed > x.ts" } }] },
     { content: "looks done", tool_calls: [] },
     ...(verifyBeforeExit ? [{ content: "verified and done", tool_calls: [] }] : []),
     { content: "You're welcome!", tool_calls: [] },
@@ -2549,6 +2549,95 @@ test.each([false, true])("verify_before_exit=%s only nudges unsatisfied tool-bea
   expect(provider.index).toBe(verifyBeforeExit ? 4 : 3);
   expect(agent.messages.filter((m) => m.role === "user" && String(m.content).startsWith("VERIFY BEFORE FINISHING")))
     .toHaveLength(verifyBeforeExit ? 1 : 0);
+});
+
+test.each(["write_file", "edit", "multi_edit"])("successful %s finishes without a redundant file re-read", async (name) => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "edit", name, arguments: { path: "x.ts", content: "fixed", old_string: "old", new_string: "fixed", edits: [{ old_string: "old", new_string: "fixed" }] } }] },
+    { content: "done", tool_calls: [] },
+    { content: "unnecessary reread turn", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider,
+    // SAFETY: test-built tool fixture.
+    tools: { schemas: () => [], execute: async () => "Edited x.ts" } as any,
+    maxSteps: 6,
+    verifyStateChangesBeforeExit: true,
+    verifyBeforeExit: true,
+  });
+  expect(await agent.run("update x.ts")).toBe("done");
+  expect(provider.index).toBe(2);
+  expect(agent.completionStatus).toEqual({ ok: true });
+  expect(agent.messages.some((message) => /OUTCOME VERIFICATION REQUIRED|VERIFY BEFORE FINISHING/.test(String(message.content)))).toBe(false);
+});
+
+test("post-edit bash inspection satisfies outcome verification even outside the read-only classifier", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "write", name: "write_file", arguments: { path: "file", content: "fixed" } }] },
+    { content: null, tool_calls: [{ id: "inspect", name: "bash", arguments: { command: "sed -n 1p file" } }] },
+    { content: "done", tool_calls: [] },
+    { content: "unnecessary extra turn", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider,
+    // SAFETY: test-built tool fixture.
+    tools: { schemas: () => [], execute: async (name: string) => name === "bash" ? "(exit 0)\nfixed" : "Wrote file" } as any,
+    maxSteps: 6,
+    verifyStateChangesBeforeExit: true,
+    verifyBeforeExit: true,
+  });
+  expect(await agent.run("write and inspect file")).toBe("done");
+  expect(provider.index).toBe(3);
+  expect(agent.completionStatus).toEqual({ ok: true });
+  expect(agent.messages.some((message) => /OUTCOME VERIFICATION REQUIRED|VERIFY BEFORE FINISHING/.test(String(message.content)))).toBe(false);
+});
+
+test.each([false, true])("an edit preserves non-edit outcome evidence or debt: inspected=%s", async (inspected) => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "bash", name: "bash", arguments: { command: "echo changed > state.txt" } }] },
+    ...(inspected ? [{ content: null, tool_calls: [{ id: "inspect", name: "read_file", arguments: { path: "state.txt" } }] }] : []),
+    { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "x.ts", old_string: "old", new_string: "fixed" } }] },
+    { content: "done", tool_calls: [] },
+    { content: "completion is unverified", tool_calls: [] },
+    { content: "still unverified", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider,
+    // SAFETY: test-built tool fixture.
+    tools: { schemas: () => [], execute: async () => "successful result" } as any,
+    maxSteps: 8,
+    verifyStateChangesBeforeExit: true,
+    verifyBeforeExit: true,
+  });
+  const result = await agent.run("change state and update x.ts");
+  expect(agent.messages.some((message) => String(message.content).includes("OUTCOME VERIFICATION REQUIRED"))).toBe(!inspected);
+  expect(agent.completionStatus).toEqual(inspected ? { ok: true } : { ok: false, reason: "outcome_unverified" });
+  if (inspected) {
+    expect(result).toBe("done");
+    expect(provider.index).toBe(4);
+  }
+});
+
+test("an edit invalidates an earlier passing validator without requiring a file re-read", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "baseline", name: "bash", arguments: { command: "bun test" } }] },
+    { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "x.ts", old_string: "old", new_string: "fixed" } }] },
+    { content: "done", tool_calls: [] },
+    { content: null, tool_calls: [{ id: "green", name: "bash", arguments: { command: "bun test" } }] },
+    { content: "tested", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider,
+    // SAFETY: test-built tool fixture.
+    tools: { schemas: () => [], execute: async (name: string) => name === "bash" ? "(exit 0)\n1 pass" : "Edited x.ts" } as any,
+    maxSteps: 8,
+    verifyStateChangesBeforeExit: true,
+    verifyBeforeExit: true,
+  });
+  expect(await agent.run("update x.ts and test")).toBe("tested");
+  expect(provider.index).toBe(5);
+  expect(agent.messages.some((message) => String(message.content).includes("VALIDATION REQUIRED"))).toBe(true);
+  expect(agent.completionStatus).toEqual({ ok: true });
 });
 
 test("verify_before_exit credits proactive fresh evidence instead of demanding a duplicate check", async () => {
@@ -2740,13 +2829,34 @@ test("a failed validator stays as completion debt after a mutation and a read ca
     verifyStateChangesBeforeExit: true,
   });
 
-  expect(await agent.run("fix x and run its test")).toBe("verified from the file");
+  expect(await agent.run("fix x and run its test")).toStartWith("Verification incomplete:");
   expect(agent.completionStatus).toMatchObject({
     ok: false,
     reason: "validation_failed",
     command: "rtk bun test test/x.test.ts",
   });
   expect(agent.messages.some((message: any) => String(message.content).includes("VALIDATION FAILED"))).toBe(true);
+});
+
+test("a final success claim cannot bypass failed post-edit validation after its nudge", async () => {
+  const provider = new ScriptedProvider([
+    { content: null, tool_calls: [{ id: "edit", name: "edit", arguments: { path: "x.ts", old_string: "old", new_string: "fixed" } }] },
+    { content: null, tool_calls: [{ id: "test", name: "bash", arguments: { command: "bun test" } }] },
+    { content: "looks done", tool_calls: [] },
+    { content: "done", tool_calls: [] },
+  ]);
+  const agent = new Agent({
+    provider,
+    // SAFETY: test-built tool fixture.
+    tools: { schemas: () => [], execute: async (name: string) => name === "bash" ? "(exit 1 -- command FAILED)\n1 fail" : "Edited x.ts" } as any,
+    maxSteps: 8,
+    verifyStateChangesBeforeExit: true,
+    verifyBeforeExit: true,
+  });
+  expect(await agent.run("fix x and run tests")).toStartWith("Verification incomplete:");
+  expect(provider.index).toBe(4);
+  expect(agent.messages.filter((message) => String(message.content).startsWith("VALIDATION FAILED"))).toHaveLength(1);
+  expect(agent.completionStatus).toMatchObject({ ok: false, reason: "validation_failed" });
 });
 
 test("baseline validator debt crosses a successful edit and a later validator success clears it", async () => {
@@ -2870,7 +2980,7 @@ test("denied, background, and exit-masked validators cannot satisfy post-mutatio
       maxSteps: 5,
     });
 
-    expect(await agent.run("edit and validate")).toBe("blocked");
+    expect(await agent.run("edit and validate")).toStartWith("Verification incomplete:");
     expect(agent.completionStatus).toMatchObject({ ok: false, reason: item.reason, command: item.command });
   }
 });
@@ -2922,7 +3032,7 @@ test("runUntilDone keeps validation debt across controller reviews and does not 
     maxSteps: 8,
   });
 
-  expect(await agent.runUntilDone("fix x", { maxIters: 3 })).toBe("blocked for real");
+  expect(await agent.runUntilDone("fix x", { maxIters: 3 })).toStartWith("Verification incomplete:");
   expect(agent.completionStatus).toMatchObject({ ok: false, reason: "validation_failed", command: "bun test" });
 });
 
@@ -3007,7 +3117,7 @@ test("runUntilDone bounds an optional-toolchain validation loop after an authori
     },
   });
 
-  expect(await agent.runUntilDone("ship artifact", { maxIters: 6 })).toBe("same unresolved optional validator");
+  expect(await agent.runUntilDone("ship artifact", { maxIters: 6 })).toStartWith("Verification incomplete:");
   expect(provider.index).toBe(7);
   expect(reviews).toBe(2);
   expect(events.filter((kind) => kind === "completion_no_progress")).toEqual(["completion_no_progress"]);

@@ -68,7 +68,7 @@ test("missing state evidence stops after two nudges, fails headless and preserve
   let calls = 0;
   let mutations = 0;
   const provider: Provider = { complete: async () => ++calls === 1
-    ? { content: null, tool_calls: [{ id: "edit-once", name: "write_file", arguments: { path: "a.txt", content: "new" } }] }
+    ? { content: null, tool_calls: [{ id: "edit-once", name: "bash", arguments: { command: "echo new > a.txt" } }] }
     : { content: "I am certain everything is verified.", tool_calls: [] } };
   const agent = new Agent({ provider, maxSteps: 50, verifyStateChangesBeforeExit: true,
     tools: fixtureTools(async () => { mutations++; return "wrote a.txt"; }) });
@@ -83,12 +83,12 @@ test("missing state evidence stops after two nudges, fails headless and preserve
   expect(agent.cost.efficiency.snapshot()).toMatchObject({ requests: 4, verificationNudges: 2, unverifiedStops: 1 });
 });
 
-test("fresh evidence avoids duplicate verification and later writes invalidate it", async () => {
-  const calls = ["write_file", "read_file", "write_file", "final", "read_file", "final"];
+test("fresh evidence avoids duplicate verification and later computer mutations invalidate it", async () => {
+  const calls = ["computer", "read_file", "computer", "final", "read_file", "final"];
   const metrics: unknown[] = [];
   const provider: Provider = { complete: async () => {
     const name = calls.shift()!;
-    return name === "final" ? { content: "verified", tool_calls: [] } : { content: null, tool_calls: [{ id: String(calls.length), name, arguments: { path: "x" } }] };
+    return name === "final" ? { content: "verified", tool_calls: [] } : { content: null, tool_calls: [{ id: String(calls.length), name, arguments: name === "computer" ? { action: "click", x: 10, y: 10 } : { path: "x" } }] };
   } };
   const agent = new Agent({ provider, verifyStateChangesBeforeExit: true, verifyBeforeExit: true,
     tools: fixtureTools(async () => "current state"),
@@ -107,7 +107,7 @@ test("an independent passing review resolves missing observations without replay
   let mutations = 0;
   let reviews = 0;
   const provider: Provider = { complete: async () => ++calls === 1
-    ? { content: null, tool_calls: [{ id: "edit-once", name: "write_file", arguments: { path: "a.txt", content: "new" } }] }
+    ? { content: null, tool_calls: [{ id: "edit-once", name: "bash", arguments: { command: "echo new > a.txt" } }] }
     : { content: "Everything is verified.", tool_calls: [] } };
   const agent = new Agent({ provider, maxSteps: 50, verifyStateChangesBeforeExit: true,
     tools: fixtureTools(async () => { mutations++; return "wrote a.txt"; }),
@@ -132,7 +132,7 @@ test("a step limit with unknown outcome preserves the tool call and avoids a use
   let calls = 0;
   const provider: Provider = { complete: async () => {
     calls++;
-    return { content: null, tool_calls: [{ id: "edit-once", name: "write_file", arguments: { path: "x", content: "new" } }] };
+    return { content: null, tool_calls: [{ id: "edit-once", name: "bash", arguments: { command: "echo new > x" } }] };
   } };
   const agent = new Agent({ provider, maxSteps: 1, verifyStateChangesBeforeExit: true,
     tools: fixtureTools(async () => "wrote x"),

@@ -1494,6 +1494,7 @@ export class Agent {
     let stateVerificationEvidence = false;
     let usedTools = false;
     let completionVerificationEvidence = false;
+    let nativeEditOccurred = false;
     const sovereigntyFreshnessRequired = !internal && isVietnamSovereigntyTopic(instruction);
     let sovereigntyFreshnessRequested = false;
     let sovereigntyFreshnessEvidence = false;
@@ -1542,19 +1543,27 @@ export class Agent {
       // Only a SUCCESSFUL state-changing call advances the epoch. A rejected edit or a sandbox
       // dependency error changed no known state and must not manufacture verification work.
       if (changesState && !failed) {
-        // A later bash can be the verifier for an earlier write/bash (tests, exact-byte checks), but the
-        // first state-changing call cannot verify itself. Other mutations invalidate older evidence.
-        stateVerificationEvidence = changedRealState && call.name.toLowerCase() === "bash" && verifiesState;
-        completionVerificationEvidence = stateVerificationEvidence;
-        changedRealState = true;
+        const isEdit = EDIT_TOOLS.has(call.name.toLowerCase());
+        if (isEdit) {
+          nativeEditOccurred = true;
+          if (!changedRealState || stateVerificationEvidence) completionVerificationEvidence = true;
+        } else {
+          // A later bash can verify an earlier mutation, including a native edit.
+          stateVerificationEvidence = (changedRealState || nativeEditOccurred)
+            && call.name.toLowerCase() === "bash" && verifiesState;
+          completionVerificationEvidence = stateVerificationEvidence;
+          changedRealState = true;
+        }
         // Validators may create caches/build output, but they observe the current source epoch rather
         // than defining a new source state that would immediately invalidate their own result.
         if (!validationCommand) {
           this.mutationEpoch++;
-          stateVerificationRequested = false;
-          stateVerificationReminderSent = false;
+          if (!isEdit) {
+            stateVerificationRequested = false;
+            stateVerificationReminderSent = false;
+          }
         }
-        if (EDIT_TOOLS.has(call.name.toLowerCase())) {
+        if (isEdit) {
           successfulEditThisStep = true;
           deliveryEditRequired = false;
           nonEditStepsSinceDelivery = 0;
@@ -1855,6 +1864,9 @@ export class Agent {
           });
           continue;
         }
+        if (!validation.ok && (validation.reason === "validation_failed" || validation.reason === "validation_missing")) {
+          return this.stopUnverified(validation.reason);
+        }
         // A state-changing action requires fresh inspection evidence of its user-visible outcome.
         if (this.verifyStateChangesBeforeExit && changedRealState && step < runStepLimit - 1) {
           if (!stateVerificationEvidence && !stateVerificationRequested) {
@@ -2122,11 +2134,14 @@ export class Agent {
     return final;
   }
 
-  private async stopUnverified(): Promise<string> {
-    const final = "Verification incomplete: the action ran, but its final outcome has not been independently observed. " +
-      "Stopped without claiming success. Inspect the current state before continuing; do not repeat an action whose outcome is unknown.";
+  private async stopUnverified(reason: "outcome_unverified" | "validation_failed" | "validation_missing" = "outcome_unverified"): Promise<string> {
+    const final = reason === "outcome_unverified"
+      ? "Verification incomplete: the action ran, but its final outcome has not been independently observed. " +
+        "Stopped without claiming success. Inspect the current state before continuing; do not repeat an action whose outcome is unknown."
+      : "Verification incomplete: required validation has not passed for the current project state. " +
+        "Stopped without claiming success. Resolve the failed or stale validator before claiming completion.";
     this.cost.efficiency.unverifiedStop();
-    this.emit("verification_incomplete", { reason: "outcome_unverified" });
+    this.emit("verification_incomplete", { reason });
     return this.recordFinal(final);
   }
 
